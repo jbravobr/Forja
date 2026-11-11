@@ -132,6 +132,16 @@ def test_a_read_and_a_write_are_seen_when_they_start() -> None:
     assert adapter.parse_event(write) == FileEditActivity("b.txt", 2, 0)
 
 
+def test_an_edit_call_is_a_write_too() -> None:
+    # cursor 2026.11 reports a file it writes as editToolCall with streamContent
+    edit = line(
+        type="tool_call", subtype="started", call_id="3",
+        tool_call={"editToolCall": {"args": {"path": "c.txt", "streamContent": "forja-ok\n"}}},
+    )  # fmt: skip
+
+    assert adapter.parse_event(edit) == FileEditActivity("c.txt", 1, 0)
+
+
 def test_a_completed_call_is_not_counted_twice() -> None:
     event = line(
         type="tool_call", subtype="completed", call_id="1",
