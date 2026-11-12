@@ -6,10 +6,12 @@ from pathlib import Path
 import pytest
 
 from forja.checks.base import Undecided
+from forja.checks.changes import Changes
 from forja.checks.mutation import (
     DEFAULT_MIN_SCORE,
     MutationCheck,
     build_mutants,
+    changed_lines,
     min_score,
     of_language,
     untested_lines,
@@ -44,12 +46,34 @@ def test_the_default_limit_is_80_percent_70_for_python_and_go_and_the_policy_may
     assert min_score(gate_input(thresholds={"python": {"min_score": 0.9}}), "python") == 0.9
     assert min_score(gate_input(thresholds={"python": {"min_score": 7}}), "python") == 0.70
     assert min_score(gate_input(thresholds={"java": {"min_score": True}}), "java") == 0.80
+    # the ends of the range: all of them killed is a limit, none of them is not
+    assert min_score(gate_input(thresholds={"java": {"min_score": 1}}), "java") == 1.0
+    assert min_score(gate_input(thresholds={"java": {"min_score": 0}}), "java") == 0.80
 
 
 def test_workers_come_from_the_policy_only_when_positive() -> None:
     assert worker_count(gate_input()) is None
     assert worker_count(gate_input(limits={"workers": 2})) == 2
+    assert worker_count(gate_input(limits={"workers": 1})) == 1
     assert worker_count(gate_input(limits={"workers": 0})) is None
+
+
+def test_the_changed_lines_are_those_of_the_files_asked_for_and_no_other() -> None:
+    patch = (
+        "diff --git a/m.py b/m.py",
+        "--- a/m.py",
+        "+++ b/m.py",
+        "@@ -1,0 +2 @@",
+        "+added",
+        "diff --git a/other.py b/other.py",
+        "--- a/other.py",
+        "+++ b/other.py",
+        "@@ -0,0 +1 @@",
+        "+elsewhere",
+    )
+    changes = Changes((), 2, patch, ())
+
+    assert changed_lines(changes, ("m.py",)) == {"m.py": frozenset({2})}
 
 
 def test_only_the_lines_a_file_gained_are_mutated(tmp_path: Path) -> None:
