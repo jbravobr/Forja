@@ -1,4 +1,4 @@
-from forja.cli.session import install_environment
+from forja.core.isolation.environment import install_environment
 
 
 def test_the_installer_gets_what_pip_needs_and_no_keys_or_tokens() -> None:

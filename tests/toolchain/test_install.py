@@ -8,11 +8,14 @@ import shutil
 import sys
 import tarfile
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from forja.core.process import ProcessSpec
+from forja.toolchain import install as install_module
 from forja.toolchain.install import (
     MARKER,
     Installed,
@@ -367,6 +370,35 @@ def test_a_wheel_gets_a_virtual_environment_of_its_own(
     assert done.executable.is_file()
     assert (done.directory / MARKER).is_file()
     assert [p.name for p in (tmp_path / "tool").iterdir()] == ["1.2.3"]
+
+
+def test_pip_runs_without_the_keys_and_tokens_of_the_person(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PIP_NO_INDEX", "1")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
+    monkeypatch.setenv("GITHUB_TOKEN", "secret")
+    seen: list[Mapping[str, str]] = []
+
+    def recorded(*args: Any, **kwargs: Any) -> ProcessSpec:
+        spec = ProcessSpec(*args, **kwargs)
+        seen.append(spec.env)
+        return spec
+
+    monkeypatch.setattr(install_module, "ProcessSpec", recorded)
+    content = wheel_bytes()
+    script = "Scripts/tool.exe" if WINDOWS else "bin/tool"
+
+    run(
+        manifest_for(content, "wheel", script), "tool", tmp_path, target=HERE, fetch=Origin(content)
+    )
+
+    assert len(seen) == 2  # the environment and pip
+    for env in seen:
+        assert "PATH" in {name.upper() for name in env}
+        assert env.get("PIP_NO_INDEX") == "1"
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "GITHUB_TOKEN" not in env
 
 
 def test_a_wheel_that_pip_refuses_installs_nothing(

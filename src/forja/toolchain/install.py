@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
+from forja.core.isolation.environment import install_environment
 from forja.core.paths import forja_home
 from forja.core.process import Outcome, ProcessIdentity, ProcessRunner, ProcessSpec
 from forja.toolchain.load import artifact_for, current_platform, find_tool
@@ -158,7 +159,10 @@ async def _install_wheel(tool: Tool, url: str, wheel: Path, destination: Path, p
     )
     for command in steps:
         collector = _Collector()
-        spec = ProcessSpec(command, destination.parent, os.environ, PIP_TIMEOUT)
+        # pip runs the code of the packages it installs: it gets no key and no token
+        spec = ProcessSpec(
+            command, destination.parent, install_environment(os.environ), PIP_TIMEOUT
+        )
         log = destination.parent / f".{tool.name}-install.log"
         result = await ProcessRunner(collector).run(f"install-{tool.name}", spec, log)
         with suppress(OSError):

@@ -31,6 +31,7 @@ from forja.core.gitguard import GuardedGit
 from forja.core.idempotency.git import Git
 from forja.core.ids import new_id
 from forja.core.isolation import IsolationLevel, IsolationRecord, SensitivePaths
+from forja.core.isolation.environment import install_environment
 from forja.core.locking import LockOwner, LockPolicy, acquire_repository_lock, repository_id
 from forja.core.locking.repository import HeldLock
 from forja.core.paths import forja_home, locks_dir, run_dir
@@ -84,20 +85,6 @@ GIT_ENVIRONMENT = (
     "PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "TEMP", "TMP", "APPDATA", "LOCALAPPDATA",
     "LANG", "LC_ALL", "PATHEXT", "COMSPEC",
 )  # fmt: skip
-INSTALL_ENVIRONMENT = (
-    *GIT_ENVIRONMENT,
-    "SSL_CERT_FILE",
-    "SSL_CERT_DIR",
-    "REQUESTS_CA_BUNDLE",
-    "PIP_INDEX_URL",
-    "PIP_EXTRA_INDEX_URL",
-    "PIP_CERT",
-    "PIP_NO_INDEX",
-    "PIP_FIND_LINKS",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-)  # fmt: skip  what pip needs; the installer runs package code, so no keys or tokens
 NETWORK_PROBES_WITHOUT_A_PERSON = 60
 INSTALL_TIMEOUT = 600.0  # seconds for one venv or pip command
 FORJA_VERSION = "0.0.0"
@@ -109,11 +96,6 @@ IN_USER_ENVIRONMENT = Confirmation(
 
 def git_base_environment(environ: Mapping[str, str]) -> dict[str, str]:
     wanted = {name.upper() for name in GIT_ENVIRONMENT}
-    return {name: value for name, value in environ.items() if name.upper() in wanted}
-
-
-def install_environment(environ: Mapping[str, str]) -> dict[str, str]:
-    wanted = {name.upper() for name in INSTALL_ENVIRONMENT}
     return {name: value for name, value in environ.items() if name.upper() in wanted}
 
 

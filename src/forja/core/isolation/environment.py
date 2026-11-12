@@ -65,3 +65,37 @@ def git_blocking_environment(workcopy: Path) -> dict[str, str]:
         "GIT_CEILING_DIRECTORIES": str(workcopy.parent),
         "GIT_DIR": str(workcopy.parent / ".forja-no-git-repository"),
     }
+
+
+INSTALL_ENVIRONMENT: frozenset[str] = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USERPROFILE",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "LANG",
+        "LC_ALL",
+        "PATHEXT",
+        "COMSPEC",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "PIP_INDEX_URL",
+        "PIP_EXTRA_INDEX_URL",
+        "PIP_CERT",
+        "PIP_NO_INDEX",
+        "PIP_FIND_LINKS",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+    }
+)  # fmt: skip  what pip needs; the installer runs package code, so no keys or tokens
+
+
+def install_environment(environ: Mapping[str, str]) -> dict[str, str]:
+    """The variables a package installer runs with. Names compare case-insensitively."""
+    return {name: value for name, value in environ.items() if name.upper() in INSTALL_ENVIRONMENT}
