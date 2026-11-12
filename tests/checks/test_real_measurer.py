@@ -12,7 +12,7 @@ import pytest
 
 from forja.core.events import OpenOperation
 from forja.core.gates import CheckSettings, Effect, InconclusiveReason, Mode, Verdict
-from forja.core.gates.models import Inconclusive, Rejected
+from forja.core.gates.models import Approved, Inconclusive, Rejected
 from forja.core.gates.pipeline import PipelineOutcome
 from forja.core.idempotency import Decision, Reconciliation
 from forja.core.states import Level
@@ -140,13 +140,13 @@ def test_the_size_of_the_change_is_limited(scene: Scene) -> None:
 
 
 def test_a_secret_in_the_added_lines_is_found_where_it_was_added(scene: Scene) -> None:
-    scene.write("src/sample/mod.py", SAMPLE["src/sample/mod.py"] + '\nKEY = "FAKE-SECRET-1"\n')
+    scene.write("src/sample/mod.py", SAMPLE["src/sample/mod.py"] + '\n\nKEY = "FAKE-SECRET-1"\n')
 
     outcome = judge(scene)
 
     assert ran(outcome) == ["scope", "secrets"]
     assert findings(outcome) == [
-        "a possible secret was added (rule fake-rule) [src/sample/mod.py at src/sample/mod.py:4]"
+        "a possible secret was added (rule fake-rule) [src/sample/mod.py at src/sample/mod.py:5]"
     ]
     assert "FAKE-SECRET" not in "".join(findings(outcome))
 
@@ -180,13 +180,16 @@ def test_a_missing_gitleaks_blocks_the_task_instead_of_passing(
 # -- gate 3: format and lint -----------------------------------------------------------------------
 
 
-def test_code_not_in_the_canonical_format_is_rejected(scene: Scene) -> None:
+def test_code_not_in_the_canonical_format_is_formatted_before_the_gates_read_it(
+    scene: Scene,
+) -> None:
     scene.write("src/sample/mod.py", "def add( a,b ):\n  return a+b\n")
 
     outcome = judge(scene)
 
-    assert ran(outcome) == ["scope", "secrets", "format"]
-    assert findings(outcome) == ["the file is not in the canonical format [src/sample/mod.py]"]
+    formatted = (scene.repo.path / "src/sample/mod.py").read_text(encoding="utf-8")
+    assert formatted == "def add(a, b):\n    return a + b\n"
+    assert [run.result for run in outcome.runs if run.check_id == "format"] == [Approved()]
 
 
 def test_code_that_does_not_parse_is_said_so(scene: Scene) -> None:
@@ -196,12 +199,16 @@ def test_code_that_does_not_parse_is_said_so(scene: Scene) -> None:
 
 
 def test_a_new_lint_violation_is_rejected_with_its_count(scene: Scene) -> None:
-    scene.write("src/sample/mod.py", "import os\n\n\n" + SAMPLE["src/sample/mod.py"])
+    # a name nobody defined: the fixer that runs before the gates cannot repair it
+    scene.write(
+        "src/sample/mod.py",
+        SAMPLE["src/sample/mod.py"] + "\n\ndef lost() -> int:\n    return missing\n",
+    )
 
     outcome = judge(scene)
 
     assert ran(outcome) == ["scope", "secrets", "format", "lint"]
-    assert findings(outcome) == ["1 new F401 violation(s) [src/sample/mod.py] measured 1, limit 0"]
+    assert findings(outcome) == ["1 new F821 violation(s) [src/sample/mod.py] measured 1, limit 0"]
 
 
 def test_an_old_violation_does_not_reprove_a_change_that_leaves_it_alone(
@@ -503,8 +510,9 @@ def test_a_tool_run_is_reconciled_by_running_it_again(scene: Scene) -> None:
 @pytest.mark.parametrize(
     "marker",
     [
-        "x = 1  # noqa: E501",
-        "x = 1  # NOQA",
+        # one that hides a violation: the fixer takes out a noqa that hides nothing
+        "import os  # noqa: F401",
+        "import os  # NOQA",
         "# ruff: noqa",
         "# fmt: off",
         "x = 1  # fmt: skip",

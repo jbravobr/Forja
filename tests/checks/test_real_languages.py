@@ -467,7 +467,9 @@ def test_an_implementer_that_touches_the_frozen_tests_is_sent_back(
     if any(shutil.which(tool) is None for tool in project.tools):
         pytest.skip(f"{project.language}: the tool chain is not installed")
     path, text = next(iter(project.tests.items()))
-    tampered = {**project.fix, path: text + "\n"}
+    # a comment: the formatter that runs before the gates would take a blank line back out
+    comment = "#" if project.language == "python" else "//"
+    tampered = {**project.fix, path: f"{text}{comment} touched\n"}
 
     _, outcome, log = repair(
         project, tmp_path, packages_of(project, request), tampered, project.fix

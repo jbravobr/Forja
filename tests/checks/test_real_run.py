@@ -115,14 +115,12 @@ def test_a_good_change_goes_through_every_gate_and_is_delivered(world: World) ->
     assert "def sub" in tree
 
 
-def test_work_the_formatter_would_change_is_rejected_and_the_next_attempt_is_told_why(
+def test_work_the_formatter_would_change_is_formatted_and_committed_in_the_same_attempt(
     world: World,
 ) -> None:
-    outcome, log = run(world, {"src/sample/mod.py": UNFORMATTED}, {"src/sample/mod.py": GOOD})
+    outcome, log = run(world, {"src/sample/mod.py": UNFORMATTED})
 
     assert outcome.state is ExecutionState.DELIVERED
-    rejected = log.state.transition_payload(Level.ATTEMPT, "t1-a1", AttemptState.REJECTED)
-    assert rejected == {
-        "reason": "gate 3 (format): the file is not in the canonical format [src/sample/mod.py]"
-    }
-    assert log.state.state_of(Level.ATTEMPT, "t1-a2") is AttemptState.COMMITTED
+    assert log.state.state_of(Level.ATTEMPT, "t1-a1") is AttemptState.COMMITTED
+    tree = world.repo.sh("show", f"{world.workspace.run_branch}:src/sample/mod.py")
+    assert "def sub(a, b):\n    return a - b" in tree
