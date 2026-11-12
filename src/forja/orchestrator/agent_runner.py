@@ -639,7 +639,8 @@ class ExecutorAgentRunner:
         plan = replace(plan, env_set={**plan.env_set, **blocking})
         spec = build_spec(plan, self._env, timeout=None)
         watch = Watch(sink, self._log, ctx, self._adapter, self._clock)
-        log_path = ctx.worktree.parent / f"{operation_id}.log"
+        # an operation id holds colons, which NTFS reads as a stream of the file before them
+        log_path = ctx.worktree.parent / f"{operation_id.replace(':', '-')}.log"
         task = asyncio.create_task(ProcessRunner(watch).run(operation_id, spec, log_path))
         stalled = False
         try:

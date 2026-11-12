@@ -197,6 +197,18 @@ def test_a_good_call_returns_why_and_counts_the_tokens(tmp_path: Path) -> None:
     assert read_consumption(tmp_path / "events.jsonl").tokens == 120
 
 
+def test_the_raw_output_of_the_cli_is_kept_in_a_file_with_a_name_every_system_accepts(
+    tmp_path: Path,
+) -> None:
+    r = rig(tmp_path, GOOD)
+
+    go(work(r))
+
+    log = tmp_path / "wt" / "call_agent_cli-t1-a1.log"
+    assert log.is_file() and log.stat().st_size > 0
+    assert not (tmp_path / "wt" / "call_agent_cli").exists()  # NTFS: a stream of this file
+
+
 def test_what_the_cli_does_is_recorded_as_activity(tmp_path: Path) -> None:
     read = json.dumps(
         {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Read",
