@@ -367,7 +367,12 @@ def build_package(
     for name in task.scope:
         path = ctx.worktree / name
         if path.is_file():
-            items.append(PackageItem(ItemKind.FILE, name, path.read_text(encoding="utf-8"), True))
+            try:
+                content = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:  # a binary file, or text in another encoding
+                notes.append(f"`{name}` is not UTF-8 text: read it yourself if you need it.")
+                continue
+            items.append(PackageItem(ItemKind.FILE, name, content, True))
         else:
             notes.append(f"`{name}` is a directory: read the files you need from it.")
     documenter = task.role is Producer.DOCUMENTER

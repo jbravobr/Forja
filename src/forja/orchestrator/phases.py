@@ -6,6 +6,8 @@ says which phase is next, and the journal skips what each phase already did. A r
 """
 
 import asyncio
+import contextlib
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +42,8 @@ from forja.orchestrator.workspace_git import HANDLED_OPERATIONS
 
 AGENT_OPERATIONS = frozenset({"prepare_workcopy", "apply_diff"})
 SUMMARY_NAME = "resumo.md"
+FAILURE_NAME = "falha.log"  # the trace of an error nobody expected, beside the summary
+FAILURE_REASON_LIMIT = 500  # characters of the error kept in the log
 METRIC_LIMIT = 40
 BASELINE_NOT_GREEN = "baseline_not_green"
 
@@ -99,8 +103,38 @@ class Orchestrator:
             self._interrupted()
             journal.session_ended("interrupted")
             raise
+        except Exception as error:
+            self._record_failure(error)
+            raise
         journal.session_ended(outcome.state.value)
         return outcome
+
+    def _record_failure(self, error: Exception) -> None:
+        """An error nobody expected: the log says the run failed and why; a file keeps the trace.
+
+        The error still leaves the orchestrator. Recording it is best effort: when the log itself
+        is what broke, there is nothing to write to, and the resume settles the run as after a
+        death of the process.
+        """
+        reason = f"{type(error).__name__}: {error}"[:FAILURE_REASON_LIMIT]
+        with contextlib.suppress(Exception):
+            trace = "".join(traceback.format_exception(error))
+            atomic_write_bytes(self._ctx.run_dir / FAILURE_NAME, trace.encode("utf-8"))
+        with contextlib.suppress(Exception):
+            state = self._state
+            # a run already paused or failed keeps the state it will be resumed from
+            if ExecutionState.FAILED in EXECUTION_MACHINE.table[state] and state not in (
+                ExecutionState.PAUSED,
+                ExecutionState.FAILED,
+            ):
+                self._log.append_transition(
+                    Level.EXECUTION,
+                    self._run_id,
+                    state,
+                    ExecutionState.FAILED,
+                    payload={"reason": reason},
+                )
+            self._journal.session_ended("failed")
 
     # -- starting up ----------------------------------------------------------------------------
 

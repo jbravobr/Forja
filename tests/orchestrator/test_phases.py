@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -549,3 +550,43 @@ def test_the_message_of_a_base_that_is_not_green_lists_the_problems_only_when_th
         f"A base já não está verde{shown}: a Forja não parte de testes ou checagens que falham. "
         "Corrija-os, faça o commit e rode de novo."
     )
+
+
+class BrokenPlanner(ScriptedPlanner):
+    async def plan(self, *args: Any, **kwargs: Any) -> Any:
+        raise KeyError("a bug in the planner")
+
+
+def test_an_error_nobody_expected_leaves_the_run_failed_with_the_reason_and_the_trace(
+    world: MemoryWorld,
+) -> None:
+    with pytest.raises(KeyError):
+        world.run(planner=BrokenPlanner())
+
+    log = world.open()
+    assert log.state.state_of(Level.EXECUTION, RUN) is ExecutionState.FAILED
+    failed = log.state.transition_payload(Level.EXECUTION, RUN, ExecutionState.FAILED)
+    assert failed == {"reason": "KeyError: 'a bug in the planner'"}
+    trace = (world.run_dir / phases.FAILURE_NAME).read_text(encoding="utf-8")
+    assert "Traceback" in trace and "a bug in the planner" in trace
+
+    outcome, log = world.run(log=log)
+
+    assert outcome.state is ExecutionState.DELIVERED
+    assert task_state(log, "t1") is TaskState.INTEGRATED
+
+
+def test_a_long_error_is_cut_in_the_log_and_whole_in_the_trace(world: MemoryWorld) -> None:
+    class Verbose(ScriptedPlanner):
+        async def plan(self, *args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("x" * 2000)
+
+    with pytest.raises(RuntimeError):
+        world.run(planner=Verbose())
+
+    log = world.open()
+    failed = log.state.transition_payload(Level.EXECUTION, RUN, ExecutionState.FAILED)
+    assert failed is not None
+    assert len(str(failed["reason"])) == phases.FAILURE_REASON_LIMIT
+    assert "x" * 2000 in (world.run_dir / phases.FAILURE_NAME).read_text(encoding="utf-8")
+    log.close()

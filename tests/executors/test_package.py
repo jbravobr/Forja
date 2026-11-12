@@ -234,6 +234,17 @@ def test_a_secret_in_the_reason_of_the_rejection_never_reaches_the_package(tmp_p
     assert "Why the last attempt was rejected" not in text  # the name of the item is not a file
 
 
+def test_a_file_in_scope_that_is_not_utf8_text_is_withheld_and_said_to_be(tmp_path: Path) -> None:
+    ctx = context(tmp_path, ("src/a.py", "src/legacy.py"))
+    (tmp_path / "src" / "legacy.py").write_bytes("# preço = 1\n".encode("cp1252"))
+
+    text = build_package(ctx, Redactor())
+
+    assert "`src/legacy.py` is not UTF-8 text: read it yourself if you need it." in text
+    assert "### `src/legacy.py`" not in text
+    assert "### `src/a.py`" in text
+
+
 def test_a_secret_in_the_diary_file_never_reaches_it(tmp_path: Path) -> None:
     ctx = replace(context(tmp_path, ("src/a.py",)), diary=f"You said: key {TOKEN}\n")
 
