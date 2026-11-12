@@ -100,6 +100,13 @@ class JavaAdapter:
     language = "java"
     dependency_ecosystem = "Maven"  # the registry of its manifests
     grammar = "java"
+    # what switches off the compiler's warnings, SpotBugs, PMD, Checkstyle and Spotless
+    suppressions = (
+        r"@Suppress(?:FB)?Warnings",
+        r"NOPMD",
+        r"CHECKSTYLE[:.]\s*OFF",
+        r"spotless:off",
+    )
     capabilities = frozenset({LanguageCapability.COVERAGE, LanguageCapability.STRUCTURAL_METERS})
 
     def __init__(

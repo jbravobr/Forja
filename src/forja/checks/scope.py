@@ -1,5 +1,6 @@
 """Gate 1: the attempt touched only what the task allowed, and not too much of it."""
 
+import functools
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -12,13 +13,32 @@ from forja.core.artifacts.models import Producer
 from forja.core.gates import Approved, Finding, GateInput, GateResult
 from forja.orchestrator.ports import TaskInfo
 
-SUPPRESSIONS = re.compile(
+_ANY_LANGUAGE = (
     r"noqa|fmt:\s*(?:off|on|skip)|yapf:\s*(?:disable|enable)|gitleaks:allow"
     r"|lizard\s+forgive|#\s*lizard|generated\s+code|nosem"
     r"|pragma:\s*no\s*\w+|type:\s*ignore|(?:mypy|pyright):\s*(?:ignore|basic|off)"
-    r"|pylint:\s*(?:disable|skip)|nosec",
-    re.IGNORECASE,
+    r"|pylint:\s*(?:disable|skip)|nosec"
 )
+SUPPRESSIONS = re.compile(_ANY_LANGUAGE, re.IGNORECASE)
+
+
+@functools.cache
+def _with(own: tuple[str, ...]) -> re.Pattern[str]:
+    return re.compile("|".join((f"(?i:{_ANY_LANGUAGE})", *own))) if own else SUPPRESSIONS
+
+
+def silencers(owner: Callable[[str], object | None]) -> Callable[[str], re.Pattern[str]]:
+    """What switches a tool off in each file: the markers looked for everywhere, plus those the
+    language that owns the file declares in ``suppressions``. The markers of a language are only
+    looked for in its own files, as they are written: ``.Skip(`` skips a test in Go and takes
+    the rest of a sequence in C#."""
+
+    def of(path: str) -> re.Pattern[str]:
+        return _with(tuple(getattr(owner(path), "suppressions", ())))
+
+    return of
+
+
 # Directories the tools write their caches to. The compiled files of Python are not here: the
 # adapter sends them outside the worktree, so any that turn up inside it are suspect.
 TOOL_CACHES = frozenset({".pytest_cache", ".ruff_cache", ".mypy_cache", ".hypothesis"})
@@ -88,6 +108,7 @@ class ScopeCheck:
     classify: Callable[[str], FileClass]
     declared: tuple[str, ...] = ()  # what the agent said it changed; empty means not asked
     dependency_edit: Callable[[Change], bool] = lambda change: False  # touches only dependencies
+    silencers: Callable[[str], re.Pattern[str]] = lambda path: SUPPRESSIONS  # by file
     id: str = "scope"
     gate: int = 1
     requires: frozenset[str] = frozenset()
@@ -192,7 +213,7 @@ class ScopeCheck:
                 target=line.path or "diff",
             )
             for line in added_lines(self.changes.patch)
-            if SUPPRESSIONS.search(line.text)
+            if self.silencers(line.path or "").search(line.text)
         ]
 
     def _too_big(self, data: GateInput) -> list[Finding]:

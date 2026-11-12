@@ -93,6 +93,13 @@ class TypeScriptAdapter:
     language = "typescript"
     dependency_ecosystem = "npm"  # the registry of its manifests
     grammar = "typescript"
+    # what switches off the linter, the compiler, the formatter and the coverage in a file
+    suppressions = (
+        r"eslint-disable",
+        r"@ts-(?:ignore|nocheck|expect-error)",
+        r"prettier-ignore",
+        r"(?:istanbul|c8|v8)\s+ignore",
+    )
     capabilities = frozenset({LanguageCapability.COVERAGE, LanguageCapability.STRUCTURAL_METERS})
 
     def __init__(self, *, node: tuple[str, ...] = ("node",)) -> None:

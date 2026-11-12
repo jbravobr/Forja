@@ -108,6 +108,12 @@ class CSharpAdapter:
     language = "csharp"
     dependency_ecosystem = "NuGet"  # the registry of its manifests
     grammar = "csharp"
+    # what switches off the analysers in a region or a member, and the coverage of a member
+    suppressions = (
+        r"#\s*pragma\s+warning\s+disable",
+        r"SuppressMessage",
+        r"ExcludeFromCodeCoverage",
+    )
     capabilities = frozenset({LanguageCapability.COVERAGE, LanguageCapability.STRUCTURAL_METERS})
 
     def __init__(self, *, dotnet: tuple[str, ...] = ("dotnet",)) -> None:

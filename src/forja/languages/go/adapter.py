@@ -90,6 +90,8 @@ class GoAdapter:
     language = "go"
     dependency_ecosystem = "Go"  # the registry of its manifests
     grammar = "go"
+    # what switches the linter off in a line, and what skips a test
+    suppressions = (r"//\s*nolint", r"\.Skip(?:f|Now)?\(")
     capabilities = frozenset({LanguageCapability.COVERAGE, LanguageCapability.STRUCTURAL_METERS})
 
     def __init__(

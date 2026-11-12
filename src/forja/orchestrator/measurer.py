@@ -80,7 +80,7 @@ from forja.checks.readme_gate import ReadmeCheck, exists_inside, read_readme, re
 from forja.checks.red_green import RedGreenCheck
 from forja.checks.registries import HttpGet, urllib_get
 from forja.checks.sast import SastCheck
-from forja.checks.scope import TEST_AUTHOR_CLASSES, ScopeCheck
+from forja.checks.scope import TEST_AUTHOR_CLASSES, ScopeCheck, silencers
 from forja.checks.secrets import SecretsCheck
 from forja.checks.structure import SUFFIXES as SHAPE_SUFFIXES
 from forja.checks.structure import dialect_of
@@ -748,6 +748,7 @@ class PipelineMeasurer:
                 ctx.task,
                 self._classify,
                 dependency_edit=dependency_edit_of(self._adapters.languages(), worktree, declared),
+                silencers=silencers(self._adapters.for_file),
             ),
             *await self._frozen(ctx, changes),
             SecretsCheck(
@@ -855,7 +856,9 @@ class PipelineMeasurer:
         spec = expectations or Expectations(frozenset(), ())
         evidence = frozenset({*self._settings, *self._read_base_metrics(), *STATIC_METRICS})
         checks: list[Check] = [
-            ScopeCheck(changes, ctx.task, self._classify),
+            ScopeCheck(
+                changes, ctx.task, self._classify, silencers=silencers(self._adapters.for_file)
+            ),
             CitationCheck(ctx.worktree, spec.claims, evidence, self._fact_ids),
         ]
         if ctx.task.role is Producer.SPECIFIER:
