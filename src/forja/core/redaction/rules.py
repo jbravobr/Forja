@@ -12,7 +12,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 
-RULES_VERSION = "2026.10.2"
+RULES_VERSION = "2026.11.1"
 
 
 def shannon_entropy(value: str) -> float:
@@ -205,6 +205,22 @@ RULES: tuple[SecretRule, ...] = (
         keywords=("secret", "token", "passw", "pwd", "key", "credential"),
         uses_threshold=True,
         check=lambda value: _looks_like_a_secret_value(value) and not is_placeholder(value),
+    ),
+    # A value of letters only is an identifier in code (``password = some_function``, and in
+    # quotes the value of an enumeration), so the rule above leaves it. In an environment file
+    # (``NAME=value`` alone on its line, the name in capitals) it is a value somebody typed.
+    SecretRule(
+        "environment-credential",
+        re.compile(
+            r"^(?:export[ 	]+)?[A-Z0-9_]{0,32}"
+            r"(?:SECRET|TOKEN|PASSW(?:OR)?D|PWD|API_?KEY|AUTH_?KEY|PRIVATE_?KEY|CREDENTIAL)"
+            r"[A-Z0-9_]{0,32}=([A-Za-z_]{8,200})[ 	]*$",
+            re.MULTILINE,
+        ),
+        group=1,
+        keywords=("secret", "token", "passw", "pwd", "key", "credential"),
+        uses_threshold=True,
+        check=lambda value: not is_placeholder(value),
     ),
 )
 

@@ -9,7 +9,7 @@ O pacote enviado ao modelo pode conter segredos e dados pessoais. Mascarar tamb�
 
 ## Decisão
 
-A redação age só no pacote que a Forja monta. Ela usa 19 regras próprias de segredos, mais dados pessoais (CPF e CNPJ com dígitos verificadores, e-mail, telefone, cartão com Luhn). Os marcadores numeram os valores distintos por categoria: `[REDACTED:<regra>:<n>]` e `[PII:<tipo>:<n>]`. Se a redação falha, nada é enviado. Se ela remove algo essencial, isso vira premissa. O registro do pacote enviado guarda hash, regras e contagens, nunca valores, e fixa a impressão digital das regras. Valores marcados como exemplo ou espaço reservado em documentação não são mascarados.
+A redação age só no pacote que a Forja monta. Ela usa 21 regras próprias de segredos, mais dados pessoais (CPF e CNPJ com dígitos verificadores, e-mail, telefone, cartão com Luhn). Os marcadores numeram os valores distintos por categoria: `[REDACTED:<regra>:<n>]` e `[PII:<tipo>:<n>]`. Se a redação falha, nada é enviado. Se ela remove algo essencial, isso vira premissa. O registro do pacote enviado guarda hash, regras e contagens, nunca valores, e fixa a impressão digital das regras. Valores marcados como exemplo ou espaço reservado em documentação não são mascarados.
 
 ## Consequências
 

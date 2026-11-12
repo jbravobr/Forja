@@ -178,6 +178,37 @@ def test_human_made_credentials_are_caught_by_the_generic_rule(line: str) -> Non
 
 
 @pytest.mark.parametrize(
+    ("line", "rule"),
+    [
+        ("DB_PASSWORD=supersecret", "environment-credential"),
+        ("export API_TOKEN=correcthorsebattery", "environment-credential"),
+    ],
+)
+def test_a_credential_of_letters_only_is_caught_in_an_environment_file(
+    line: str, rule: str
+) -> None:
+    result = run("x = 1" + chr(10) + line + chr(10) + "y = 2" + chr(10))
+
+    assert [f.rule for f in result.findings] == [rule]
+    assert "supersecret" not in result.items[0].content
+    assert "correcthorse" not in result.items[0].content
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'password = "password"',  # a documentation value
+        "API_TOKEN=aaaaaaaaaa",  # no entropy
+        'SECRETS = "no_secrets"',  # in quotes: the value of an enumeration
+        "db_password=supersecret",  # lower case with no quotes: a keyword argument
+        "DB_PASSWORD=supersecret and more",  # not an environment line
+    ],
+)
+def test_letters_that_are_not_a_typed_credential_are_left(line: str) -> None:
+    assert out(line) == line
+
+
+@pytest.mark.parametrize(
     "line",
     [
         "token = abcdefghijkl",  # only letters: an identifier
@@ -307,5 +338,5 @@ def test_personal_data_detectors_can_be_chosen_one_by_one() -> None:
 
 def test_the_rules_fingerprint_is_pinned_so_a_change_cannot_go_unversioned() -> None:
     """Changed a rule? Bump RULES_VERSION in rules.py and update this value with it."""
-    assert rules_fingerprint()[:8] == "082da4b8"
-    assert rules_version() == "2026.10.2+082da4b8"
+    assert rules_fingerprint()[:8] == "4d077c3f"
+    assert rules_version() == "2026.11.1+4d077c3f"
