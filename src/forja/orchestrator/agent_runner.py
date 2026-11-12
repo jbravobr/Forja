@@ -81,6 +81,7 @@ FACTS_REPORT = "Recorded facts"
 FINDINGS_REPORT = "Findings"
 DIARY_REPORT = "Earlier attempts"
 SAID_REPORT = "What the agent said"
+REJECTION_REPORT = "Why the last attempt was rejected"
 DIARY_ORDER = (
     f"Before you do anything else, read `{AGENT_DIR}/{DIARY_FILE}`. It holds every earlier attempt "
     "of this stage, whole: what you said and why each one was turned down. Do not act until "
@@ -381,6 +382,8 @@ def build_package(
         items.append(PackageItem(ItemKind.TEXT, FACTS_REPORT, recorded, True))
     if ctx.previous_said:  # what the agent itself said in the last rejected attempt
         items.append(PackageItem(ItemKind.TEXT, SAID_REPORT, ctx.previous_said, True))
+    if ctx.previous_rejection:  # the output of the repository's tools and tests: redacted too
+        items.append(PackageItem(ItemKind.TEXT, REJECTION_REPORT, ctx.previous_rejection, True))
     result = redactor.redact(items)
     report = next((i.content for i in result.items if i.name == README_REPORT), "")
     author = task.role is Producer.TEST_AUTHOR
@@ -438,7 +441,15 @@ def build_package(
     recorded = next((i.content for i in result.items if i.name == FACTS_REPORT), "")
     found = next((i.content for i in result.items if i.name == FINDINGS_REPORT), "")
     said = next((i.content for i in result.items if i.name == SAID_REPORT), "")
-    hidden_names = (README_REPORT, ADR_REPORT, FACTS_REPORT, FINDINGS_REPORT, SAID_REPORT)
+    rejection = next((i.content for i in result.items if i.name == REJECTION_REPORT), "")
+    hidden_names = (
+        README_REPORT,
+        ADR_REPORT,
+        FACTS_REPORT,
+        FINDINGS_REPORT,
+        SAID_REPORT,
+        REJECTION_REPORT,
+    )
     shown = [i for i in result.items if i.name not in hidden_names]
     if shown or notes:
         parts.append("## Files in scope\n")
@@ -467,8 +478,8 @@ def build_package(
         parts.append(f"## Earlier attempts of this stage\n\n{DIARY_ORDER}\n")
     if ctx.hypothesis:  # fixed text of the Forja: nothing to redact
         parts.append(f"## Attack the hypothesis\n\n{ctx.hypothesis}\n")
-    if ctx.previous_rejection:
-        parts.append(f"## The previous attempt was rejected\n\n{ctx.previous_rejection}\n")
+    if rejection:
+        parts.append(f"## The previous attempt was rejected\n\n{rejection}\n")
         if said:
             parts.append(f"What you said in that attempt:\n\n{_quote(said)}\n")
     return "\n".join(parts) + "\n"

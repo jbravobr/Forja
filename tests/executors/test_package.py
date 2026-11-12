@@ -223,6 +223,17 @@ def test_a_secret_in_what_the_agent_said_never_reaches_the_package(tmp_path: Pat
     assert TOKEN not in build_package(ctx, Redactor())
 
 
+def test_a_secret_in_the_reason_of_the_rejection_never_reaches_the_package(tmp_path: Path) -> None:
+    rejected = f"gate 5 (tests): test_login failed\nE  assert login({TOKEN!r})"
+
+    text = package(tmp_path, rejection=rejected)
+
+    assert TOKEN not in text
+    assert "## The previous attempt was rejected" in text
+    assert "gate 5 (tests): test_login failed" in text
+    assert "Why the last attempt was rejected" not in text  # the name of the item is not a file
+
+
 def test_a_secret_in_the_diary_file_never_reaches_it(tmp_path: Path) -> None:
     ctx = replace(context(tmp_path, ("src/a.py",)), diary=f"You said: key {TOKEN}\n")
 
