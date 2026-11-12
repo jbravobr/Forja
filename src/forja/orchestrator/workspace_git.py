@@ -154,6 +154,14 @@ class Layout:
         return self.worktree(attempt_id)
 
 
+def workcopy_path(worktree: Path) -> Path:
+    """Where the copy the agent works in lies: beside the attempt's worktree, never inside it.
+
+    The agent runner makes it and the workspace removes it with the worktree, so both name it here.
+    """
+    return worktree.with_name(f"{worktree.name}-copy")
+
+
 _REF_KINDS = frozenset(
     {DifferenceKind.REF_ADDED, DifferenceKind.REF_REMOVED, DifferenceKind.REF_MOVED}
 )
@@ -409,6 +417,10 @@ class GitWorkspace:
 
         async def run() -> None:
             await self._clear(path)
+            # the copy the agent worked in is as large as the worktree and nothing reads it again
+            copy = workcopy_path(path)
+            if copy.exists():
+                shutil.rmtree(copy, onexc=_make_writable_and_retry)
 
         return Step.plain({"worktree": str(path)}, run)
 

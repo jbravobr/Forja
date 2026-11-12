@@ -21,6 +21,7 @@ from forja.orchestrator.workspace_git import (
     Layout,
     NothingToCommit,
     NothingToRollBack,
+    workcopy_path,
 )
 from forja.testing import MemoryRepo, MemoryWorkspace
 from tests.core.idempotency.conftest import Repo
@@ -334,6 +335,22 @@ def test_removing_a_worktree_leaves_the_branch(backend: Backend) -> None:
 
     assert not worktree.exists()
     assert task_branch_name(RUN, "t1") in backend.branches()
+
+
+def test_removing_a_worktree_removes_the_copy_the_agent_worked_in(backend: Backend) -> None:
+    start(backend)
+    task(backend, "t1", "t1-a1", {"src/a.py": "one"})
+    copy = workcopy_path(backend.workspace.attempt_worktree("t1-a1"))
+    (copy / "src").mkdir(parents=True)
+    (copy / "src" / "a.py").write_text("one", encoding="utf-8")
+    other = workcopy_path(backend.workspace.attempt_worktree("t1-a2"))
+    other.mkdir()
+
+    go(backend.workspace.remove_worktree("t1-a1"))
+    go(backend.workspace.remove_worktree("t1-a1"))  # with nothing left to remove it still ends
+
+    assert copy.name == "t1-a1-copy" and not copy.exists()
+    assert other.exists()  # the copy of another attempt is not this one's to remove
 
 
 def test_an_attempt_worktree_made_again_starts_clean(backend: Backend) -> None:

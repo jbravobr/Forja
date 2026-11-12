@@ -73,6 +73,7 @@ from forja.orchestrator.budget import AGENT_ACTIVITY
 from forja.orchestrator.criteria import manifest_of
 from forja.orchestrator.operations import Step
 from forja.orchestrator.ports import AgentResult, AttemptContext, RejectedWork
+from forja.orchestrator.workspace_git import workcopy_path
 
 PACKAGE = "package.md"
 README_REPORT = "README report"
@@ -315,7 +316,7 @@ def _refuse_links_on_the_way(worktree: Path, path: str) -> None:
 
 
 def workcopy_of(ctx: AttemptContext) -> Path:
-    return ctx.worktree.with_name(f"{ctx.attempt_id}-copy")
+    return workcopy_path(ctx.worktree)
 
 
 def _quote(text: str) -> str:

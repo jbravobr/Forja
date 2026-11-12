@@ -32,6 +32,7 @@ from forja.orchestrator.workspace_git import (
     NothingToRollBack,
     RepositoryNotReady,
     others_work,
+    workcopy_path,
 )
 from forja.testing.repo import MemoryRepo, MergeConflict, read_tree, write_tree
 
@@ -249,6 +250,7 @@ class MemoryWorkspace:
 
         async def run() -> None:
             self._clear(path)
+            self._clear(workcopy_path(path))
 
         return Step.plain({"worktree": str(path)}, run)
 
