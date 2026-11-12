@@ -121,14 +121,19 @@ async def _watch(
 
 
 def exit_code(session: Session, ended: Ended) -> int:
-    """The exit code of the process: the run's own, except a delivery with blocked tasks."""
+    """The exit code of the process: the run's own, except a delivery that left tasks behind.
+
+    A task left behind is one that was blocked or, with the tokens up, never started: zero is
+    only for a delivery with every task integrated.
+    """
     if ended.outcome is None:
         return int(ExitCode.INTERRUPTED)
     view = session.view.snapshot()
     if ended.outcome.exit_code is ExitCode.DELIVERED and view.state == "delivered":
-        if view.tasks_blocked and not view.tasks_integrated:
+        left_behind = view.tasks_total - view.tasks_integrated
+        if left_behind > 0 and not view.tasks_integrated:
             return int(ExitCode.NOTHING_INTEGRATED)
-        if view.tasks_blocked:
+        if left_behind > 0:
             return int(ExitCode.SOME_BLOCKED)
     return int(ended.outcome.exit_code)
 
@@ -150,6 +155,9 @@ def closing_lines(session: Session, ended: Ended) -> list[str]:
                 f"{view.tasks_integrated} de {view.tasks_total} tarefa(s) integrada(s); "
                 f"{view.tasks_blocked} bloqueada(s), com o motivo no resumo."
             )
+        not_started = view.tasks_total - view.tasks_integrated - view.tasks_blocked
+        if not_started > 0:
+            lines.append(f"{not_started} tarefa(s) não começaram: o limite de tokens acabou antes.")
         if not view.tasks_integrated:
             lines.append("Nenhuma tarefa foi integrada: a branch não tem mudanças.")
         lines += [
