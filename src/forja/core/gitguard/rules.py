@@ -129,7 +129,14 @@ def parse(args: Sequence[str]) -> Command:
 
 
 def _refuse_flags(args: Sequence[str], command: Command, forbidden: set[str], why: str) -> None:
-    hit = sorted(command.flags & forbidden)
+    # git takes a long option cut short (``--upload-pa`` for ``--upload-pack``): a prefix of a
+    # forbidden name is that name
+    hit = sorted(
+        flag
+        for flag in command.flags
+        if flag in forbidden
+        or (flag.startswith("--") and len(flag) > 2 and any(f.startswith(flag) for f in forbidden))
+    )
     if hit:
         raise GitCommandRefused(args, f"{', '.join(hit)} {why}")
 
@@ -246,6 +253,8 @@ def check(args: Sequence[str]) -> Command:
     if sub in READ_ONLY:
         _refuse_flags(args, command, {"--output", "-o"}, "would write a file")
         _refuse_flags(args, command, RUNS_A_PROGRAM, "runs a program")
+        if sub == "ls-remote":  # its short form of --upload-pack
+            _refuse_flags(args, command, {"-u"}, "runs a program")
         return command
 
     checker = _CHECKERS.get(sub)
