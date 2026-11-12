@@ -113,15 +113,23 @@ def build_mutants(
 ) -> list[Mutant]:
     """One mutant per place on a changed line where the rules allow a change. With
     ``whole_functions`` (the default, as in the mutator's differential run) also one per place
-    anywhere in a function that holds a changed line."""
+    anywhere in a function that holds a changed line. A file the rules cannot read stops the
+    measurement (``Undecided``): no mutant of it would otherwise look like every mutant killed."""
     mutants: list[Mutant] = []
     for path, wanted in sorted(lines.items()):
         try:
             source = (worktree / path).read_text(encoding="utf-8")
             sites = discover(source, path)
             touched = touched_functions(source, path, wanted) if whole_functions else frozenset()
-        except (OSError, SyntaxError, ValueError):
-            continue  # a file that does not compile is the build gate's finding, not this one's
+        except (OSError, SyntaxError, ValueError) as error:
+            # the build gate has already passed: the file is good and the rules cannot read it,
+            # so nothing is known about its new lines, which is not the same as their being tested
+            raise Undecided(
+                Inconclusive(
+                    reason=InconclusiveReason.UNSUPPORTED_CONSTRUCT,
+                    detail=f"mutation: the rules cannot read {path} ({error})",
+                )
+            ) from None
         for site in sites:
             if site.line not in wanted and site.function not in touched:
                 continue

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from forja.checks.base import Undecided
 from forja.checks.mutation import (
     DEFAULT_MIN_SCORE,
     MutationCheck,
@@ -15,7 +16,13 @@ from forja.checks.mutation import (
     worker_count,
 )
 from forja.core.gates import GateInput
-from forja.core.gates.models import Approved, FindingKind, Rejected
+from forja.core.gates.models import (
+    Approved,
+    FindingKind,
+    Inconclusive,
+    InconclusiveReason,
+    Rejected,
+)
 from forja.core.reports.models import CoverageReport, FileCoverage
 from forja.core.states import Level
 from forja.mutation.executor import Mutant
@@ -62,6 +69,20 @@ def test_a_changed_line_no_test_runs_gives_an_uncovered_mutant(tmp_path: Path) -
     for report in (covered, CoverageReport({})):
         (mutant,) = build_mutants(tmp_path, {"m.py": frozenset({2})}, report)
         assert not mutant.covered
+
+
+def test_a_file_the_rules_cannot_read_leaves_the_measurement_undecided(tmp_path: Path) -> None:
+    (tmp_path / "m.py").write_text("def f(a, b):\n    return a - b\n")
+    (tmp_path / "broken.py").write_text("def (:\n")
+    coverage = CoverageReport({})
+
+    with pytest.raises(Undecided) as stop:
+        build_mutants(tmp_path, {"broken.py": frozenset({1}), "m.py": frozenset({2})}, coverage)
+
+    result = stop.value.result
+    assert isinstance(result, Inconclusive)
+    assert result.reason is InconclusiveReason.UNSUPPORTED_CONSTRUCT
+    assert "broken.py" in result.detail
 
 
 def judge(scene: Scene) -> object:
