@@ -103,6 +103,24 @@ async def _work(
         results[index] = await _judge(runner, root, path, path.read_bytes(), mutant, timeout)
 
 
+async def _alone(
+    mutants: Sequence[Mutant],
+    results: dict[int, MutantStatus],
+    runner: TestRunner,
+    root: Path,
+    timeout: float,
+) -> None:
+    """Judge again, one at a time, the mutants that ran out of time beside the others.
+
+    The timeout comes from a baseline that ran alone. With several test commands running at once
+    a mutant the tests would have passed may only be slow, and counting it as killed would raise
+    the score for no reason. Alone, it gets the conditions the baseline had."""
+    for index, mutant in enumerate(mutants):
+        if results[index] is MutantStatus.TIMEOUT:
+            path = root / mutant.file
+            results[index] = await _judge(runner, root, path, path.read_bytes(), mutant, timeout)
+
+
 async def run_mutants(
     worktree: Path,
     scratch: Path,
@@ -115,7 +133,8 @@ async def run_mutants(
     """Judge every mutant. ``scratch`` is an empty directory for the copies; the caller removes it.
 
     The baseline run (the whole test command on the unchanged copy) must pass; its duration sets
-    the timeout of each mutant at ten times that, but never below two seconds.
+    the timeout of each mutant at ten times that, but never below two seconds. With more than
+    one worker, a mutant that timed out is judged once more with nothing else running.
     """
     count = max(1, workers) if workers is not None else min(4, os.cpu_count() or 1)
     roots = [scratch / f"worker-{n}" for n in range(count)]
@@ -133,6 +152,8 @@ async def run_mutants(
         queue.put_nowait(item)
     results: dict[int, MutantStatus] = {}
     await asyncio.gather(*(_work(queue, results, runner, root, timeout) for root in roots))
+    if count > 1:
+        await _alone(mutants, results, runner, roots[0], timeout)
     return MutationReport(
         tuple(
             MutantResult(m.file, m.line, m.change, results[i], m.function)

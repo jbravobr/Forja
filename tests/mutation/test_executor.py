@@ -226,3 +226,52 @@ def test_bytecode_caches_that_cannot_be_removed_do_not_stop_the_run(
     run(project, tmp_path, [mutant(b"x > 0", b"x < 0")], workers=1)
 
     assert asked and all(asked)
+
+
+def _slow_beside_the_others(answers: list[TestVerdict], calls: list[Path]) -> object:
+    """A runner whose mutant runs answer ``answers`` in turn; the unchanged copy passes."""
+
+    async def runner(root: Path, timeout: float | None) -> TestVerdict:
+        if (root / "calc.py").read_bytes() == CALC:
+            return TestVerdict.PASSED
+        calls.append(root)
+        return answers[len(calls) - 1]
+
+    return runner
+
+
+def test_a_mutant_that_only_ran_out_of_time_beside_the_others_is_judged_again_alone(
+    project: Path, tmp_path: Path
+) -> None:
+    calls: list[Path] = []
+    runner = _slow_beside_the_others([TestVerdict.TIMED_OUT, TestVerdict.PASSED], calls)
+
+    report = run(project, tmp_path, [mutant(b"x > 0", b"x >= 0")], runner, workers=2)
+
+    assert [m.status for m in report.mutants] == [MutantStatus.SURVIVED]
+    assert len(calls) == 2
+    assert calls[1] == tmp_path / "scratch" / "worker-0"
+
+
+def test_a_mutant_that_runs_out_of_time_alone_too_is_a_timeout(
+    project: Path, tmp_path: Path
+) -> None:
+    calls: list[Path] = []
+    runner = _slow_beside_the_others([TestVerdict.TIMED_OUT, TestVerdict.TIMED_OUT], calls)
+
+    report = run(project, tmp_path, [mutant(b"x > 0", b"x >= 0")], runner, workers=2)
+
+    assert [m.status for m in report.mutants] == [MutantStatus.TIMEOUT]
+    assert len(calls) == 2
+    for copy in (tmp_path / "scratch").iterdir():
+        assert (copy / "calc.py").read_bytes() == CALC
+
+
+def test_with_one_worker_a_timeout_is_not_judged_again(project: Path, tmp_path: Path) -> None:
+    calls: list[Path] = []
+    runner = _slow_beside_the_others([TestVerdict.TIMED_OUT], calls)
+
+    report = run(project, tmp_path, [mutant(b"x > 0", b"x >= 0")], runner, workers=1)
+
+    assert [m.status for m in report.mutants] == [MutantStatus.TIMEOUT]
+    assert len(calls) == 1
