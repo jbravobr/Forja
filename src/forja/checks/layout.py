@@ -237,3 +237,20 @@ class TypesCheck(LintCheck):
     name: str = "types"
     noun: str = "error"
     tool: str = "type checker"
+
+    async def _judge(self, data: GateInput) -> GateResult:
+        """An adapter may say it cannot measure a project the way the project asks (its settings
+        load plugins the Forja does not run): the errors it would count are not the project's,
+        so the answer is inconclusive, never the count."""
+        files = self.changes.current(owned_by(self.projects))
+        for adapter, _ in by_adapter(self.projects, files):
+            ask = getattr(adapter.inner, "unmeasurable", None)
+            why = ask(self.operation, adapter.directory(self.worktree)) if callable(ask) else None
+            if why:
+                raise Undecided(
+                    Inconclusive(
+                        reason=InconclusiveReason.UNSUPPORTED_CONSTRUCT,
+                        detail=f"{self.name}: {why}",
+                    )
+                )
+        return await super()._judge(data)

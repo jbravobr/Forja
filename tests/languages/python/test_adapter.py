@@ -298,7 +298,7 @@ def test_violations_nobody_can_read_are_not_taken_for_a_clean_run(tmp_path: Path
 # -- types -----------------------------------------------------------------------------------------
 
 
-def test_types_run_mypy_on_the_files_with_the_repositorys_python_and_no_configuration(
+def test_types_run_mypy_on_the_files_with_the_repositorys_python_and_its_defaults_when_no_settings(
     project: Path,
 ) -> None:
     assert argv(Operation.TYPES, project, files=("a.py", "b.py")) == (

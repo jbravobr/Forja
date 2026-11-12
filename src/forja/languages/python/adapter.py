@@ -29,7 +29,7 @@ from forja.core.adapters import (
 )
 from forja.core.adapters.common import PROPERTY_SEED
 from forja.core.reports import ReportFormat, ReportSpec
-from forja.languages.python import parsers
+from forja.languages.python import mypy_config, parsers
 from forja.languages.python.manifest import (
     declared_dependencies,
     declared_requirements,
@@ -119,6 +119,20 @@ class PythonAdapter:
         declares, each added one a plain registry requirement; ``None`` for any other file."""
         return only_dependencies_changed(path, before, after)
 
+    def unmeasurable(self, operation: Operation, root: Path) -> str | None:
+        """Why ``operation`` cannot measure the project at ``root`` as the project asks to be
+        measured, or ``None`` when it can. The types of a project whose mypy settings load
+        plugins are one such case: without them mypy reports errors the project does not have."""
+        if operation is not Operation.TYPES:
+            return None
+        settings = mypy_config.read(root)
+        if settings is None or not settings.plugins:
+            return None
+        return (
+            f"the mypy settings in {settings.source} load plugins, which are code of the "
+            "repository the Forja does not run"
+        )
+
     def classify(self, path: str) -> FileClass | None:
         parts = path.replace("\\", "/").split("/")
         name, directories = parts[-1], set(parts[:-1])
@@ -196,19 +210,22 @@ class PythonAdapter:
                     *targets,
                 )
             case Operation.TYPES:
-                # The repository's own configuration is not read (``--config-file=``): a mypy
-                # plugin in it would run code the attempt may have written.
+                # mypy reads a copy of the repository's settings, without the plugins: a plugin
+                # would run code the attempt may have written. No settings, mypy's defaults.
+                settings = mypy_config.read(request.root)
+                config = "" if settings is None else settings.write(request.root, Path(self._cache))
                 argv = (
                     *self._mypy,
                     *("--python-executable", self._python[0]),
-                    *("--config-file=", "--follow-imports=silent"),
+                    *(f"--config-file={config}", "--follow-imports=silent"),
                     *("--output", "json", "--cache-dir", os.devnull),
                     "--disable-error-code=import-not-found",
                     "--disable-error-code=import-untyped",
                     "--",
                     *targets,
                 )
-                return self._plan(request.root, argv)
+                read = () if settings is None else (settings.source,)
+                return self._plan(request.root, argv, config_files=read)
             case Operation.BUILD:
                 argv = (
                     *self._python,

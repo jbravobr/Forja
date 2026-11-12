@@ -9,7 +9,7 @@ A tabela de adaptadores da Especificação prevê "ruff, mypy" para o lint do Py
 - **Um check `types` no gate 3**, em modo observação, separado do `lint`, que é bloqueante.
 - **A catraca é a do lint, generalizada.** `LintCheck` virou uma catraca parametrizada pela operação; `TypesCheck` a reaproveita. Reprova o erro que aumentou por (arquivo, código) em arquivo mudado.
 - **Operação nova, `Operation.TYPES`.** Os adaptadores respondem `NotSupported` por padrão; só o Python a oferece.
-- **A configuração do repositório não vale** (`--config-file=`), por segurança (um plugin é código do repositório) e por determinismo. Quem quer opções suas as põe em `[checks.types.commands]` do `forja.toml`.
+- **A configuração do repositório não vale** (substituído pelo [ADR 0041](0041-o-mypy-le-a-configuracao-do-repositorio-sem-os-plugins.md)) (`--config-file=`), por segurança (um plugin é código do repositório) e por determinismo. Quem quer opções suas as põe em `[checks.types.commands]` do `forja.toml`.
 - **Sem cache, import não achado desligado, `--follow-imports=silent`, só `severity` igual a `error`.**
 - **Falha é `Inconclusive`:** `mypy` ausente, saída fora de 0 e 1, JSON ilegível, saída 1 sem erro lido.
 - **O `mypy` vem da Forja (ADR 0037):** entrada `wheel` fixada em 2.4.1 no manifesto, pura (`py3-none-any`), `needed_by = ["python"]`. No `doctor` é item não obrigatório.

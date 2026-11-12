@@ -8,8 +8,16 @@ import pytest
 from forja.checks.changes import Change, ChangeKind, Changes
 from forja.checks.layout import FormatCheck, LintCheck, TypesCheck, skip_git_and_links
 from forja.checks.tooling import Tools
+from forja.core.adapters import Operation
 from forja.core.events import EventLog
-from forja.core.gates import Approved, GateInput, Inconclusive, NotApplicable, Rejected
+from forja.core.gates import (
+    Approved,
+    GateInput,
+    Inconclusive,
+    InconclusiveReason,
+    NotApplicable,
+    Rejected,
+)
 from forja.core.states import ExecutionState, Level
 from tests.checks.support import RUN, Stub, draft, projects_of, sinks
 from tests.core.events.support import FakeClock
@@ -207,3 +215,38 @@ def test_the_private_copy_leaves_out_git_and_each_link_on_its_own(tmp_path: Path
     assert skip_git_and_links(str(tmp_path), [".git"]) == {".git"}
     assert skip_git_and_links(str(tmp_path), ["link"]) == {"link"}
     assert skip_git_and_links(str(tmp_path), ["real"]) == set()
+
+
+class Refusing(Stub):
+    """An adapter that says it cannot measure the types of a project the way the project asks."""
+
+    def unmeasurable(self, operation: Operation, root: Path) -> str | None:
+        return f"plugins in {root.name}" if operation is Operation.TYPES else None
+
+
+def test_types_an_adapter_cannot_measure_as_the_project_asks_are_inconclusive(
+    tools: Tools, tmp_path: Path
+) -> None:
+    py = Refusing("python", ".py", tmp_path, after=(draft("types.x", "a.py"),))
+    check = TypesCheck(tools, projects_of(py), tmp_path, changes_of("a.py"), {"a.py": "x\n"})
+
+    result = asyncio.run(check.evaluate(data()))
+
+    assert isinstance(result, Inconclusive)
+    assert result.reason is InconclusiveReason.UNSUPPORTED_CONSTRUCT
+    assert result.detail == f"types: plugins in {tmp_path.name}"
+    assert py.requests == []  # nothing was run
+
+
+def test_the_refusal_is_asked_about_types_only_and_about_the_projects_with_changed_files(
+    tools: Tools, tmp_path: Path
+) -> None:
+    py = Refusing("python", ".py", tmp_path)
+    go = Stub("go", ".go", tmp_path, after=(draft("types.x", "b.go"),))
+    projects = projects_of(py, go)
+
+    lint = LintCheck(tools, projects, tmp_path, changes_of("a.py"), {"a.py": "x\n"})
+    assert asyncio.run(lint.evaluate(data())) == Approved()
+
+    types = TypesCheck(tools, projects, tmp_path, changes_of("b.go"), {"b.go": "y\n"})
+    assert isinstance(asyncio.run(types.evaluate(data())), Rejected)

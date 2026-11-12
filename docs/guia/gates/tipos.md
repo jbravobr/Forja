@@ -59,28 +59,28 @@ O check nasce em `observation`: mede e reporta, e não reprova até o repositór
 - **Só `severity` igual a `error`.** Notas do `mypy` não contam.
 - **Só o arquivo pedido.** O `mypy` roda com `--follow-imports=silent`: usa os tipos dos módulos importados e esconde os erros deles.
 - **Import não achado não conta.** `import-not-found` e `import-untyped` ficam desligados, porque o ambiente do repositório pode não ter tudo.
-- **Modo padrão do `mypy`, não o estrito.** Código sem anotação quase não é verificado.
+- **As opções do repositório.** Com `strict` na configuração do `mypy`, a medição é estrita. Sem configuração valem os padrões do `mypy`, em que código sem anotação quase não é verificado.
 
 ### Como roda
 
 ```text
-<mypy> --python-executable <python do repositório> --config-file= --follow-imports=silent
+<mypy> --python-executable <python do repositório> --config-file=<cópia da configuração> --follow-imports=silent
        --output json --cache-dir <dispositivo nulo> --disable-error-code=import-not-found
        --disable-error-code=import-untyped -- <arquivos mudados>
 ```
 
 - **`--python-executable`** é o interpretador do repositório, o mesmo que roda os testes. A Forja usa o do `.venv` ou do `venv` do repositório, se existir; senão, o primeiro `python` ou `python3` do `PATH`; senão, o Python que roda a própria Forja. Se a execução precisar instalar dependências novas, ela cria um ambiente virtual próprio, e o `mypy` passa a olhar esse. Assim os pacotes instalados no ambiente resolvem.
-- **A configuração do repositório não vale** (`--config-file=`). Um `plugins` em `mypy.ini` ou `pyproject.toml` é execução de código que o agente pode ter escrito, e a base e a tentativa precisam das mesmas opções.
+- **A configuração do repositório vale, por uma cópia.** A Forja lê a primeira de `mypy.ini`, `.mypy.ini`, `pyproject.toml` (`[tool.mypy]`) e `setup.cfg` (`[mypy]`) que tiver configuração, grava uma cópia fora da worktree e a passa em `--config-file`. A cópia não leva `plugins`, que é código do repositório que o `mypy` executaria, nem as chaves que gravam relatório (`*_report`, `junit_xml`). Sem configuração, o `mypy` roda com `--config-file=` e os padrões dele. A base e a tentativa leem a mesma configuração. A decisão está no ADR 0041.
 - **Sem cache.** A base e a tentativa não se contaminam e nada cai na worktree.
 - O `mypy` é procurado no `PATH`. `forja instalar` o instala quando detecta Python no repositório (veja `..\instalacao.md`).
 
 ### Quando fica sem resposta
 
-Falha da ferramenta nunca aprova: o resultado é inconclusivo. Isso vale para o `mypy` ausente, para saída diferente de 0 e 1, para tempo esgotado, para JSON ilegível e para saída 1 sem nenhum erro lido. Como o `types` tem `on_inconclusive = "premise"` por padrão, a tentativa segue e a lacuna é declarada como suposição. O `forja doctor` avisa quando o `mypy` falta, sem tornar isso obrigatório.
+Falha da ferramenta nunca aprova: o resultado é inconclusivo. Isso vale para o `mypy` ausente, para saída diferente de 0 e 1, para tempo esgotado, para JSON ilegível e para saída 1 sem nenhum erro lido. Vale também para a configuração que declara `plugins`: sem eles o `mypy` acusaria erros que o projeto não tem, então o `types` não mede (`the mypy settings in <arquivo> load plugins`). Como o `types` tem `on_inconclusive = "premise"` por padrão, a tentativa segue e a lacuna é declarada como suposição. O `forja doctor` avisa quando o `mypy` falta, sem tornar isso obrigatório.
 
 ### Limites
 
-- **A tentativa pode tentar esconder erro.** `# type: ignore` e `# mypy:` calam o `mypy`, que não tem opção para ignorá-los. O gate 1 (escopo) reprova a tentativa que acrescenta esses comentários, junto com `# noqa`, `# fmt: off`, `# pylint: disable`, `# nosec` e outros silenciadores. O que ele não vê, como uma opção de configuração que afrouxa o `mypy`, só a revisão do ramo pega. A configuração do repositório não vale para o `mypy`, então esse caminho não afeta a medição dele.
+- **A tentativa pode tentar esconder erro.** `# type: ignore` e `# mypy:` calam o `mypy`, que não tem opção para ignorá-los. O gate 1 (escopo) reprova a tentativa que acrescenta esses comentários, junto com `# noqa`, `# fmt: off`, `# pylint: disable`, `# nosec` e outros silenciadores. O que ele não vê, como uma opção de configuração que afrouxa o `mypy`, só a revisão do ramo pega. Os arquivos de configuração do `mypy` não são arquivos de produção, então o gate 1 não deixa o implementador mexer neles.
 - **Erro novo pode vir de outro arquivo.** Mudar a assinatura de uma função quebra quem a chama, e a catraca é por arquivo mudado.
 
 ## O que acontece ao falhar
