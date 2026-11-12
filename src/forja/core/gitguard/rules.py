@@ -66,6 +66,8 @@ READ_ONLY = frozenset(
         "ls-tree",
     }
 )
+# Options that make git start a program named by the caller.
+RUNS_A_PROGRAM = {"--upload-pack", "--exec", "--receive-pack", "--ext-diff"}
 WRITING = frozenset(
     {
         "init",
@@ -139,7 +141,16 @@ def _check_config(args: Sequence[str], command: Command) -> None:
     _refuse_flags(
         args,
         command,
-        {"--add", "--unset", "--unset-all", "--replace-all", "--edit", "-e"},
+        {
+            "--add",
+            "--unset",
+            "--unset-all",
+            "--replace-all",
+            "--remove-section",
+            "--rename-section",
+            "--edit",
+            "-e",
+        },
         "writes",
     )
 
@@ -187,6 +198,8 @@ def _check_notes(args: Sequence[str], command: Command) -> None:
     positionals = command.positionals
     if not positionals or positionals[0] not in {"add", "append", "show", "list"}:
         raise GitCommandRefused(args, "notes allows only add, append, show and list")
+    # a note under another ref would write where the branch rules do not look
+    _refuse_flags(args, command, {"--ref"}, "writes outside the notes of the commits")
 
 
 def _check_checkout(args: Sequence[str], command: Command) -> None:
@@ -199,6 +212,11 @@ def _check_switch(args: Sequence[str], command: Command) -> None:
 
 def _check_fetch(args: Sequence[str], command: Command) -> None:
     _refuse_flags(args, command, {"--prune", "-p", "--prune-tags", "--update-head-ok"}, "")
+    _refuse_flags(args, command, RUNS_A_PROGRAM | {"--refmap"}, "is not allowed")
+    for refspec in command.positionals[1:]:
+        if ":" in refspec or refspec.startswith("+"):
+            # ``<source>:<destination>`` writes a local ref, a protected branch included
+            raise GitCommandRefused(args, f"the refspec {refspec!r} writes a local ref")
 
 
 # "commit" has no entry: --amend is judged against the state of the branch by GuardedGit.
@@ -227,6 +245,7 @@ def check(args: Sequence[str]) -> Command:
 
     if sub in READ_ONLY:
         _refuse_flags(args, command, {"--output", "-o"}, "would write a file")
+        _refuse_flags(args, command, RUNS_A_PROGRAM, "runs a program")
         return command
 
     checker = _CHECKERS.get(sub)
