@@ -32,7 +32,13 @@ from forja.core.idempotency.git import Git
 from forja.core.ids import new_id
 from forja.core.isolation import IsolationLevel, IsolationRecord, SensitivePaths
 from forja.core.isolation.environment import install_environment
-from forja.core.locking import LockOwner, LockPolicy, acquire_repository_lock, repository_id
+from forja.core.locking import (
+    GitMutex,
+    LockOwner,
+    LockPolicy,
+    acquire_repository_lock,
+    repository_id,
+)
 from forja.core.locking.repository import HeldLock
 from forja.core.paths import forja_home, locks_dir, run_dir
 from forja.core.policy.config import EffectivePolicy, load_policy
@@ -87,6 +93,7 @@ GIT_ENVIRONMENT = (
 )  # fmt: skip
 NETWORK_PROBES_WITHOUT_A_PERSON = 60
 INSTALL_TIMEOUT = 600.0  # seconds for one venv or pip command
+GIT_MUTEX_TIMEOUT = 300.0  # seconds a git write waits for another task's git write
 FORJA_VERSION = "0.0.0"
 POLICY_VERSION = "0.0.0+default"
 IN_USER_ENVIRONMENT = Confirmation(
@@ -323,18 +330,19 @@ async def open_session(
         repo, executable=git_executable(), env=git_base_environment(env), timeout=60,
         log_dir=directory / "logs" / "git",
     )  # fmt: skip
-    lock = await acquire_repository_lock(
+    locks = (
         (base / "locks" / await repository_id(plain))
         if home
-        else locks_dir(await repository_id(plain), environ=env),
-        LockOwner.current(run_id),
-        LockPolicy.refuse(),
+        else locks_dir(await repository_id(plain), environ=env)
     )
+    lock = await acquire_repository_lock(locks, LockOwner.current(run_id), LockPolicy.refuse())
     try:
         if not resumed:
             config = redacted_config(config, Redactor(repo_policy(repo).redaction))
             confirm_run(log, config, isolation)
-        context = await _context(config, log, directory, base, env, plain, run_id, interactive)
+        context = await _context(
+            config, log, directory, base, env, plain, run_id, interactive, locks
+        )
     except BaseException:
         lock.release()
         log.close()
@@ -361,6 +369,7 @@ async def _context(
     plain: Git,
     run_id: str,
     interactive: bool,
+    locks: Path,
 ) -> RunContext:
     repo = Path(config.repo)
     policy = repo_policy(repo)
@@ -375,6 +384,9 @@ async def _context(
         protected=ProtectedBranches(
             frozenset({"main", "master", branch, *policy.protected_branches})
         ),
+        # every worktree shares one `.git`: tasks that run together must not write to it at once
+        mutex=GitMutex(locks),
+        mutex_timeout=GIT_MUTEX_TIMEOUT,
     )
     workspace = GitWorkspace(git, run_id=run_id, layout=Layout.for_run(base, run_id), repo=repo)
 

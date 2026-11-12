@@ -29,6 +29,10 @@ from forja.cli.session import (
     repo_python,
 )
 from forja.core.artifacts.models import Producer
+from forja.core.gitguard import GuardedGit
+from forja.core.locking import LockOwner, MutexTimeout
+from forja.core.locking.directory import release, try_acquire
+from forja.core.locking.mutex import GIT_MUTEX_NAME
 from forja.orchestrator.config import CreateRequest, FixRequest, RunConfig
 from tests.cli.test_main import git
 
@@ -379,3 +383,36 @@ def test_the_test_author_is_the_implementer_when_none_was_chosen(
         assert runner._executable == Path("claude")
     finally:
         close(session)
+
+
+def test_a_git_write_of_the_run_waits_for_the_mutex_of_the_repository(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built: list[GuardedGit] = []
+
+    class Recorded(GuardedGit):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            built.append(self)
+
+    monkeypatch.setattr(session_module, "GuardedGit", Recorded)
+    monkeypatch.setattr(session_module, "GIT_MUTEX_TIMEOUT", 0.2)
+
+    async def scenario() -> None:
+        session = await _open(config_for(repo), None, tmp_path / "home")
+        try:
+            (git_of_the_run,) = built
+            held = session.lock.directory.parent / GIT_MUTEX_NAME
+            other = LockOwner.current("another-task")
+            try_acquire(held, other)
+            try:
+                with pytest.raises(MutexTimeout):
+                    await git_of_the_run.run("branch", "forja/x/t1")
+                assert (await git_of_the_run.run("status", "--porcelain")).exit_code == 0
+            finally:
+                release(held, other)
+            assert (await git_of_the_run.run("branch", "forja/x/t1")).exit_code == 0
+        finally:
+            close(session)
+
+    asyncio.run(scenario())
