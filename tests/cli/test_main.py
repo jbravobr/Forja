@@ -356,6 +356,21 @@ def test_choosing_to_resume_opens_the_unfinished_run(
     assert opened == {"config": None, "run_id": "r1", "environ": environ, "interactive": True}
 
 
+def test_without_a_terminal_and_without_a_config_file_nobody_confirms_and_nothing_starts(
+    repo: Path, environ: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def never(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the run was opened with nobody to confirm it")
+
+    monkeypatch.setattr(door, "open_session", never)
+    monkeypatch.setattr(door, "missing_tools", lambda _environ, **_: [])
+    talk = Talk()
+    assert go(["refatorar", "--escopo", "src"], talk, environ) == 2
+    assert "Sem terminal não há quem confirme" in talk.text
+    assert "--config" in talk.text
+    assert not (Path(environ["FORJA_HOME"]) / "runs").exists()
+
+
 def test_a_run_from_a_config_file_opens_without_questions(
     repo: Path, environ: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

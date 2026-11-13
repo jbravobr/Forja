@@ -203,6 +203,11 @@ async def start(
         for line in prepared.summary:
             console.say(line)
         return 0
+    if args.config is None and automatic:
+        raise Refused(
+            "Sem terminal não há quem confirme. Rode `forja --config execucao.toml`, "
+            "ou num terminal. Nada foi alterado."
+        )
     if not confirmed(console, prepared, automatic=automatic):
         console.say("Cancelado. Nada foi alterado.")
         return 0

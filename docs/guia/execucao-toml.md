@@ -297,12 +297,11 @@ Tentativas, arquivos e linhas por tarefa não podem ser mudados pelo `execucao.t
 
 ## Modo CI
 
-O modo sem perguntas liga em dois casos:
-
-- `forja --config <arquivo>`: lê o `execucao.toml` e não pergunta nada, mesmo num terminal interativo. Assim a execução de CI e a mesma execução digitada à mão dão o mesmo resultado.
-- Sem terminal interativo (entrada ou saída redirecionada), mesmo sem `--config`.
+O modo sem perguntas liga com `forja --config <arquivo>`: a Forja lê o `execucao.toml` e não pergunta nada, mesmo num terminal interativo. Assim a execução de CI e a mesma execução digitada à mão dão o mesmo resultado.
 
 Nesse modo a Forja repassa o que tem a dizer e responde a cada pergunta com o valor padrão. Também não há a confirmação final "Confirma e começa?": a execução começa direto. `forja --plano` mostra o resumo e sai com código 0 sem começar.
+
+Sem terminal interativo (entrada ou saída redirecionada) e sem `--config`, a Forja também não pergunta nada, mas não começa: não há quem confirme. Ela recusa com "Sem terminal não há quem confirme" e sai com código 2, sem alterar nada. `forja --plano` continua valendo sem terminal.
 
 O valor padrão só serve quando não muda o resultado. Quando falta uma resposta sem padrão seguro, a Forja recusa a execução (código de saída 2) e diz onde está a resposta:
 
