@@ -183,6 +183,103 @@ def test_the_screen_is_refreshed_while_the_run_goes_on(tmp_path: Path) -> None:
     assert len(screen.updates) >= 3
 
 
+@dataclass
+class Held(ScriptedAgent):
+    """Does its work only after ``go``: the run is still going when the interface breaks."""
+
+    go: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def call(self, ctx: AttemptContext, operation_id: str, sink: Any) -> AgentResult:
+        await self.go.wait()
+        return await super().call(ctx, operation_id, sink)
+
+
+@dataclass
+class Breaking(Recorder):
+    """A screen that breaks in one of its three calls."""
+
+    where: str = ""
+    broke: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def _break(self, name: str) -> None:
+        if name == self.where:
+            self.broke.set()
+            raise RuntimeError(f"the screen broke in {name}")
+
+    def start(self, view: View) -> None:
+        self._break("start")
+        super().start(view)
+
+    def update(self, view: View) -> None:
+        self._break("update")
+        super().update(view)
+
+    def stop(self, view: View) -> None:
+        self._break("stop")
+        super().stop(view)
+
+
+class BrokenKeys:
+    def __init__(self, broke: asyncio.Event) -> None:
+        self._broke = broke
+
+    async def keys(self) -> AsyncIterator[str]:
+        self._broke.set()
+        raise RuntimeError("the keys broke")
+        yield ""
+
+    def close(self) -> None:
+        pass
+
+
+@pytest.mark.parametrize("where", ["start", "update", "stop"])
+def test_a_screen_that_breaks_does_not_take_the_run_with_it(tmp_path: Path, where: str) -> None:
+    world = MemoryWorld(tmp_path)
+    screen = Breaking(where=where)
+    agent = Held()
+    if where == "update":
+        agent.go = screen.broke
+    else:
+        agent.go.set()
+    session, _ = make_session(world, agent)
+
+    ended = asyncio.run(execute(cast(Session, session), screen, None, refresh=0.01))
+
+    assert not ended.interrupted
+    assert ended.outcome is not None
+    assert ended.outcome.exit_code is ExitCode.DELIVERED
+    trace = (world.run_dir / "interface.log").read_text(encoding="utf-8")
+    assert trace.count(f"RuntimeError: the screen broke in {where}") == 1
+    assert "Traceback" in trace
+    if where != "stop":
+        assert len(screen.stopped) == 1
+
+
+def test_keys_that_break_do_not_take_the_run_with_them(tmp_path: Path) -> None:
+    world = MemoryWorld(tmp_path)
+    agent = Held()
+    session, _ = make_session(world, agent)
+
+    ended = asyncio.run(
+        execute(cast(Session, session), Recorder(), cast(Any, BrokenKeys(agent.go)), refresh=0.01)
+    )
+
+    assert not ended.interrupted
+    assert ended.outcome is not None
+    assert ended.outcome.exit_code is ExitCode.DELIVERED
+    trace = (world.run_dir / "interface.log").read_text(encoding="utf-8")
+    assert "RuntimeError: the keys broke" in trace
+
+
+def test_a_run_with_a_sound_interface_writes_no_interface_log(tmp_path: Path) -> None:
+    world = MemoryWorld(tmp_path)
+    session, _ = make_session(world, ScriptedAgent())
+
+    asyncio.run(execute(cast(Session, session), Recorder(), None, refresh=0.01))
+
+    assert not (world.run_dir / "interface.log").exists()
+
+
 def test_a_paused_run_says_how_to_resume(tmp_path: Path) -> None:
     world = MemoryWorld(tmp_path)
     session, _ = make_session(world, ScriptedAgent())

@@ -8,6 +8,7 @@ because every event is already on disk and the next run settles whatever was lef
 
 import asyncio
 import contextlib
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -20,6 +21,7 @@ from forja.ui.theme import Theme, next_theme
 from forja.ui.view import View
 
 REFRESH_SECONDS = 0.25
+INTERFACE_FAILURE_NAME = "interface.log"  # the trace of a screen or a key reader that broke
 
 
 class Renderer(Protocol):
@@ -59,7 +61,7 @@ async def execute(
     helpers = [asyncio.create_task(_refresh(session, renderer, refresh))]
     if keys is not None:
         helpers.append(asyncio.create_task(_watch(keys, renderer, run, pressed, forced)))
-    renderer.start(session.view.snapshot())
+    _shown(session, lambda: renderer.start(session.view.snapshot()))
     try:
         await _wait(run, forced)
     except asyncio.CancelledError:
@@ -70,12 +72,32 @@ async def execute(
         for helper in helpers:
             helper.cancel()
         for helper in helpers:
-            with contextlib.suppress(asyncio.CancelledError):
+            try:
                 await helper
-        renderer.stop(session.view.snapshot())
+            except asyncio.CancelledError:
+                pass
+            except Exception as error:
+                _record_interface_failure(session, error)
+        _shown(session, lambda: renderer.stop(session.view.snapshot()))
     if run.cancelled() or pressed.is_set():
         return Ended(None, True)
     return Ended(run.result(), False)
+
+
+def _shown(session: Session, draw: Callable[[], None]) -> None:
+    """Draw on the screen; a screen that breaks is written down and the run goes on."""
+    try:
+        draw()
+    except Exception as error:
+        _record_interface_failure(session, error)
+
+
+def _record_interface_failure(session: Session, error: Exception) -> None:
+    """The trace of what broke the screen or the keys, beside the summary. Best effort."""
+    with contextlib.suppress(Exception):
+        trace = "".join(traceback.format_exception(error))
+        with (session.directory / INTERFACE_FAILURE_NAME).open("a", encoding="utf-8") as log:
+            log.write(trace)
 
 
 async def _wait(run: "asyncio.Task[Outcome]", forced: asyncio.Event) -> None:
