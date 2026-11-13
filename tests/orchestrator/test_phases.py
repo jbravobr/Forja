@@ -128,6 +128,7 @@ def test_the_commit_of_a_task_carries_the_agents_reason_and_the_runs_facts(
         "Attempt-Id": "t1-a1",
         "Agent": "fake-cli 1.0",
         "Policy-Version": "0.0.0+abc",
+        "Evidence-Id": "complexity",
     }
 
 

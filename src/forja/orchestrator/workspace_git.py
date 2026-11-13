@@ -14,12 +14,13 @@ Layout of a run:
   moves the branch and no command that moves refs by hand is needed.
 """
 
+import json
 import os
 import re
 import shutil
 import stat
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,12 @@ BODY_LINES = 20
 # What git reads as a trailer. The body is written by the agent, so a line like this in it could
 # add a Stage-Id or Task-Id that Forja never put there, and reconciliation would believe it.
 _TRAILER_LIKE = re.compile(r"^\s*[A-Za-z][A-Za-z0-9-]*\s*:")
+# Conventional Commits, with the types the commits of a stage have: type, optional scope, text.
+_CONVENTIONAL = re.compile(r"^(docs|feat|fix|refactor|style|test)(\([a-z0-9][a-z0-9-]*\))?: \S")
+_NOT_IN_A_TRAILER_NAME = re.compile(r"[^A-Za-z0-9]+")
+# Where git keeps the notes of the commits. Forja writes one for each stage, so a task that
+# commits while the agent of another runs moves this ref.
+NOTES_REF = "refs/notes/commits"
 HANDLED_OPERATIONS = frozenset(
     {
         "create_run_branch",
@@ -85,6 +92,10 @@ class IntegrationConflict(Exception):
 
 class NothingToRollBack(Exception):
     """The tip of the run branch is not the merge of this task."""
+
+
+class NotConventional(ValueError):
+    """The subject of a commit is not a Conventional Commits line."""
 
 
 # -- who the commits are from, and the settings every git command of a run shares ----------------
@@ -189,7 +200,7 @@ def others_work(
     def theirs(difference: Difference) -> bool:
         subject = difference.subject
         if difference.kind in _REF_KINDS:
-            if subject == run_branch:
+            if subject in (run_branch, NOTES_REF):
                 return True
             names = {f"refs/heads/{task_branch_name(run_id, other)}" for other in tasks()}
             return subject in names - {own_branch}
@@ -201,6 +212,44 @@ def others_work(
     return theirs
 
 
+def conventional(subject: str) -> str:
+    """``subject`` as it is, or ``NotConventional`` when it is not ``type(scope): text``."""
+    if not _CONVENTIONAL.match(subject):
+        raise NotConventional(f"{subject!r} is not a Conventional Commits subject")
+    return subject
+
+
+@dataclass(frozen=True)
+class StageFacts:
+    """What Forja knows of an approved stage: the checks that approved it, each number as the
+    base of the run had it and as the stage leaves it (``None`` for one not measured), and what
+    the agent said it had to guess."""
+
+    evidence: tuple[str, ...] = ()
+    metrics: tuple[tuple[str, float | None, float | None], ...] = ()
+    assumptions: tuple[str, ...] = ()
+
+    def trailers(self) -> tuple[tuple[str, str], ...]:
+        """One ``Evidence-Id`` for each check, one ``Metric-<name>`` for each number that
+        changed, one ``Assumption`` for each guess; each value on a single line."""
+        found = [("Evidence-Id", check) for check in self.evidence]
+        for name, before, after in self.metrics:
+            if before is not None and after is not None and before != after:
+                key = _NOT_IN_A_TRAILER_NAME.sub("-", name).strip("-")
+                found.append((f"Metric-{key}", f"{before:g} -> {after:g}"))
+        guesses = (" ".join(statement.split()) for statement in self.assumptions)
+        found += [("Assumption", guess) for guess in guesses if guess]
+        return tuple(found)
+
+    def note(self) -> str:
+        """Every number, changed or not, and the checks, as the git note of the commit; empty
+        when nothing was measured."""
+        if not self.metrics:
+            return ""
+        numbers = {name: {"before": b, "after": a} for name, b, a in self.metrics}
+        return json.dumps({"gates_passed": [*self.evidence], "metrics": numbers}, indent=2)
+
+
 @dataclass(frozen=True)
 class CommitMessage:
     """Subject from the task, reason from the agent, facts from Forja as trailers."""
@@ -209,6 +258,21 @@ class CommitMessage:
     body: str
     agent: str
     policy_version: str
+    facts: StageFacts = field(default_factory=StageFacts)
+
+    def trailers(
+        self, task_id: str, attempt_id: str, *stage: tuple[str, str]
+    ) -> tuple[tuple[str, str], ...]:
+        """The trailers of the commit, in the order they are written; ``stage`` is the
+        ``Stage-Id`` of the commit that says the stage is done."""
+        return (
+            ("Task-Id", task_id),
+            *stage,
+            ("Attempt-Id", attempt_id),
+            ("Agent", self.agent),
+            ("Policy-Version", self.policy_version),
+            *self.facts.trailers(),
+        )
 
     @classmethod
     def refactor(
@@ -221,7 +285,7 @@ class CommitMessage:
         cls, kind: str, intent: str, reason: str, *, agent: str, policy_version: str
     ) -> "CommitMessage":
         """``kind`` is the conventional-commit type: refactor, fix or test."""
-        subject = f"{kind}: {' '.join(intent.split())}"[:SUBJECT_LIMIT].rstrip()
+        subject = conventional(f"{kind}: {' '.join(intent.split())}"[:SUBJECT_LIMIT].rstrip())
         lines = reason.strip().splitlines()[:BODY_LINES]
         body = "\n".join(_defuse(line.rstrip()) for line in lines)
         return cls(subject, body.strip(), agent, policy_version)
@@ -355,13 +419,7 @@ class GitWorkspace:
             args = ["commit", "-m", note.subject]
             if note.body:
                 args += ["-m", note.body]
-            for key, value in (
-                ("Task-Id", task_id),
-                *trailers,
-                ("Attempt-Id", attempt_id),
-                ("Agent", note.agent),
-                ("Policy-Version", note.policy_version),
-            ):
+            for key, value in note.trailers(task_id, attempt_id, *trailers):
                 args += ["--trailer", f"{key}: {value}"]
             return args
 
@@ -378,6 +436,9 @@ class GitWorkspace:
                 await git.lines(*arguments(apart_message))
                 await stage_all(git)
             await git.lines(*arguments(message, ("Stage-Id", stage_id)))
+            detail = message.facts.note()
+            if detail:
+                await git.lines("notes", "add", "-f", "-m", detail, "HEAD")
 
         return Step.plain({"task_branch": branch, "stage_id": stage_id}, run)
 

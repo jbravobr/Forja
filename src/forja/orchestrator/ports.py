@@ -155,6 +155,10 @@ class Measurer(Protocol):
 
     async def documents(self, ctx: AttemptContext) -> list[str]: ...
 
+    async def stage_metrics(
+        self, ctx: AttemptContext, sinks: SinkFactory
+    ) -> Sequence[tuple[str, float | None, float | None]]: ...
+
     async def change_record(
         self,
         ctx: AttemptContext,

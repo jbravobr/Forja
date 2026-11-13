@@ -186,16 +186,12 @@ class MemoryWorkspace:
                 tree,
                 note.subject,
                 body=note.body,
-                trailers=(
-                    ("Task-Id", task_id),
-                    *trailers,
-                    ("Attempt-Id", attempt_id),
-                    ("Agent", note.agent),
-                    ("Policy-Version", note.policy_version),
-                ),
+                trailers=note.trailers(task_id, attempt_id, *trailers),
                 parents=(tip.sha,),
             )
             self.repo.advance(branch, made)
+            if trailers and note.facts.note():  # only the commit that ends the stage has one
+                self.repo.notes[made.sha] = note.facts.note()
 
         async def run() -> None:
             tip = self.repo.tip(branch)

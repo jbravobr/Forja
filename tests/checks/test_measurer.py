@@ -562,6 +562,37 @@ def test_the_numbers_count_what_is_there(scene: Scene) -> None:
     }
 
 
+def test_the_numbers_of_a_stage_are_the_base_of_the_run_beside_the_worktree_of_the_attempt(
+    scene: Scene,
+) -> None:
+    base_of(scene)  # writes what the run started from
+    scene.write("src/sample/mod.py", MOD + "\n\nimport os  # LINT:F401\n\n" + deep("branchy", 6))
+
+    numbers = asyncio.run(scene.measurer.stage_metrics(scene.context(), scene.recorder.sinks))
+
+    assert numbers == (
+        ("dependency_cycles", 0.0, 0.0),
+        ("dependency_edges", 0.0, 0.0),
+        ("functions", 2.0, 3.0),
+        ("lint_violations", 0.0, 1.0),
+        ("max_ccn", 1.0, 7.0),
+        ("max_distance", 1.0, 1.0),
+        ("tests", 1.0, None),  # counting the tests would take running them again
+        ("unstable_tests", 0.0, None),
+    )
+
+
+def test_a_run_whose_base_was_not_measured_still_says_what_the_stage_has(scene: Scene) -> None:
+    numbers = asyncio.run(scene.measurer.stage_metrics(scene.context(), scene.recorder.sinks))
+
+    assert dict((name, (before, after)) for name, before, after in numbers) == {
+        "lint_violations": (None, 0.0),
+        "max_ccn": (None, 1.0),
+        "functions": (None, 2.0),
+        **{name: (None, value) for name, value in GRAPH.items()},
+    }
+
+
 def test_a_base_whose_tests_fail_is_not_green(scene: Scene) -> None:
     scene.write("src/sample/mod.py", MOD + "\n# BREAKS\n")
 

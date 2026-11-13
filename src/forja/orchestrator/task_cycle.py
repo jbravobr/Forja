@@ -50,7 +50,7 @@ from forja.orchestrator.ports import (
     TaskInfo,
 )
 from forja.orchestrator.summary import DOCUMENTATION, PREMISE, TRACE
-from forja.orchestrator.workspace_git import CommitMessage, IntegrationConflict
+from forja.orchestrator.workspace_git import CommitMessage, IntegrationConflict, StageFacts
 
 UNTESTED_LIMIT = 200
 TRACE_BYTES = MAX_PAYLOAD_BYTES - 512  # the margin holds the task id and the key of the event
@@ -699,8 +699,26 @@ class TaskCycle:
             policy_version=run.config.policy_version,
         )
 
-    async def _commit_attempt(self, info: TaskInfo, attempt: str) -> None:
-        """Also what keeps the work of an attempt sent back to the test author, so it sees it."""
+    async def _stage_facts(self, ctx: AttemptContext) -> StageFacts:
+        """What the commit of an approved attempt says besides the reason: the checks that
+        approved it, the numbers before and after, and what the agent said it had to guess."""
+        run = self._ctx
+        approved = self._state.transition_payload(
+            Level.ATTEMPT, ctx.attempt_id, AttemptState.APPROVED
+        )
+        passed = approved.get("gates_passed") if approved else None
+        output = run.runner(ctx.task.role).declared_output(ctx)
+        return StageFacts(
+            evidence=tuple(str(gate) for gate in passed) if isinstance(passed, list) else (),
+            metrics=tuple(await run.measurer.stage_metrics(ctx, run.sinks)),
+            assumptions=tuple(assumption.statement for assumption in output.assumptions),
+        )
+
+    async def _commit_attempt(
+        self, info: TaskInfo, attempt: str, facts: StageFacts | None = None
+    ) -> None:
+        """Also what keeps the work of an attempt sent back to the test author, so it sees it;
+        that one was not approved and has no ``facts``."""
         apart: list[str] = []
         if info.role is Producer.DOCUMENTER:  # the README gets a commit of its own
             worktree = self._ctx.workspace.attempt_worktree(attempt)
@@ -714,7 +732,7 @@ class TaskCycle:
                 info.task_id,
                 info.stage_id,
                 attempt,
-                self._commit_message(info, attempt),
+                replace(self._commit_message(info, attempt), facts=facts or StageFacts()),
                 apart,
                 self._commit_message(info, attempt, "docs(readme)") if apart else None,
             ),
@@ -724,7 +742,7 @@ class TaskCycle:
         journal = self._journal
         attempt, info = ctx.attempt_id, ctx.task
         if info.role not in NO_COMMIT:  # these roles change nothing: no commit
-            await self._commit_attempt(info, attempt)
+            await self._commit_attempt(info, attempt, await self._stage_facts(ctx))
         journal.enter(Level.ATTEMPT, attempt, AttemptState.COMMITTED)
         journal.enter(
             Level.STAGE,

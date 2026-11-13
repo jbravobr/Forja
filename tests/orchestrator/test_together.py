@@ -166,6 +166,9 @@ def test_the_branches_and_worktrees_forja_keeps_for_other_tasks_are_not_the_agen
     ignore = theirs(tmp_path)
     assert ignore(difference("ref_added", "refs/heads/forja/r1/t2"))  # type: ignore[operator]
     assert ignore(difference("ref_moved", "refs/heads/forja-run/r1"))  # type: ignore[operator]
+    # the note of a commit another task made while this agent ran
+    assert ignore(difference("ref_added", "refs/notes/commits"))  # type: ignore[operator]
+    assert ignore(difference("ref_moved", "refs/notes/commits"))  # type: ignore[operator]
     assert ignore(difference("worktree_added", str(tmp_path / "wt" / "t2-a1")))  # type: ignore[operator]
     assert ignore(difference("index_changed", str(tmp_path / "wt" / "run")))  # type: ignore[operator]
 

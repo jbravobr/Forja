@@ -4,6 +4,7 @@ Whatever one does the other must do, because the fast tests of the orchestrator 
 """
 
 import asyncio
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,11 +17,13 @@ from forja.core.idempotency import Decision, ReconciliationError, task_branch_na
 from forja.core.states import Level
 from forja.orchestrator.operations import Step
 from forja.orchestrator.workspace_git import (
+    NOTES_REF,
     CommitMessage,
     IntegrationConflict,
     Layout,
     NothingToCommit,
     NothingToRollBack,
+    StageFacts,
     workcopy_path,
 )
 from forja.testing import MemoryRepo, MemoryWorkspace
@@ -46,6 +49,7 @@ class Backend:
     branches: Callable[[], set[str]]
     make_branch: Callable[[str], None]
     tip: Callable[[str], str]
+    notes: Callable[[], dict[str, str]]  # the commit -> its note
 
 
 def memory_backend(root: Path) -> Backend:
@@ -69,6 +73,7 @@ def memory_backend(root: Path) -> Backend:
         lambda: set(repo.branches),
         lambda name: repo.create_branch(name),
         lambda branch: repo.branches[branch],
+        lambda: dict(repo.notes),
     )
 
 
@@ -92,6 +97,12 @@ def git_backend(root: Path, template: Path) -> Backend:
                 found.setdefault(key, []).append(value)
         return found
 
+    def notes() -> dict[str, str]:
+        if not repo.sh("for-each-ref", NOTES_REF):
+            return {}
+        noted = [line.split()[1] for line in repo.sh("notes", "list").splitlines()]
+        return {commit: repo.sh("notes", "show", commit) for commit in noted}
+
     return Backend(
         "git",
         workspace,
@@ -105,6 +116,7 @@ def git_backend(root: Path, template: Path) -> Backend:
         ),
         lambda name: _ignore(repo.sh("branch", name)),
         lambda branch: repo.sh("rev-parse", branch),
+        notes,
     )
 
 
@@ -227,6 +239,63 @@ def test_a_stage_is_a_commit_on_the_task_branch_with_the_facts_as_trailers(
     }
     assert backend.read_tree(branch) == {"base.txt": "base", "src/a.py": "one"}
     assert backend.read_tree(backend.workspace.run_branch) == {"base.txt": "base"}
+
+
+FACTS = StageFacts(
+    evidence=("scope", "complexity"),
+    metrics=(("lint_violations", 2.0, 2.0), ("max_ccn", 14.0, 9.0), ("tests", 3.0, None)),
+    assumptions=("the parser is only\ncalled from the CLI",),
+)
+
+
+def stage_with_facts(b: Backend) -> str:
+    """The branch of a task whose stage was committed with ``FACTS``."""
+    start(b)
+    ws = b.workspace
+    go(ws.create_task_branch("t1"))
+    go(ws.create_attempt_worktree("t1", "t1-a1"))
+    (ws.attempt_worktree("t1-a1") / "a.py").write_text("one", encoding="utf-8")
+    message = CommitMessage("refactor: make it simpler", "", "fake-cli 1.0", "0.0.0+abc", FACTS)
+    go(ws.commit_stage("t1", "t1-s", "t1-a1", message))
+    return task_branch_name(RUN, "t1")
+
+
+def test_what_forja_measured_of_the_stage_goes_after_the_other_trailers(backend: Backend) -> None:
+    branch = stage_with_facts(backend)
+
+    assert backend.tip_trailers(branch) == {
+        "Task-Id": ["t1"],
+        "Stage-Id": ["t1-s"],
+        "Attempt-Id": ["t1-a1"],
+        "Agent": ["fake-cli 1.0"],
+        "Policy-Version": ["0.0.0+abc"],
+        "Evidence-Id": ["scope", "complexity"],
+        "Metric-max-ccn": ["14 -> 9"],
+        "Assumption": ["the parser is only called from the CLI"],
+    }
+
+
+def test_every_number_of_the_stage_is_in_the_note_of_its_commit(backend: Backend) -> None:
+    branch = stage_with_facts(backend)
+
+    notes = backend.notes()
+    assert list(notes) == [backend.tip(branch)]
+    assert json.loads(notes[backend.tip(branch)]) == {
+        "gates_passed": ["scope", "complexity"],
+        "metrics": {
+            "lint_violations": {"before": 2.0, "after": 2.0},
+            "max_ccn": {"before": 14.0, "after": 9.0},
+            "tests": {"before": 3.0, "after": None},
+        },
+    }
+
+
+def test_a_stage_nothing_was_measured_of_has_no_note(backend: Backend) -> None:
+    start(backend)
+
+    task(backend, "t1", "t1-a1", {"src/a.py": "one"})
+
+    assert backend.notes() == {}
 
 
 def test_an_attempt_that_changed_nothing_has_nothing_to_commit(backend: Backend) -> None:

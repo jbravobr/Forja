@@ -113,6 +113,12 @@ def test_a_good_change_goes_through_every_gate_and_is_delivered(world: World) ->
     assert log.state.state_of(Level.TASK, "t1") is TaskState.INTEGRATED
     tree = world.repo.sh("show", f"{world.workspace.run_branch}:src/sample/mod.py")
     assert "def sub" in tree
+    branch = world.workspace.run_branch
+    stage = world.repo.sh("log", "-1", "--format=%H", "--grep=Stage-Id: t1-s", branch)
+    trailers = world.repo.sh("log", "-1", "--format=%(trailers:only,unfold)", stage)
+    assert "Evidence-Id: scope" in trailers.splitlines()
+    assert "Metric-functions: 2 -> 3" in trailers.splitlines()
+    assert '"functions": {' in world.repo.sh("notes", "show", stage)
 
 
 def test_work_the_formatter_would_change_is_formatted_and_committed_in_the_same_attempt(

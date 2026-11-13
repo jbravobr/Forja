@@ -33,6 +33,7 @@ class MemoryRepo:
     commits: dict[str, MemoryCommit] = field(default_factory=dict)
     branches: dict[str, str] = field(default_factory=dict)
     worktrees: dict[str, str] = field(default_factory=dict)  # normalized path -> head at creation
+    notes: dict[str, str] = field(default_factory=dict)  # sha -> the note of the commit
 
     def __post_init__(self) -> None:
         first = self.commit(self.files, "base", parents=())

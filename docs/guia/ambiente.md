@@ -123,12 +123,34 @@ REDUCE_MOTION=1 forja refatorar         # sem animação
 | autor dos commits | `Forja (<cli>)`, e-mail `forja@localhost` |
 | `docs/mudancas/<tarefa>.md` | registro de mudança da tarefa, no mesmo commit |
 | `docs/mudancas/<tarefa>-diario.md` | diário de bordo da tarefa; veja `diario-de-bordo.md` |
+| `refs/notes/commits` | uma nota do git em cada commit de etapa, com as métricas |
 
 A Forja nunca faz push e nunca altera a sua branch. Para ver o que ela entregou:
 
 ```bash
 git log --oneline forja-run/<id>
 ```
+
+### O que cada commit de etapa diz
+
+O assunto segue Conventional Commits (`refactor:`, `fix:`, `feat:`, `test:`, `docs:`, `style:`). O corpo é o motivo que o agente deu. Os trailers são escritos pela Forja:
+
+| Trailer | Conteúdo |
+| --- | --- |
+| `Task-Id`, `Stage-Id`, `Attempt-Id` | a tarefa, a etapa e a tentativa |
+| `Agent` | a CLI e a versão |
+| `Policy-Version` | a versão das políticas |
+| `Evidence-Id` | um para cada check que aprovou a tentativa |
+| `Metric-<nome>` | `<antes> -> <depois>`, só para a métrica que mudou; "antes" é a base da execução |
+| `Assumption` | um para cada premissa que o agente declarou |
+
+A nota do commit traz, em JSON, todas as métricas, mudadas ou não, e os checks:
+
+```bash
+git notes show <commit>
+```
+
+As notas são locais como a branch. `git push` não as leva; quem quiser publicá-las roda `git push <remoto> refs/notes/commits`. Squash e rebase criam commits novos, sem as notas dos antigos.
 
 ### Cópia de trabalho do agente
 

@@ -119,6 +119,7 @@ ALLOWED = [
     ["remote", "-v"],
     ["remote", "get-url", "origin"],
     ["notes", "add", "-m", "metrics"],
+    ["notes", "add", "-f", "-m", "metrics", "HEAD"],
     ["notes", "show", "HEAD"],
     ["init", "-b", "main"],
     ["checkout", "-b", "x"],

@@ -92,6 +92,7 @@ class ScriptedMeasurer:
     expected: list[Expectations | None] = field(default_factory=list)
     metrics: Mapping[str, float] = field(default_factory=lambda: {"complexity": 12.0})
     formatted: bool = True
+    stage_numbers: Sequence[tuple[str, float | None, float | None]] = ()
 
     async def format_worktree(self, worktree: Path) -> None:
         if self.formatted:
@@ -121,6 +122,11 @@ class ScriptedMeasurer:
 
     async def documents(self, ctx: AttemptContext) -> list[str]:
         return list(getattr(self, "documented", []))
+
+    async def stage_metrics(
+        self, ctx: AttemptContext, sinks: SinkFactory
+    ) -> Sequence[tuple[str, float | None, float | None]]:
+        return tuple(self.stage_numbers)
 
     async def change_record(
         self,

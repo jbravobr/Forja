@@ -455,6 +455,19 @@ class PipelineMeasurer:
         except (OSError, ValueError, TypeError, AttributeError):
             return {}
 
+    async def stage_metrics(
+        self, ctx: AttemptContext, sinks: SinkFactory
+    ) -> tuple[tuple[str, float | None, float | None], ...]:
+        """Each number as the base of the run had it and as the attempt's worktree has it, for
+        the trailers and the note of the commit. Only the ones that need no test run are taken
+        again; ``None`` stands for a number one of the two sides does not have."""
+        before = self._read_base_metrics()
+        tools = self._tools(sinks, Level.ATTEMPT, ctx.attempt_id)
+        after = await self._static_metrics(tools, ctx.worktree, self._active(ctx.worktree))
+        return tuple(
+            (name, before.get(name), after.get(name)) for name in sorted(before.keys() | after)
+        )
+
     async def change_record(
         self,
         ctx: AttemptContext,
