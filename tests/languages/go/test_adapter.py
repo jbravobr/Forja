@@ -317,3 +317,14 @@ def test_the_real_golangci_lint_report_is_counted_and_a_typecheck_failure_is_not
 
     assert facts(issues) == [("lint.errcheck", "l.go", 1), ("lint.ineffassign", "l.go", 1)]
     assert isinstance(broken, Unparseable)
+
+
+def test_without_golangci_lint_the_lint_cannot_be_measured_and_everything_else_can(
+    project: Path,
+) -> None:
+    assert ADAPTER.unmeasurable(Operation.LINT, project) == (
+        "golangci-lint is not installed (forja instalar installs it)"
+    )
+    for operation in (Operation.FORMAT, Operation.LINT_FIX, Operation.BUILD, Operation.TEST):
+        assert ADAPTER.unmeasurable(operation, project) is None
+    assert LINTING.unmeasurable(Operation.LINT, project) is None

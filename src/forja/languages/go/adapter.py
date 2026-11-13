@@ -3,7 +3,8 @@
 
 It only describes commands and reads their output; the core runs them. Go has no lint tool of its
 own that the toolchain ships, so without ``golangci_lint`` the lint operations are not supported
-and nothing pretends otherwise; ``forja doctor`` says so.
+and nothing pretends otherwise: the adapter says the lint cannot be measured (``unmeasurable``),
+which the lint check answers as inconclusive, and ``forja doctor`` says the tool is missing.
 """
 
 from collections.abc import Mapping
@@ -79,7 +80,7 @@ def _packages(files: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def find_golangci_lint(environ: Mapping[str, str] | None = None) -> tuple[str, ...] | None:
-    """The golangci-lint on the PATH, or ``None``: it is not installed by Forja."""
+    """The golangci-lint on the PATH, or ``None`` when there is none."""
     path = (environ or {}).get("PATH")
     found = locate_in_path("golangci-lint", path)
     return (str(found),) if found else None
@@ -122,6 +123,14 @@ class GoAdapter:
         """The packages a manifest declares; ``None`` when ``path`` is not one of this
         language's manifests, ``ValueError`` when it is one that cannot be read."""
         return declared_dependencies(path, text)
+
+    def unmeasurable(self, operation: Operation, root: Path) -> str | None:
+        """Why ``operation`` cannot measure the project at ``root``, or ``None`` when it can.
+        The lint of a Go project is golangci-lint, which the Forja installs: without it the lint
+        was not run, which is not the same as the code having no violation."""
+        if operation is Operation.LINT and self._lint is None:
+            return "golangci-lint is not installed (forja instalar installs it)"
+        return None
 
     def classify(self, path: str) -> FileClass | None:
         parts = path.replace("\\", "/").split("/")

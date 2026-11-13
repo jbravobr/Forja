@@ -145,6 +145,7 @@ class LintCheck:
     name: str = "lint"  # the name of its tool runs and the family of its measurements
     noun: str = "violation"
     tool: str = "linter"
+    unmeasurable: InconclusiveReason = InconclusiveReason.TOOL_FAILED  # why, when refused
 
     async def evaluate(self, data: GateInput) -> GateResult:
         return await decided(self._judge(data))
@@ -153,6 +154,7 @@ class LintCheck:
         files = self.changes.current(owned_by(self.projects))
         if not files:
             return Approved()
+        self._refused(files)
         findings: list[Finding] = []
         offered = False
         for adapter, own in by_adapter(self.projects, files):
@@ -185,6 +187,18 @@ class LintCheck:
         if not offered:
             return NotApplicable(missing_capability=self.operation.value)
         return rejected(findings) if findings else Approved()
+
+    def _refused(self, files: tuple[str, ...]) -> None:
+        """An adapter may say it cannot measure a project the way the project is meant to be
+        measured (its linter is not installed, its settings load plugins the Forja does not
+        run). That is not a language without the operation: the answer is inconclusive, never
+        a pass and never a count."""
+        for adapter, _ in by_adapter(self.projects, files):
+            ask = getattr(adapter.inner, "unmeasurable", None)
+            why = ask(self.operation, adapter.directory(self.worktree)) if callable(ask) else None
+            if why:
+                detail = f"{self.name}: {why}"
+                raise Undecided(Inconclusive(reason=self.unmeasurable, detail=detail))
 
     def _origin(self, path: str) -> str:
         """Where the file was before this attempt: its old name if it was renamed."""
@@ -237,20 +251,5 @@ class TypesCheck(LintCheck):
     name: str = "types"
     noun: str = "error"
     tool: str = "type checker"
-
-    async def _judge(self, data: GateInput) -> GateResult:
-        """An adapter may say it cannot measure a project the way the project asks (its settings
-        load plugins the Forja does not run): the errors it would count are not the project's,
-        so the answer is inconclusive, never the count."""
-        files = self.changes.current(owned_by(self.projects))
-        for adapter, _ in by_adapter(self.projects, files):
-            ask = getattr(adapter.inner, "unmeasurable", None)
-            why = ask(self.operation, adapter.directory(self.worktree)) if callable(ask) else None
-            if why:
-                raise Undecided(
-                    Inconclusive(
-                        reason=InconclusiveReason.UNSUPPORTED_CONSTRUCT,
-                        detail=f"{self.name}: {why}",
-                    )
-                )
-        return await super()._judge(data)
+    # settings that load plugins: the errors counted without them are not the project's
+    unmeasurable: InconclusiveReason = InconclusiveReason.UNSUPPORTED_CONSTRUCT

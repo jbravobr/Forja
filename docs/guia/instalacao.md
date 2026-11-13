@@ -66,7 +66,7 @@ O `doctor` só lê e diz o que falta; não instala nada. Cada item sai numa linh
 - Quando a ferramenta foi encontrada na pasta de ferramentas da Forja, o detalhe diz `instalado pela Forja` e mostra o caminho; quando veio do sistema, diz `no PATH`.
 - Sempre aparecem: `git`, `ruff`, `lizard`, `gitleaks`, `jscpd`, `disco` (espaço livre) e a CLI do agente. Esta última passa por uma prova de vida: a Forja pede à CLI uma tarefa pequena de teste, então a CLI precisa estar instalada e com login feito.
 - Dentro de um repositório entram também `repositório limpo` e, conforme as linguagens detectadas, `pytest no repositório` e `mypy` (Python), `go` e `golangci-lint`, `node`, `dotnet`, `java` com `maven` ou `gradle`. O `semgrep` entra com `--semgrep-config` ou quando o repositório tem `.semgrep.yml` ou `.semgrep/`.
-- `mypy`, `golangci-lint` e as CLIs de agente além da escolhida são opcionais: aparecem, mas não contam para o resultado.
+- `mypy`, `golangci-lint` e as CLIs de agente além da escolhida são opcionais: aparecem, mas não contam para o resultado. Sem o `golangci-lint`, o `lint` de um projeto Go fica inconclusivo, e com a política padrão a tarefa para (veja `gates/tipos.md`).
 - A saída termina em `Tudo pronto.` ou em `N item(ns) a resolver.`
 
 ![Verificação do ambiente no terminal](imagens/terminal-doctor.png)

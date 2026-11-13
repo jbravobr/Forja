@@ -36,13 +36,15 @@ O lint usa catraca: reprova só a violação nova. A Forja conta as violações 
 | --- | --- | --- |
 | Python | `ruff check` | sempre |
 | TypeScript | `eslint` | o `package.json` depende de `eslint` |
-| Go | `golangci-lint run`, sobre os pacotes dos arquivos mudados | o `golangci-lint` está no `PATH` (a Forja não o instala) |
+| Go | `golangci-lint run`, sobre os pacotes dos arquivos mudados | sempre; sem o `golangci-lint` no `PATH` o resultado é inconclusivo (`forja instalar` o instala) |
 | Java | Checkstyle, PMD e SpotBugs | o `pom.xml` ou o `build.gradle` declara o plugin de cada um; só os declarados rodam |
 | C# | `dotnet format analyzers --verify-no-changes` | há uma solução ou um projeto único na raiz |
 
 O achado é `N new <regra> violation(s)`, com o arquivo, a contagem medida e a contagem da base.
 
 Dois detalhes do Python: o `ruff` roda com `--ignore-noqa`, então um `# noqa` na tentativa não cala o lint; e o `ruff` usado é o da própria Forja, que lê a configuração de lint do repositório (`pyproject.toml`, `ruff.toml`, `.ruff.toml`).
+
+Em Go, a falta do `golangci-lint` não é "não aplicável": o lint não rodou, e o resultado é inconclusivo (`golangci-lint is not installed`). Com o `lint` bloqueante e `on_inconclusive = "block"`, a tarefa para até a ferramenta ser instalada.
 
 Se o linter roda nos arquivos novos mas não roda na versão anterior deles, não há com o que comparar. O resultado é inconclusivo (`the <linguagem> linter cannot run on the old files`), nunca aprovado.
 

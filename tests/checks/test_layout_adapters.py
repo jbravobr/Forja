@@ -19,6 +19,7 @@ from forja.core.gates import (
     Rejected,
 )
 from forja.core.states import ExecutionState, Level
+from forja.languages.go import GoAdapter
 from tests.checks.support import RUN, Stub, draft, projects_of, sinks
 from tests.core.events.support import FakeClock
 
@@ -250,3 +251,16 @@ def test_the_refusal_is_asked_about_types_only_and_about_the_projects_with_chang
 
     types = TypesCheck(tools, projects, tmp_path, changes_of("b.go"), {"b.go": "y\n"})
     assert isinstance(asyncio.run(types.evaluate(data())), Rejected)
+
+
+def test_a_project_whose_linter_is_not_installed_makes_the_lint_inconclusive_not_a_pass(
+    tools: Tools, tmp_path: Path
+) -> None:
+    go = GoAdapter(go=("g",), gofmt=("gf",))  # no golangci-lint
+    check = LintCheck(tools, projects_of(go), tmp_path, changes_of("pkg/a.go"), {"pkg/a.go": "y"})
+
+    result = asyncio.run(check.evaluate(data()))
+
+    assert isinstance(result, Inconclusive)
+    assert result.reason is InconclusiveReason.TOOL_FAILED
+    assert result.detail == "lint: golangci-lint is not installed (forja instalar installs it)"
