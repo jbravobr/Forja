@@ -348,3 +348,53 @@ Só os três de `keep_worst` são de código escrito nesta leva. Os outros 21 es
 - **Itens 15 a 20 e 31 a 40** (o 30 adiado), e os restos dos itens 2 e 6.
 - **Verificação que falta:** a da lista acima.
 - **Decisões do dono ainda abertas:** ADR 0041 (item 24); item 29; as três do item 5; a observação sobre a etapa de caracterização (item 12).
+
+## 13/11/2026 — item 14: o commit da etapa diz o que a Forja mediu, e as métricas vão numa nota
+
+### Decisões do dono
+
+- **`Evidence-Id`:** um trailer para cada check que aprovou a tentativa (o `gates_passed` do evento de aprovação). A execução não grava registros de evidência: `EvidenceStore` e `GateDecisionStore` existem em `core` e nada os usa. Ligá-los ficou fora do item.
+- **Métricas:** trailer `Metric-<nome>: <antes> -> <depois>` só para a métrica que mudou em relação à base da execução; a tabela inteira vai em JSON na nota do commit.
+
+### O que foi feito
+
+| Mudança | Arquivos | Teste novo | Commit |
+| --- | --- | --- | --- |
+| `StageFacts` leva os fatos da etapa aprovada: checks, métricas (antes, depois) e premissas. `CommitMessage.trailers` escreve os trailers numa ordem só, e os dois workspaces a usam. Depois de `Policy-Version` vêm `Evidence-Id`, `Metric-<nome>` e `Assumption`. | `orchestrator/workspace_git.py`, `testing/workspace.py` | `tests/orchestrator/test_commit_facts.py` (40 casos), três cenários em `test_workspace_contract.py`, nos dois workspaces | `2808d03` |
+| Nota do git no commit que fecha a etapa (`git notes add -f -m <json> HEAD`), com todas as métricas, mudadas ou não, e os checks. Sem métrica medida não há nota. `MemoryRepo.notes` faz o mesmo em memória. | `orchestrator/workspace_git.py`, `testing/repo.py`, `testing/workspace.py` | os mesmos; uma linha em `tests/core/gitguard/test_rules.py` | `2808d03` |
+| `PipelineMeasurer.stage_metrics`: cada métrica como a base da execução a tinha (`base-metrics.json`) e como a worktree da tentativa a tem. Só as que não pedem rodar testes são medidas de novo. | `orchestrator/measurer.py`, `orchestrator/ports.py` | dois em `tests/checks/test_measurer.py`; três linhas no teste `slow` de `test_real_run.py` | `2808d03` |
+| O ciclo monta os fatos só na tentativa aprovada (`_stage_facts`). O commit que guarda trabalho reprovado para o autor de testes e o commit à parte do README ficam sem eles. | `orchestrator/task_cycle.py` | quatro em `test_commit_facts.py` | `2808d03` |
+| Conventional Commits: `conventional()` recusa assunto fora de `tipo(escopo): texto`, com os tipos da Especificação (`docs`, `feat`, `fix`, `refactor`, `style`, `test`). `CommitMessage.of` passa por ela. | `orchestrator/workspace_git.py` | 24 casos em `test_commit_facts.py` | `2808d03` |
+| Com tarefas em paralelo, a guarda de git deixa de contar `refs/notes/commits` como obra do agente: a nota de uma tarefa é escrita enquanto o agente de outra roda. | `orchestrator/workspace_git.py` | duas linhas em `test_together.py` | `2808d03` |
+| Guia: o que cada commit de etapa diz e como ler a nota. | `docs/guia/ambiente.md` | nenhum | `2808d03` |
+
+### Conclusões
+
+- **O "antes" é a base da execução, não o commit pai.** É o único "antes" que a Forja guarda. Na segunda tarefa de uma execução, o trailer mostra a soma do que as tarefas já integradas e esta mudaram.
+- **`tests` e `unstable_tests` saem na nota com "depois" nulo.** Contar os testes pede rodá-los de novo; a nota diz o que foi medido e não inventa o resto. Métrica com um lado nulo não vira trailer.
+- **Custo:** uma medição de lint, complexidade e grafo por commit de etapa, a mesma que o registro de mudança já fazia para o documentador.
+- **O nome da métrica vira nome de trailer** trocando o que não é letra nem dígito por `-`: `max_ccn` sai `Metric-max-ccn`, `dependency_cycles[services/api]` sai `Metric-dependency-cycles-services-api`.
+- **A premissa vai inteira, numa linha.** Não passa pela redação, como o corpo do commit, que também é texto do agente.
+- **O merge da tarefa não é validado.** O assunto dele é `merge: <intenção>`, e `merge` não está entre os tipos da Especificação. A validação ficou nos commits de etapa, que é onde a Especificação a pede ("Commits atômicos").
+- **Assunto recusado derruba a execução** com `NotConventional`, e desde o item 7 isso fica gravado como `failed`. Só acontece por erro da própria Forja: o tipo é escolhido por ela e a intenção nunca é vazia.
+- **Limite na retomada:** queda entre o commit e a nota deixa o commit sem nota. A reconciliação vê o `Stage-Id` e dá a etapa por feita.
+- **A guarda em paralelo ficou mais frouxa num ponto:** com mais de uma tarefa ao mesmo tempo, um agente que escrevesse em `refs/notes/commits` não seria notado. Com uma tarefa por vez, continua sendo. O agente trabalha numa cópia sem `.git`.
+- **As notas não acompanham o `git push` da branch.** O guia diz como publicá-las.
+
+### Dificuldades
+
+- Um script embutido no shell trocou `\n` por quebra de linha dentro de uma string de teste, de novo. Corrigido pela ferramenta de edição.
+
+### Verificação
+
+- `ruff check .`, `ruff format --check src tests` e `mypy` strict: limpos, 621 arquivos.
+- `pytest -m "not slow" -n 6`: 9638 aprovados, 41 pulados, nenhuma falha, 328 s.
+- `tests/checks/test_real_run.py` (`slow`), com git de verdade e a fachada: 2 aprovados; o commit da etapa sai com `Evidence-Id: scope`, `Metric-functions: 2 -> 3` e a nota.
+- Mutação em `2808d03`, no checkout de verificação: `orchestrator/task_cycle.py` (78 mutantes) e `orchestrator/measurer.py` (93, 26 min) sem sobrevivente; `orchestrator/workspace_git.py` (28) com um, `:351` `or -> and` em `GitWorkspace.watch`, código antigo. Um teste novo no contrato dos workspaces o mata, em `9ea30b4` (`test_a_watch_told_only_the_task_or_only_the_attempt_overlooks_nothing`): conferido à mão, com a mutação aplicada os dois casos de git falham. O script não rodou de novo sobre o arquivo.
+- Não rodou: suíte completa com `slow` na ponta; mutação dos arquivos da entrada anterior (`common.py`, os `parsers.py` de C# e Java, `ports.py`, `cli/session.py`, `cli/detect.py`, `cli/prepare.py`, `cli/doctor.py`); E2E com agente real.
+
+### Pendências
+
+- **Itens 15 a 20 e 31 a 40** (o 30 adiado), e os restos dos itens 2 e 6.
+- **Verificação que falta:** a da lista acima.
+- **Decisões do dono ainda abertas:** ADR 0041 (item 24); item 29; as três do item 5; a observação sobre a etapa de caracterização (item 12).
