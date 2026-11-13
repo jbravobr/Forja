@@ -20,7 +20,12 @@ _RUFF_LINE = re.compile(
 )
 _RUFF_PATH = re.compile(r"^\s*--> (?P<path>.+?):\d+:\d+$")
 _COMPILE_ERROR = re.compile(r"^\*\*\* Error compiling '(?P<path>.+)'\.\.\.$")
-_TEST_LINE = re.compile(r"^(?P<outcome>PASSED|FAILED|ERROR|XFAIL|XPASS) (?P<id>.+?)(?: - .*)?$")
+_TEST_LINE = re.compile(
+    r"^(?P<outcome>PASSED|FAILED|ERROR|XFAIL|XPASS) (?P<id>.+?)(?: - (?P<why>.*))?$"
+)
+# what a failed test raised, as pytest writes it after the id: ``NameError: name ...``, or the
+# name alone when the exception says nothing; a word alone that is no such name is a message
+_RAISED = re.compile(r"^(?P<name>[A-Za-z_][\w.]*)(?::|(?<=Error)$|(?<=Exception)$)")
 _SKIPPED = re.compile(r"^SKIPPED \[(?P<count>\d{1,9})\]")
 _SUMMARY = re.compile(r"^=+ short test summary info =+$")
 
@@ -147,10 +152,14 @@ def parse_tests(output: ToolOutput) -> ParseResult:
         return Parsed((_draft("test.collected", TargetKind.MODULE, "tests", 0, "tests"),))
     if code not in (0, 1, 2):
         return Unparseable(f"pytest ended with {code}")
-    outcomes, skipped = _scan_tests(_summary_lines(_lines(output)))
+    outcomes, raised, skipped = _scan_tests(_summary_lines(_lines(output)))
     drafts = [
         _draft("test.outcome", TargetKind.SYMBOL, test_id, outcome, "outcome")
         for test_id, outcome in sorted(outcomes.items())
+    ]
+    drafts += [
+        _draft("test.failure", TargetKind.SYMBOL, test_id, name, "exception")
+        for test_id, name in sorted(raised.items())
     ]
     if skipped:
         drafts.append(_draft("test.skipped", TargetKind.MODULE, "tests", skipped, "tests"))
@@ -168,15 +177,21 @@ def _summary_lines(lines: list[str]) -> list[str]:
     return lines[summary[-1] + 1 :] if summary else lines
 
 
-def _scan_tests(lines: list[str]) -> tuple[dict[str, str], int]:
+def _scan_tests(lines: list[str]) -> tuple[dict[str, str], dict[str, str], int]:
+    """The outcome of each test, what each failed one raised (when pytest says), and how many
+    were skipped."""
     outcomes: dict[str, str] = {}
+    raised: dict[str, str] = {}
     skipped = 0
     for line in lines:
         found = _TEST_LINE.match(line)
         if found:
             outcomes[found["id"]] = found["outcome"].lower()
+            exception = _RAISED.match(found["why"] or "")
+            if found["outcome"] == "FAILED" and exception:
+                raised[found["id"]] = exception["name"]
             continue
         counted = _SKIPPED.match(line)
         if counted:
             skipped += int(counted["count"])
-    return outcomes, skipped
+    return outcomes, raised, skipped

@@ -57,6 +57,7 @@ A execução reprova quando:
 
 - o teste declarado não rodou;
 - o teste declarado passa no código com o defeito (`the declared test passes on the code with the defect`);
+- o teste declarado falha por erro dele mesmo: em Python, um `NameError`, que é um nome que o teste usa e ninguém definiu (`the declared test fails on its own mistake`). Nenhuma mudança no código faria esse teste passar;
 - o teste declarado dá erro de importação, sintaxe ou coleta em vez de falhar (`the declared test errors out instead of failing`). Erro desse tipo não prova o defeito;
 - outro teste, que não foi declarado, falha;
 - um teste que passava na base sumiu ou deixou de passar.

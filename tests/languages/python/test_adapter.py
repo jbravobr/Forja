@@ -494,6 +494,28 @@ def test_every_test_has_an_outcome_and_skips_are_counted(tmp_path: Path) -> None
     ]
 
 
+def test_a_failed_test_says_what_it_raised_when_pytest_says_it(tmp_path: Path) -> None:
+    result = parsed(
+        Operation.TEST,
+        tmp_path,
+        1,
+        "=========================== short test summary info ===========================",
+        "FAILED tests/test_m.py::test_name - NameError: name 'page' is not defined",
+        "FAILED tests/test_m.py::test_own - sample.errors.Missing: no page",
+        "FAILED tests/test_m.py::test_bare - AssertionError",
+        "FAILED tests/test_m.py::test_assert - assert 1 == 2",
+        "FAILED tests/test_m.py::test_silent",
+        "ERROR tests/test_m.py::test_err - NameError: name 'x' is not defined",
+        "5 failed, 1 error in 0.18s",
+    )
+
+    assert [fact for fact in facts(result) if fact[0] == "test.failure"] == [
+        ("test.failure", "tests/test_m.py::test_bare", "AssertionError"),
+        ("test.failure", "tests/test_m.py::test_name", "NameError"),
+        ("test.failure", "tests/test_m.py::test_own", "sample.errors.Missing"),
+    ]
+
+
 def test_a_collection_error_is_an_error_of_the_file(tmp_path: Path) -> None:
     result = parsed(Operation.TEST, tmp_path, 2, "ERROR tests/test_imp.py", "1 error in 0.17s")
 

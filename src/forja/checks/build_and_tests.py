@@ -24,7 +24,20 @@ async def outcomes_of(
     values: Mapping[str, JsonValue],
 ) -> dict[str, str]:
     """The outcome of every test every adapter ran, by test id; ``values`` are the policy's."""
+    outcomes, _ = await results_of(tools, adapters, worktree, values)
+    return outcomes
+
+
+async def results_of(
+    tools: Tools,
+    adapters: Sequence[LanguageAdapter],
+    worktree: Path,
+    values: Mapping[str, JsonValue],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """The outcome of every test every adapter ran and, for the failed ones whose adapter says
+    it (``test.failure``), what the failure was: the name of the exception."""
     outcomes: dict[str, str] = {}
+    failures: dict[str, str] = {}
     for adapter in adapters:
         parsed = await measure(
             tools,
@@ -37,7 +50,10 @@ async def outcomes_of(
         outcomes |= {
             d.target.id: str(d.value) for d in parsed.drafts if d.measurement == "test.outcome"
         }
-    return outcomes
+        failures |= {
+            d.target.id: str(d.value) for d in parsed.drafts if d.measurement == "test.failure"
+        }
+    return outcomes, failures
 
 
 @dataclass(frozen=True)

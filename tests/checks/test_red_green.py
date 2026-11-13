@@ -103,6 +103,39 @@ def test_a_declared_test_that_errors_is_not_a_red_test(log: EventLog, tmp_path: 
     ]
 
 
+def test_a_declared_test_that_fails_on_a_name_nobody_defined_is_not_a_red_test(
+    log: EventLog, tmp_path: Path
+) -> None:
+    result = run(log, tmp_path, [f"FAILED {NEW} - NameError: name 'page' is not defined"])
+
+    assert described(result) == [
+        "the declared test fails on its own mistake (NameError), "
+        f"which no change to the code can repair [{NEW}]"
+    ]
+
+
+@pytest.mark.parametrize(
+    "why",
+    [
+        "AttributeError: module 'sample.mod' has no attribute 'page'",  # the code to be written
+        "AssertionError",
+        "sample.NameErrorLike: x",
+    ],
+)
+def test_a_declared_test_that_fails_on_what_the_code_lacks_is_a_red_test(
+    log: EventLog, tmp_path: Path, why: str
+) -> None:
+    assert run(log, tmp_path, [f"FAILED {NEW} - {why}"]) == Approved()
+
+
+def test_a_name_nobody_defined_in_an_undeclared_test_is_one_failure_like_any_other(
+    log: EventLog, tmp_path: Path
+) -> None:
+    lines = [f"FAILED {NEW} - assert 1 == 2", f"FAILED {OLD} - NameError: name 'x' is not defined"]
+
+    assert described(run(log, tmp_path, lines)) == [f"test failed [{OLD}]"]
+
+
 def test_a_declared_test_that_did_not_run_is_named(log: EventLog, tmp_path: Path) -> None:
     result = run(log, tmp_path, [f"PASSED {OLD}"], passing=frozenset({OLD}))
 

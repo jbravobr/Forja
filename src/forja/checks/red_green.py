@@ -5,13 +5,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from forja.checks.base import decided, rejected
-from forja.checks.build_and_tests import outcomes_of
+from forja.checks.build_and_tests import results_of
 from forja.checks.tooling import Tools
 from forja.core.adapters import FileClass, LanguageAdapter
 from forja.core.artifacts.llm_output import DeclaredTest
 from forja.core.gates import Approved, Finding, GateInput, GateResult
 
 FAILED = ("failed", "error")
+# What a test raises when it is the test that is wrong: a name it uses and nobody defined is
+# still undefined after the defect is repaired, so the test can never pass.
+OWN_FAULT = frozenset({"NameError"})
 
 
 @dataclass(frozen=True)
@@ -19,7 +22,8 @@ class RedGreenCheck:
     """Stands in for the plain tests check while the test author works.
 
     Every criterion has a declared test; every declared test exists and fails (an error of import
-    or collection is not a failure of the defect); no other test fails, and the tests that passed
+    or collection is not a failure of the defect, and neither is a failure the test brought on
+    itself, ``OWN_FAULT``); no other test fails, and the tests that passed
     on the base still pass.
     """
 
@@ -86,13 +90,19 @@ class RedGreenCheck:
             return ""
 
     async def _judge(self, data: GateInput) -> GateResult:
-        outcomes = await outcomes_of(self.tools, self.adapters, self.worktree, data.values)
+        outcomes, raised = await results_of(self.tools, self.adapters, self.worktree, data.values)
         wanted = {t.test_id for t in self.declared}
         findings = []
         for test in sorted(wanted):
             # a file that cannot be collected is reported under its own path, not its tests'
             outcome = outcomes.get(test) or outcomes.get(test.split("::")[0])
             if outcome == "failed":
+                if raised.get(test) in OWN_FAULT:
+                    message = (
+                        f"the declared test fails on its own mistake ({raised[test]}), "
+                        "which no change to the code can repair"
+                    )
+                    findings.append(Finding(message=message, target=test))
                 continue
             message = {
                 None: "the declared test did not run",
