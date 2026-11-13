@@ -370,6 +370,31 @@ def test_the_wait_grows_with_the_failures_in_a_row_up_to_the_last_step(world: Me
     assert world.slept == [30.0, 60.0, 120.0, 120.0]
 
 
+@pytest.mark.parametrize(
+    ("drawn", "waits"),
+    [
+        (0.0, [15.0, 30.0]),  # half of each step of the table
+        (0.5, [30.0, 60.0]),
+        (1.0, [45.0, 90.0]),
+        (7.0, [45.0, 90.0]),  # a number out of the range is taken as its nearest end
+        (-1.0, [15.0, 30.0]),
+    ],
+)
+def test_the_wait_after_a_transient_failure_is_spread_by_the_number_drawn(
+    world: MemoryWorld, drawn: float, waits: list[float]
+) -> None:
+    agent = ScriptedAgent(errors={0: ErrorKind.TRANSIENT, 1: ErrorKind.TRANSIENT})
+    log = world.open()
+    confirm_run(log, world.config, ISOLATION)
+    ctx = world.context(log, measurer=ScriptedMeasurer(), agent=agent, planner=ScriptedPlanner())
+    ctx.jitter = lambda: drawn
+
+    outcome = asyncio.run(Orchestrator(ctx).run())
+
+    assert outcome.state is ExecutionState.DELIVERED
+    assert world.slept == waits
+
+
 def test_too_many_failures_in_a_row_pause_the_run_and_a_later_run_finishes_it(
     world: MemoryWorld,
 ) -> None:

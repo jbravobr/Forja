@@ -5,6 +5,7 @@ No agent runs: the session is opened and looked at, with the real git and the re
 
 import asyncio
 import os
+import random
 import subprocess
 import sys
 from pathlib import Path
@@ -416,3 +417,29 @@ def test_a_git_write_of_the_run_waits_for_the_mutex_of_the_repository(
             close(session)
 
     asyncio.run(scenario())
+
+
+def test_the_run_draws_the_spread_of_its_waits_and_asks_the_cli_whether_the_network_is_back(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[tuple[str, Path]] = []
+    answers: list[list[str]] = [["no answer"], []]
+
+    async def probe(adapter: Any, executable: Path, environ: Any, **more: Any) -> list[str]:
+        asked.append((adapter.name, executable))
+        return answers.pop(0)
+
+    monkeypatch.setattr(session_module, "run_probe", probe)
+    session = asyncio.run(_open(config_for(repo), None, tmp_path / "home"))
+    try:
+        context = session.context
+        assert context.jitter is random.random
+
+        async def ask() -> bool:
+            return await context.network_is_up()
+
+        assert asyncio.run(ask()) is False  # the proof of life found a problem
+        assert asyncio.run(ask()) is True
+        assert asked == [("claude-code", Path("claude"))] * 2
+    finally:
+        close(session)

@@ -259,6 +259,10 @@ async def _network_is_up() -> bool:
     return True
 
 
+def _no_jitter() -> float:
+    return 0.5  # the middle of the range: the wait is the one of the table
+
+
 async def _no_test_files(worktree: Path) -> Sequence[str]:
     return ()
 
@@ -278,6 +282,9 @@ class RunContext:
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
     network_is_up: Callable[[], Awaitable[bool]] = _network_is_up
     backoff: tuple[float, ...] = (30.0, 60.0, 120.0)
+    # A number from 0 to 1 that spreads each wait of ``backoff`` from half to one and a half of
+    # itself, so runs that failed together do not all come back together. The session draws it.
+    jitter: Callable[[], float] = _no_jitter
     probe_interval: float = 60.0
     max_network_probes: int | None = None  # None waits for the network as long as it takes
     agents: Mapping[Producer, AgentRunner] = field(default_factory=dict)

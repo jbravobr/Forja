@@ -748,7 +748,8 @@ class TaskCycle:
             self._stage_pause(info)
             raise StopRun(f"{failures} infrastructure failures in a row on {info.task_id}")
         if error.kind is ErrorKind.TRANSIENT:
-            await run.sleep(run.backoff[min(failures, len(run.backoff)) - 1])
+            wait = run.backoff[min(failures, len(run.backoff)) - 1]
+            await run.sleep(wait * (0.5 + min(1.0, max(0.0, run.jitter()))))
         elif not await self._network_came_back():
             self._stage_pause(info)
             raise StopRun("the network did not come back")

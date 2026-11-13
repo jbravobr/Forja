@@ -7,8 +7,9 @@ the work; this only connects the pieces the orchestrator is written against.
 
 import hashlib
 import os
+import random
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,6 +46,7 @@ from forja.core.policy.config import EffectivePolicy, load_policy
 from forja.core.redaction import Redactor
 from forja.core.states import Level
 from forja.executors import adapter_for
+from forja.executors.probe import run_probe
 from forja.languages import (
     CSharpAdapter,
     GoAdapter,
@@ -92,6 +94,20 @@ GIT_ENVIRONMENT = (
     "LANG", "LC_ALL", "PATHEXT", "COMSPEC",
 )  # fmt: skip
 NETWORK_PROBES_WITHOUT_A_PERSON = 60
+
+
+def cli_answers(executor: ExecutorRef, env: Mapping[str, str]) -> Callable[[], Awaitable[bool]]:
+    """Whether the network is back, as the run that waits for it asks: the implementer's CLI
+    passes its proof of life again. Only the CLI knows the endpoint it needs (a provider, a
+    gateway of the company), so reaching any other address would prove nothing."""
+
+    async def answers() -> bool:
+        adapter = adapter_for(executor.name, executor.template)
+        return not await run_probe(adapter, Path(executor.path), env)
+
+    return answers
+
+
 INSTALL_TIMEOUT = 600.0  # seconds for one venv or pip command
 GIT_MUTEX_TIMEOUT = 300.0  # seconds a git write waits for another task's git write
 FORJA_VERSION = "0.0.0"
@@ -510,6 +526,8 @@ async def _context(
         test_files=measurer.test_files,
         test_root=test_root,
         max_network_probes=None if interactive else NETWORK_PROBES_WITHOUT_A_PERSON,
+        network_is_up=cli_answers(config.implementer, env),
+        jitter=random.random,
         notices=(
             *security_notices(
                 rules=rules is not None,
