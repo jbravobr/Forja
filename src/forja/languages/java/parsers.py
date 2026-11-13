@@ -17,7 +17,7 @@ from pathlib import Path, PurePosixPath
 from xml.etree.ElementTree import Element
 
 from forja.core.adapters import EvidenceDraft, Parsed, ParseResult, ToolOutput, Unparseable
-from forja.core.adapters.common import read_output_lines
+from forja.core.adapters.common import keep_worst, read_output_lines
 from forja.core.evidence import Target, TargetKind
 from forja.core.reports.reading import ReportError, load_xml
 
@@ -212,11 +212,11 @@ def parse_tests(output: ToolOutput, *, gradle: bool) -> ParseResult:
                     method = method.removesuffix("()")
                 name = f"{case.get('classname', '')}.{method}".strip(".")
                 if case.find("failure") is not None or case.find("error") is not None:
-                    outcomes[name] = "failed"
+                    keep_worst(outcomes, name, "failed")
                 elif case.find("skipped") is not None:
-                    outcomes[name] = "skipped"
+                    keep_worst(outcomes, name, "skipped")
                 else:
-                    outcomes[name] = "passed"
+                    keep_worst(outcomes, name, "passed")
     except (OSError, ReportError) as error:
         return Unparseable(f"a test report cannot be read ({error})")
     failed = any(o == "failed" for o in outcomes.values())

@@ -14,11 +14,20 @@ VERSION = 2  # 2: emoji left the list; it is part of the voice (see ``voice_brie
 MAX_DASHES = 3  # em dashes in the text one file adds before it reads as excess
 
 
+# The patterns are written with the plain apostrophe; text typed in an editor or pasted from a
+# model often has the curly ones, and ``it’s worth noting`` says what ``it's worth noting`` says.
+_APOSTROPHES = str.maketrans({"’": "'", "‘": "'", "ʼ": "'"})
+
+
 @dataclass(frozen=True)
 class Marker:
     id: str
     pattern: re.Pattern[str]
     why: str
+
+    def found_in(self, text: str) -> bool:
+        """Whether ``text`` has the marker, whatever apostrophe it was written with."""
+        return self.pattern.search(text.translate(_APOSTROPHES)) is not None
 
 
 def _marker(id: str, pattern: str, why: str) -> Marker:

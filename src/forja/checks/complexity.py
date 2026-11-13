@@ -21,6 +21,7 @@ from forja.core.gates import Approved, Finding, GateInput, GateResult, Inconclus
 from forja.core.gates.models import InconclusiveReason
 
 DEFAULT_MAX_CCN = 15  # lizard's own default
+ROW_AT_LEAST = 4  # more fields than this is a row of the report, not a warning lizard printed
 FIELDS = 11  # NLOC, CCN, tokens, params, length, "name@lines@file", file, name, long name, from, to
 
 Functions = dict[tuple[str, str], int]
@@ -93,7 +94,18 @@ async def read_spans(
                 tool_run_ids=(execution.operation_id,),
             )
         )
-    return parse_spans(execution.lines)
+    spans = parse_spans(execution.lines)
+    if not spans and any(len(row) > ROW_AT_LEAST for row in csv.reader(execution.lines)):
+        # lizard printed rows and none is one this reader knows (another version, other
+        # columns): no function read is not the same as no function too complex
+        raise Undecided(
+            Inconclusive(
+                reason=InconclusiveReason.TOOL_FAILED,
+                detail="complexity: lizard printed its report in a form this reader does not know",
+                tool_run_ids=(execution.operation_id,),
+            )
+        )
+    return spans
 
 
 @dataclass(frozen=True)

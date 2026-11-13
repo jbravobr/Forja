@@ -107,7 +107,8 @@ _NOT_AFTER = r"(?![\d])"
 DETECTORS: tuple[PiiDetector, ...] = (
     PiiDetector(
         PiiKind.CPF,
-        (re.compile(_NOT_BEFORE + r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}" + _NOT_AFTER),),
+        # with its dots and hyphen, with blanks in their place, or with nothing
+        (re.compile(_NOT_BEFORE + r"\d{3}[. ]?\d{3}[. ]?\d{3}[- ]?\d{2}" + _NOT_AFTER),),
         cpf_valid,
     ),
     PiiDetector(
@@ -134,6 +135,8 @@ DETECTORS: tuple[PiiDetector, ...] = (
             re.compile(r"(?<![\w])\(\d{2}\)\s?9?\d{4}[\s\-]?\d{4}(?!\d)"),
             # DD 9NNNN-NNNN, with a space or a dot after the area code
             re.compile(r"(?<![\w.\-])\d{2}[\s.]9?\d{4}[\s.\-]\d{4}(?![\d\-])"),
+            # DD9NNNNNNNN, a mobile number with nothing between its digits
+            re.compile(r"(?<![\w.\-+])[1-9]\d9\d{8}(?!\d)"),
             # other countries, E.164
             re.compile(r"(?<![\w+])\+(?!55)[1-9]\d{7,14}(?!\d)"),
         ),

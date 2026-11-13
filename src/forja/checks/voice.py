@@ -57,7 +57,7 @@ class VoiceCheck:
         findings: list[Finding] = [
             Finding(message=f"commit message: {marker.why}", target=COMMIT_MESSAGE)
             for marker in self.markers
-            if marker.pattern.search(self.message)
+            if marker.found_in(self.message)
         ]
         if self.message.count(DASH) > limit:
             findings.append(
@@ -71,7 +71,7 @@ class VoiceCheck:
         for path, lines in self._prose().items():
             for line in lines:
                 for marker in self.markers:
-                    if marker.pattern.search(line.text):
+                    if marker.found_in(line.text):
                         findings.append(_finding(marker.why, path, line.number))
             dashes = sum(line.text.count(DASH) for line in lines)
             if dashes > limit:

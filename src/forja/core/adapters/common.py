@@ -132,6 +132,18 @@ class ToolOutput:
     root: Path | None = None  # where the command ran, for a tool that prints absolute paths
 
 
+_WORSE = {"skipped": 0, "passed": 1, "failed": 2, "error": 2}
+
+
+def keep_worst(outcomes: dict[str, str], test: str, outcome: str) -> None:
+    """Record ``outcome`` for ``test`` unless a worse one is already there. A runner may name
+    several cases alike (one per set of arguments): if one of them failed the test failed, and
+    the last to be read must not pass for all."""
+    known = outcomes.get(test)
+    if known is None or _WORSE.get(outcome, 1) > _WORSE.get(known, 1):
+        outcomes[test] = outcome
+
+
 def read_output_lines(log_path: Path) -> list[str]:
     """Lines of the raw log without the ``[out] ``/``[err] `` channel prefix. Never raises."""
     try:

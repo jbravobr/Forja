@@ -156,9 +156,11 @@ def _matches(cited: Signature, run: Signature) -> bool:
 
 
 def _satisfied(chunk: Chunk, name: str, pattern: str) -> bool:
-    return (
-        chunk.heading is not None and re.search(pattern, chunk.heading, re.IGNORECASE) is not None
-    )
+    """Whether a word of the heading starts with one of the stems of ``pattern``: "Running" and
+    "Como rodar" are about ``run``; "Trunk" and "Latest" hold a stem and are about nothing."""
+    if chunk.heading is None:
+        return False
+    return re.search(rf"(?<![^\W\d_])(?:{pattern})", chunk.heading, re.IGNORECASE) is not None
 
 
 def evaluate(

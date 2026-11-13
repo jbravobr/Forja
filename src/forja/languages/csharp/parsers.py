@@ -11,7 +11,7 @@ from collections import Counter
 from pathlib import PurePosixPath
 
 from forja.core.adapters import EvidenceDraft, Parsed, ParseResult, ToolOutput, Unparseable
-from forja.core.adapters.common import read_output_lines
+from forja.core.adapters.common import keep_worst, read_output_lines
 from forja.core.evidence import Target, TargetKind
 
 MAX_LINE = 100_000  # a test name can be long; beyond this the line is not ours
@@ -104,7 +104,7 @@ def parse_tests(output: ToolOutput) -> ParseResult:
     for line in _lines(output):
         found = _TEST_LINE.match(line)
         if found:
-            outcomes[found["name"]] = _OUTCOMES[found["outcome"]]
+            keep_worst(outcomes, found["name"], _OUTCOMES[found["outcome"]])
     failed = any(o == "failed" for o in outcomes.values())
     if code == 1 and not failed:
         return Unparseable("dotnet test reported a failure in a form this parser does not know")
