@@ -8,7 +8,7 @@ import pytest
 
 from forja.checks.base import Undecided
 from forja.checks.complexity import read_spans
-from forja.checks.readme import evaluate
+from forja.checks.readme import Chunk, _satisfied, evaluate
 from forja.checks.voice_markers import MARKERS
 from forja.core.adapters import Parsed, ToolOutput
 from forja.core.adapters.common import keep_worst
@@ -218,3 +218,20 @@ def test_a_java_case_that_failed_is_not_hidden_by_a_case_of_the_same_name_that_p
         "com.acme.CalcTest.adds": "failed",
         "com.acme.CalcTest.subs": "passed",
     }
+
+
+# -- two changes to these detectors that no test noticed (mutation of item 27) ---------------------
+
+
+def test_a_line_of_lizard_with_four_fields_is_a_warning_and_one_more_is_a_row(
+    log: EventLog, tmp_path: Path
+) -> None:
+    assert spans_of(log, tmp_path, "warning,m.py,skipped,twice") == {}
+
+    with pytest.raises(Undecided):
+        spans_of(log, tmp_path, "one,two,three,four,five")
+
+
+def test_the_text_before_the_first_heading_is_about_no_section() -> None:
+    assert _satisfied(Chunk(None, "how to run it"), "run", "run") is False
+    assert _satisfied(Chunk("How to run it", ""), "run", "run") is True
