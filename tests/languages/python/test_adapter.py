@@ -733,6 +733,13 @@ def test_tests_of_a_src_layout_copy_import_the_copy_and_not_an_editable_install(
     lint = ADAPTER.plan(Operation.LINT, OperationRequest(root=project))
     assert isinstance(lint, CommandPlan)
     assert "PYTHONPATH" not in lint.env_set
+    # only the tests import the project; the type checker and the version probes do not
+    types = ADAPTER.plan(Operation.TYPES, OperationRequest(root=project))
+    assert isinstance(types, CommandPlan)
+    assert "PYTHONPATH" not in types.env_set
+    found = ADAPTER.detect(project)
+    assert found is not None and found.toolchain_probe is not None
+    assert "PYTHONPATH" not in found.toolchain_probe.plan.env_set
 
 
 def test_tests_of_a_flat_layout_set_no_python_path(project: Path) -> None:

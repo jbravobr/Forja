@@ -241,3 +241,29 @@ def test_a_value_of_several_lines_stays_one_value_in_the_copy(project: Path) -> 
     reader = configparser.RawConfigParser()
     reader.read_string(text)
     assert reader.sections() == ["mypy"] and reader.options("mypy") == ["python_version"]
+
+
+def test_two_different_settings_are_two_copies_in_the_same_directory(
+    tmp_path: Path, project: Path
+) -> None:
+    cache = tmp_path / "cache"
+    (project / "mypy.ini").write_text("[mypy]\nstrict = True\n", encoding="utf-8")
+    first = settings_of(project).write(project, cache)
+    (project / "mypy.ini").write_text("[mypy]\nstrict = False\n", encoding="utf-8")
+    second = settings_of(project).write(project, cache)
+
+    assert first is not None and second is not None and first != second
+    assert first.parent == second.parent
+    assert first.read_text(encoding="utf-8") == "[mypy]\nstrict = True\n"
+    assert second.read_text(encoding="utf-8") == "[mypy]\nstrict = False\n"
+
+
+def test_an_override_that_is_no_table_and_one_without_a_module_are_left_out(
+    project: Path,
+) -> None:
+    (project / "pyproject.toml").write_text(
+        '[tool.mypy]\nstrict = true\noverrides = ["text", {ignore_errors = true}]\n',
+        encoding="utf-8",
+    )
+
+    assert settings_of(project).sections == {"mypy": {"strict": "True"}}
