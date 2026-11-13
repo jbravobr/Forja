@@ -16,6 +16,7 @@ Os dois motivos foram conferidos no código:
 - **O `mypy` lê uma cópia da configuração, nunca o arquivo.** A Forja procura na ordem do `mypy` (`mypy.ini`, `.mypy.ini`, `pyproject.toml`, `setup.cfg`), grava a cópia fora da worktree, na pasta de cache do adaptador, e passa o caminho em `--config-file`.
 - **A cópia não leva `plugins`,** nem as chaves que fazem o `mypy` gravar relatório na worktree (`*_report`, `junit_xml`).
 - **Configuração com `plugins` deixa o `types` inconclusivo** (`unsupported_construct`). Sem o plugin o `mypy` acusa erros que o projeto não tem, e a contagem não seria a do projeto. Com `on_inconclusive = "premise"`, o padrão do `types`, a tentativa segue e a lacuna vai para o resumo como suposição.
+- **A cópia só é usada se disser o que o arquivo do repositório diz e nada mais.** Nome de opção é comparado sem maiúsculas, como o leitor de INI do `mypy` faz (`Plugins` num TOML é `plugins`). Nome de opção ou de seção fora do formato esperado, ou valor com caractere de controle, poderia acrescentar uma linha à cópia; nesse caso não há cópia, o `mypy` roda com os padrões e o `types` fica inconclusivo. A cópia gerada é relida com o leitor que o `mypy` usa e conferida contra as opções de origem.
 - **Sem configuração, nada muda:** `--config-file=`, os padrões do `mypy`.
 - **As opções da linha de comando da Forja continuam valendo sobre a configuração:** `--follow-imports=silent`, sem cache, `import-not-found` e `import-untyped` desligados, o interpretador do repositório.
 

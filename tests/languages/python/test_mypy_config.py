@@ -1,5 +1,6 @@
 """The settings mypy is given: the repository's own, without what would run its code."""
 
+import configparser
 from pathlib import Path
 
 import pytest
@@ -129,6 +130,7 @@ def test_the_copy_leaves_out_the_plugins_and_what_writes_a_report(project: Path)
 
     text = found.text(project)
 
+    assert text is not None
     assert "plugins" not in text and "report" not in text and "junit" not in text
     assert "strict = True" in text
     assert f"mypy_path = {project.as_posix()}/stubs" in text
@@ -179,3 +181,63 @@ def test_types_cannot_be_measured_when_the_settings_load_plugins(
         "the mypy settings in mypy.ini load plugins, which are code of the repository "
         "the Forja does not run"
     )
+
+
+@pytest.mark.parametrize(
+    "toml",
+    [
+        'Plugins = ["evil"]\n',  # mypy's reader of INI files takes the name without its case
+        '" plugins " = ["evil"]\n',
+        'HTML_Report = "out"\n',
+    ],
+)
+def test_an_option_is_known_by_its_name_whatever_its_case(project: Path, toml: str) -> None:
+    (project / "pyproject.toml").write_text(f"[tool.mypy]\nstrict = true\n{toml}", encoding="utf-8")
+
+    found = settings_of(project)
+
+    assert found.text(project) == "[mypy]\nstrict = True\n"
+    assert found.plugins == ("lugins" in toml)
+
+
+@pytest.mark.parametrize(
+    "toml",
+    [
+        'python_version = "3.12\\rplugins = evil"\n',  # a line of its own, for a reader of text
+        'python_version = "3.12\\u2028plugins = evil"\n',
+        '"strict\\nplugins" = "evil"\n',
+        '"strict = True\\nplugins" = "evil"\n',
+        '"a b" = "c"\n',
+        '[[tool.mypy.overrides]]\nmodule = "a]\\n[mypy]\\nplugins = evil\\n[mypy-b"\nx = true\n',
+        '[[tool.mypy.overrides]]\nmodule = "a]"\nx = true\n',
+    ],
+)
+def test_settings_that_could_add_a_line_to_the_copy_are_not_copied(
+    tmp_path: Path, project: Path, toml: str
+) -> None:
+    (project / "pyproject.toml").write_text(f"[tool.mypy]\nstrict = true\n{toml}", encoding="utf-8")
+
+    found = settings_of(project)
+
+    assert found.text(project) is None
+    assert found.write(project, tmp_path / "cache") is None
+    plan = types_plan(tmp_path, project)
+    assert config_of(plan) == "" and plan.config_files == ()
+    assert adapter(tmp_path).unmeasurable(Operation.TYPES, project) == (
+        "the mypy settings in pyproject.toml have a name or a value the Forja cannot copy "
+        "without the risk of adding a setting of its own"
+    )
+
+
+def test_a_value_of_several_lines_stays_one_value_in_the_copy(project: Path) -> None:
+    (project / "pyproject.toml").write_text(
+        '[tool.mypy]\npython_version = "3.12\\n\\nplugins = evil\\n[mypy-x]\\nplugins = evil"\n',
+        encoding="utf-8",
+    )
+
+    text = settings_of(project).text(project)
+
+    assert text is not None
+    reader = configparser.RawConfigParser()
+    reader.read_string(text)
+    assert reader.sections() == ["mypy"] and reader.options("mypy") == ["python_version"]

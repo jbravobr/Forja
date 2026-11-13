@@ -76,7 +76,7 @@ O check nasce em `observation`: mede e reporta, e não reprova até o repositór
 
 ### Quando fica sem resposta
 
-Falha da ferramenta nunca aprova: o resultado é inconclusivo. Isso vale para o `mypy` ausente, para saída diferente de 0 e 1, para tempo esgotado, para JSON ilegível e para saída 1 sem nenhum erro lido. Vale também para a configuração que declara `plugins`: sem eles o `mypy` acusaria erros que o projeto não tem, então o `types` não mede (`the mypy settings in <arquivo> load plugins`). Como o `types` tem `on_inconclusive = "premise"` por padrão, a tentativa segue e a lacuna é declarada como suposição. O `forja doctor` avisa quando o `mypy` falta, sem tornar isso obrigatório.
+Falha da ferramenta nunca aprova: o resultado é inconclusivo. Isso vale para o `mypy` ausente, para saída diferente de 0 e 1, para tempo esgotado, para JSON ilegível e para saída 1 sem nenhum erro lido. Vale também para a configuração que declara `plugins`: sem eles o `mypy` acusaria erros que o projeto não tem, então o `types` não mede (`the mypy settings in <arquivo> load plugins`). E para a configuração com nome de opção, nome de seção ou valor que a Forja não consegue copiar com segurança (`have a name or a value the Forja cannot copy`). Como o `types` tem `on_inconclusive = "premise"` por padrão, a tentativa segue e a lacuna é declarada como suposição. O `forja doctor` avisa quando o `mypy` falta, sem tornar isso obrigatório.
 
 ### Limites
 

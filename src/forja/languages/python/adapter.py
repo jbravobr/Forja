@@ -126,12 +126,19 @@ class PythonAdapter:
         if operation is not Operation.TYPES:
             return None
         settings = mypy_config.read(root)
-        if settings is None or not settings.plugins:
+        if settings is None:
             return None
-        return (
-            f"the mypy settings in {settings.source} load plugins, which are code of the "
-            "repository the Forja does not run"
-        )
+        if settings.plugins:
+            return (
+                f"the mypy settings in {settings.source} load plugins, which are code of the "
+                "repository the Forja does not run"
+            )
+        if settings.text(root) is None:
+            return (
+                f"the mypy settings in {settings.source} have a name or a value the Forja "
+                "cannot copy without the risk of adding a setting of its own"
+            )
+        return None
 
     def classify(self, path: str) -> FileClass | None:
         parts = path.replace("\\", "/").split("/")
@@ -213,7 +220,9 @@ class PythonAdapter:
                 # mypy reads a copy of the repository's settings, without the plugins: a plugin
                 # would run code the attempt may have written. No settings, mypy's defaults.
                 settings = mypy_config.read(request.root)
-                config = "" if settings is None else settings.write(request.root, Path(self._cache))
+                # settings with no copy to trust are not read: ``unmeasurable`` says so
+                copy = None if settings is None else settings.write(request.root, Path(self._cache))
+                config = "" if copy is None else str(copy)
                 argv = (
                     *self._mypy,
                     *("--python-executable", self._python[0]),
@@ -224,7 +233,7 @@ class PythonAdapter:
                     "--",
                     *targets,
                 )
-                read = () if settings is None else (settings.source,)
+                read = () if settings is None or copy is None else (settings.source,)
                 return self._plan(request.root, argv, config_files=read)
             case Operation.BUILD:
                 argv = (
