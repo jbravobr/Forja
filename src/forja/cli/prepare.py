@@ -327,7 +327,7 @@ def _template_hash(template: CommandTemplate | None) -> str:
     """What tells one way of calling the CLI from another; empty for a CLI the Forja knows."""
     if template is None:
         return ""
-    described = json.dumps(dataclasses.asdict(template), sort_keys=True)
+    described = json.dumps(dataclasses.asdict(template))
     return hashlib.sha256(described.encode("utf-8")).hexdigest()[:16]
 
 

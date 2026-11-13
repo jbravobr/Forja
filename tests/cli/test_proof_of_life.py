@@ -34,7 +34,7 @@ class World:
     """A CLI whose version is told and whose probe is counted, and a clock that is set."""
 
     def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        self.cache = tmp_path / "profile" / "provas.json"
+        self.cache = tmp_path / "home" / "profile" / "provas.json"  # neither folder is there yet
         self.probes = 0
         self.problems: list[str] = []
         self.now = START
@@ -197,6 +197,17 @@ def test_a_cache_that_cannot_be_read_is_started_over(world: World, content: str)
 
     assert world.probes == 1
     assert len(json.loads(world.cache.read_text(encoding="utf-8"))) == 1
+
+
+def test_unless_told_to_prove_again_what_is_remembered_is_used(world: World) -> None:
+    choice = cast(Any, SimpleNamespace(path="p"))
+
+    for _ in range(2):
+        asyncio.run(
+            prove("minha", choice, {}, world.cache, world.console, TEMPLATE, clock=lambda: START)
+        )
+
+    assert world.probes == 1
 
 
 def test_a_failed_proof_is_not_remembered(world: World) -> None:
