@@ -24,8 +24,9 @@ from forja.core.adapters import (
 )
 from forja.core.reports import ReportFormat, ReportSpec
 from forja.core.reports.readers import read_coverage
-from forja.languages.java import JavaAdapter
+from forja.languages.java import JavaAdapter, parsers
 from forja.languages.java.adapter import COVERAGE_REPORT, JACOCO, SOURCE_ROOTS
+from forja.languages.java.parsers import MAX_LINE
 from tests.core.adapters.conformance import language_problems
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "java"
@@ -324,3 +325,58 @@ def test_through_cmd_exe_only_one_file_can_be_asked_for(tmp_path: Path) -> None:
     assert isinstance(launcher.plan(Operation.FORMAT, several), NotSupported)
     assert isinstance(launcher.plan(Operation.FORMAT, single), CommandPlan)
     assert isinstance(ADAPTER.plan(Operation.FORMAT, several), CommandPlan)
+
+
+def test_spotless_failing_without_naming_a_file_is_not_understood(tmp_path: Path) -> None:
+    log = tmp_path / "f.log"
+    log.write_text("[ERROR] Could not resolve dependencies\n", encoding="utf-8")
+
+    assert isinstance(ADAPTER.parse(Operation.FORMAT, ToolOutput(1, log, WORK)), Unparseable)
+    assert facts(ADAPTER.parse(Operation.FORMAT, ToolOutput(0, log, WORK))) == []
+
+
+@pytest.mark.parametrize("outside", ["/elsewhere/dir/X.java", "D:/elsewhere/dir/X.java"])
+def test_a_path_outside_the_project_is_named_by_its_file_only(outside: str, tmp_path: Path) -> None:
+    log = tmp_path / "f.log"
+    log.write_text(f"[ERROR]     {outside}\n", encoding="utf-8")
+
+    assert facts(ADAPTER.parse(Operation.FORMAT, ToolOutput(1, log, WORK))) == [
+        ("format.unformatted", "X.java", 1)
+    ]
+
+
+def test_a_line_of_exactly_the_limit_is_still_read_and_a_longer_one_is_not(
+    tmp_path: Path,
+) -> None:
+    def unformatted(name: str) -> ParseResult:
+        log = tmp_path / "f.log"
+        log.write_text(f"[ERROR]     {name}.java\n", encoding="utf-8")
+        return ADAPTER.parse(Operation.FORMAT, ToolOutput(1, log, WORK))
+
+    longest = "U" * (MAX_LINE - len("[ERROR]     .java"))
+
+    assert facts(unformatted(longest)) == [("format.unformatted", f"{longest}.java", 1)]
+    assert isinstance(unformatted(longest + "U"), Unparseable)
+
+
+def test_a_directory_named_like_a_report_is_not_read_as_one(tmp_path: Path) -> None:
+    root = build_reports(tmp_path, "TEST-pass.xml")
+    (root / "target" / "surefire-reports" / "TEST-a-directory.xml").mkdir()
+
+    result = ADAPTER.parse(Operation.TEST, ToolOutput(0, FIXTURES / "test-pass.txt", root))
+
+    assert ("test.outcome", "com.acme.CalcTest.addsTwoNumbers", "passed") in facts(result)
+
+
+def test_a_report_of_exactly_the_limit_is_read_and_a_larger_one_is_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = build_reports(tmp_path, "TEST-pass.xml")
+    size = (root / "target" / "surefire-reports" / "TEST-com.acme.CalcTest.xml").stat().st_size
+
+    def read_with(limit: int) -> list[tuple[str, str, object]]:
+        monkeypatch.setattr(parsers, "MAX_REPORT", limit)
+        return facts(ADAPTER.parse(Operation.TEST, ToolOutput(0, FIXTURES / "test-pass.txt", root)))
+
+    assert ("test.outcome", "com.acme.CalcTest.addsTwoNumbers", "passed") in read_with(size)
+    assert read_with(size - 1) == [("test.collected", "tests", 0)]

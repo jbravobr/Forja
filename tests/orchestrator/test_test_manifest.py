@@ -21,6 +21,7 @@ from forja.orchestrator.config import FixRequest, Objective
 from forja.orchestrator.criteria import manifest_of
 from forja.orchestrator.ports import Expectations, PlannedTask, RejectedWork
 from forja.orchestrator.summary import _traceability, read_facts
+from forja.orchestrator.task_cycle import TRACE_BYTES, _within_event_limit
 from tests.orchestrator.fakes import ScriptedAgent, ScriptedMeasurer, ScriptedPlanner
 from tests.orchestrator.harness import MemoryWorld
 
@@ -179,6 +180,39 @@ def test_many_long_criteria_are_traced_in_the_summary_without_breaking_the_event
     lines = _traceability(log.state, read_facts(log.path))
     for n in range(1, count + 1):
         assert any(f"critério {n} (origem E1): criterion {n} " in line for line in lines)
+
+
+def test_rows_that_fill_an_event_to_the_last_byte_go_together_and_one_byte_more_splits_them() -> (
+    None
+):
+    half = TRACE_BYTES // 2 - len('"",')  # a row is its JSON and the comma after it
+    row = "r" * half
+
+    assert _within_event_limit([row, row]) == [[row, row]]
+    assert _within_event_limit([row, row + "r"]) == [[row], [row + "r"]]
+    assert _within_event_limit([row, row, row]) == [[row, row], [row]]
+    assert _within_event_limit([]) == []
+
+
+def test_what_an_implementer_declares_never_replaces_the_manifest_of_the_author(
+    world: MemoryWorld,
+) -> None:
+    other = DeclaredTest(criterion_id=1, test_id="tests/test_z.py::test_z", path="tests/test_z.py")
+
+    outcome, _ = world.run(
+        measurer=ScriptedMeasurer(),
+        agent=ScriptedAgent(edits=[{"src/a.py": "def f():\n    return 1\n"}], tests=(other,)),
+        agents={
+            Producer.TEST_AUTHOR: ScriptedAgent(edits=[TESTS], tests=DECLARED),
+            Producer.DOCUMENTER: ScriptedAgent(edits=[{"README.md": "# a\n"}]),
+        },
+        planner=ScriptedPlanner((TASK,)),
+    )
+
+    stored = ArtifactStore(world.run_dir / "store").get("test-manifest-t1")
+    assert outcome.state is ExecutionState.DELIVERED
+    assert isinstance(stored.body, AuthoredTestsBody)
+    assert [t.test_id for t in stored.body.tests] == [t.test_id for t in DECLARED]
 
 
 def test_a_run_with_no_test_author_has_nothing_to_trace(world: MemoryWorld) -> None:

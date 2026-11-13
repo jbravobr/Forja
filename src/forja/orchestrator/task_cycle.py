@@ -870,10 +870,10 @@ def _within_event_limit(rows: list[JsonValue]) -> list[list[JsonValue]]:
     """Consecutive rows grouped so that each group fits in one event (the task id and the key
     take the margin); a row alone is never split."""
     groups: list[list[JsonValue]] = []
-    size = 0
+    size = TRACE_BYTES  # no group yet, so the first row opens one
     for row in rows:
         width = len(canonical_json(row)) + 1
-        if not groups or size + width > TRACE_BYTES:
+        if size + width > TRACE_BYTES:
             groups.append([])
             size = 0
         groups[-1].append(row)

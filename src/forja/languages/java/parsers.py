@@ -46,7 +46,7 @@ def _path(text: str, output: ToolOutput) -> str:
     if root and posix.startswith(root):
         posix = posix[len(root) :]
     elif PurePosixPath(posix).is_absolute() or re.match(r"^[A-Za-z]:/", posix):
-        posix = posix.rsplit("/", 1)[-1]  # outside the repository: only the name is ours to say
+        posix = posix.rpartition("/")[2]  # outside the repository: only the name is ours to say
     return posix.removeprefix("./")
 
 

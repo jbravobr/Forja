@@ -25,6 +25,7 @@ from forja.core.reports import ReportFormat, ReportSpec
 from forja.core.reports.readers import read_coverage
 from forja.languages.csharp import CSharpAdapter
 from forja.languages.csharp.adapter import COVERAGE_DIRECTORY, COVERAGE_REPORT, artifacts_dir
+from forja.languages.csharp.parsers import MAX_LINE
 from tests.core.adapters.conformance import language_problems
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "csharp"
@@ -318,3 +319,28 @@ def test_the_real_cobertura_report_names_the_lines_the_tests_ran(tmp_path: Path)
     assert calc is not None
     assert {6, 7, 8} <= calc.covered
     assert not calc.missed
+
+
+@pytest.mark.parametrize("operation", [Operation.FORMAT, Operation.LINT])
+def test_changes_reported_in_no_line_the_parser_knows_are_not_understood(
+    operation: Operation, tmp_path: Path
+) -> None:
+    log = tmp_path / "f.log"
+    log.write_text("Formatted code file 'Ugly.cs'.\n", encoding="utf-8")
+
+    assert isinstance(ADAPTER.parse(operation, ToolOutput(2, log, WORK)), Unparseable)
+    assert facts(ADAPTER.parse(operation, ToolOutput(0, log, WORK))) == []
+
+
+def test_a_line_of_exactly_the_limit_is_still_read_and_a_longer_one_is_not(
+    tmp_path: Path,
+) -> None:
+    def outcome_of(name: str) -> list[tuple[str, str, object]]:
+        log = tmp_path / "t.log"
+        log.write_text(f"  Passed {name} [1 ms]\n", encoding="utf-8")
+        return facts(ADAPTER.parse(Operation.TEST, ToolOutput(0, log, WORK)))
+
+    longest = "T" * (MAX_LINE - len("  Passed  [1 ms]"))
+
+    assert outcome_of(longest) == [("test.outcome", longest, "passed")]
+    assert outcome_of(longest + "T") == [("test.collected", "tests", 0)]

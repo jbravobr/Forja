@@ -7,13 +7,14 @@ from pathlib import Path
 import pytest
 
 from forja.core.events import EventLog
-from forja.core.states import ExecutionState, Level, TaskState
+from forja.core.idempotency.reconcilers import task_branch_name
+from forja.core.states import AttemptState, ExecutionState, Level, TaskState
 from forja.orchestrator.config import RunConfig
 from forja.orchestrator.phases import Orchestrator
 from forja.orchestrator.ports import AgentResult, AttemptContext, PlannedTask
 from forja.orchestrator.task_cycle import TaskCycle
 from tests.orchestrator.fakes import ScriptedAgent, ScriptedPlanner
-from tests.orchestrator.harness import MemoryWorld
+from tests.orchestrator.harness import RUN, MemoryWorld
 
 APART = (
     PlannedTask("work on a", ("src/a.py",), 8, 400),
@@ -184,6 +185,20 @@ def test_the_agents_own_branch_and_worktree_and_everything_outside_the_run_stay_
         ("hooks_changed", "hooks"),
     ):
         assert not ignore(difference(kind, subject)), (kind, subject)  # type: ignore[operator]
+
+
+def test_one_task_at_a_time_holds_the_agent_to_the_branches_of_the_other_tasks_too(
+    world: MemoryWorld,
+) -> None:
+    other = task_branch_name(RUN, "t2")
+    agent = Watched(meddle=lambda: world.memory.branches.setdefault(other, world.memory.base))
+    config: RunConfig = world.config.model_copy(update={"parallel_tasks": 1})
+
+    _, log = world.run(agent=agent, planner=ScriptedPlanner(APART), config=config)
+
+    payload = log.state.transition_payload(Level.ATTEMPT, "t1-a1", AttemptState.REJECTED)
+    assert payload is not None
+    assert other in str(payload["reason"])
 
 
 def test_the_limit_of_one_never_enters_the_scheduler_of_tasks_together(

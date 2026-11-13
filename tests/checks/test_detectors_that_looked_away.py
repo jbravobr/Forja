@@ -162,6 +162,9 @@ def test_text_without_a_marker_is_still_without_one() -> None:
         ("skipped", "passed", "passed"),
         ("passed", "skipped", "passed"),
         ("failed", "skipped", "failed"),
+        ("failed", "error", "failed"),  # as bad as each other: the first to be read stays
+        ("skipped", "unheard-of", "unheard-of"),  # an outcome nobody listed weighs as a pass
+        ("unheard-of", "passed", "unheard-of"),
     ],
 )
 def test_of_two_outcomes_under_one_name_the_worse_is_kept(
