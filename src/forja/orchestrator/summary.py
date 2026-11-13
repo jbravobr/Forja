@@ -19,6 +19,7 @@ from forja.core.events.state import RunState
 from forja.core.events.versioning import BadLine, parse_line
 from forja.core.isolation import Context, Guarantee, Status
 from forja.core.states import AttemptState, Level, StageState, TaskState
+from forja.orchestrator.budget import read_consumption
 from forja.orchestrator.config import Objective, RunConfig
 from forja.orchestrator.diary import (
     BLOCKED,
@@ -90,6 +91,7 @@ class Facts:
     baseline: dict[str, float] = field(default_factory=dict)
     final: dict[str, float] = field(default_factory=dict)
     differential: dict[str, JsonValue] = field(default_factory=dict)
+    unmeasured_calls: int = 0  # calls to the agent whose CLI did not say the tokens they used
 
 
 NOTE_NAMES = 10  # a note holds at most this many case names, each cut: events are small
@@ -110,7 +112,7 @@ def differential_note(base: DifferentialBase) -> dict[str, JsonValue]:
 
 
 def read_facts(log_path: Path) -> Facts:
-    facts = Facts()
+    facts = Facts(unmeasured_calls=read_consumption(log_path).unmeasured)
     seen: set[Premise] = set()
     for raw in [line for line in log_path.read_bytes().split(b"\n") if line]:
         try:
@@ -259,7 +261,7 @@ def render_summary(
         "",
         *_environment(state, config),
         *_agents(config),
-        *(f"- **{notice}**" for notice in (*notices, *_differential(facts))),
+        *(f"- **{notice}**" for notice in (*notices, *_differential(facts), *_tokens(facts))),
         "",
         "## Para publicar",
         "",
@@ -268,6 +270,16 @@ def render_summary(
         "",
     ]
     return "\n".join(lines)
+
+
+def _tokens(facts: Facts) -> list[str]:
+    """The limit of tokens is only as good as what the CLIs said they used."""
+    if not facts.unmeasured_calls:
+        return []
+    return [
+        f"O limite de tokens não foi medido: {facts.unmeasured_calls} chamada(s) ao agente não "
+        "informaram os tokens usados, e o que elas gastaram não entrou na conta."
+    ]
 
 
 _DIFFERENTIAL_SAYS = (

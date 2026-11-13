@@ -93,7 +93,7 @@ Só as variáveis de ambiente listadas abaixo chegam ao agente. As demais ficam 
 - Variáveis repassadas: `APPDATA`, `LOCALAPPDATA`, `COMSPEC`, `PATHEXT`, `CURSOR_API_KEY`, `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `NODE_USE_ENV_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`.
 - Credenciais: o login do usuário não é levado, porque a pasta de configuração é a da Forja. É preciso definir `CURSOR_API_KEY`.
 - Limites:
-  - O Cursor não reporta tokens. O consumo aparece como desconhecido, não como zero.
+  - O Cursor não reporta tokens. O consumo aparece como desconhecido, não como zero: o limite de tokens não para a execução, e o resumo diz quantas chamadas ficaram sem medida.
   - Chamadas de shell e de edição não aparecem no que a Forja mostra. Só leitura e escrita de arquivo aparecem.
   - As regras de negação não formam lista de permissões. Um papel com comandos permitidos pode rodar qualquer comando dentro do sandbox, e a Forja não impõe as permissões do papel.
   - A configuração `.cursor/cli.json` e as regras do próprio projeto são lidas pela CLI. Não há como desligar isso.
@@ -258,7 +258,7 @@ Não há outro canal. A CLI genérica recebe só o pacote.
 - Não restringe permissões por papel. A CLI pode fazer em cada papel mais do que o papel permite, e o resumo da execução registra isso. Os portões continuam olhando o que a tentativa mudou.
 - Não define `NO_COLOR` nem outras variáveis. Só chegam à CLI as genéricas e as de `ambiente`.
 - Não recebe instruções de voz por arquivo ou flag próprios. A seção de voz vai dentro do pacote, como para toda CLI.
-- Não lê eventos, erros nem consumo de tokens.
+- Não lê eventos, erros nem consumo de tokens. Cada chamada fica como consumo desconhecido: o limite de tokens não para a execução, e o resumo diz quantas chamadas ficaram sem medida.
 - Não entra na sugestão de autor de testes.
 - A prova de vida é mínima: uma CLI que cria `probe.txt` passa, mesmo que responda mal às outras tarefas.
 - `--config` executa o `comando` do arquivo, que roda um programa qualquer. Use só um `execucao.toml` em que você confia.

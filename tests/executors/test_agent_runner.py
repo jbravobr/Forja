@@ -252,8 +252,51 @@ def test_a_cli_that_goes_quiet_is_ended_and_reported(tmp_path: Path) -> None:
     assert "printed nothing" in result.error.message
 
 
-def test_a_usage_report_without_counts_is_counted_as_zero() -> None:
-    assert _payload(UsageActivity(None, None)) == {"type": "usage", "input": 0, "output": 0}
+def consumed(tmp_path: Path) -> tuple[int, int]:
+    found = read_consumption(tmp_path / "events.jsonl")
+    return found.tokens, found.unmeasured
+
+
+def test_a_call_that_said_its_tokens_is_measured_and_said_once(tmp_path: Path) -> None:
+    r = rig(tmp_path, GOOD)
+
+    go(work(r))
+
+    assert consumed(tmp_path) == (120, 0)
+    assert (tmp_path / "events.jsonl").read_text(encoding="utf-8").count('"usage"') == 1
+
+
+def test_a_call_that_ended_well_without_a_word_on_tokens_is_use_nobody_knows(
+    tmp_path: Path,
+) -> None:
+    r = rig(tmp_path, {**GOOD, "lines": []})
+
+    result = go(work(r))
+
+    assert result.error is None
+    assert consumed(tmp_path) == (0, 1)
+
+
+def test_a_call_that_ended_badly_is_use_nobody_knows_too(tmp_path: Path) -> None:
+    r = rig(tmp_path, {"exit": 3, "stderr": "boom"})
+
+    go(work(r))
+
+    assert consumed(tmp_path) == (0, 1)
+
+
+def test_a_call_ended_for_going_quiet_is_use_nobody_knows_too(tmp_path: Path) -> None:
+    r = rig(tmp_path, {"sleep": 60}, idle_limit=0.4, poll=0.05)
+
+    go(work(r))
+
+    assert consumed(tmp_path) == (0, 1)
+
+
+def test_a_usage_report_without_counts_is_kept_as_unknown_not_as_zero() -> None:
+    assert _payload(UsageActivity(None, None)) == {"type": "usage", "input": None, "output": None}
+    assert _payload(UsageActivity(7, None)) == {"type": "usage", "input": 7, "output": None}
+    assert _payload(UsageActivity(0, 0)) == {"type": "usage", "input": 0, "output": 0}
     assert _payload(UsageActivity(7, 3)) == {"type": "usage", "input": 7, "output": 3}
 
 

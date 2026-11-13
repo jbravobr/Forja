@@ -534,6 +534,7 @@ class Watch:
         self.last_output = clock()
         self.error: ErrorActivity | None = None
         self.operation_id = ""
+        self._usage_said = False
 
     def intent(self, operation_id: str, details: Mapping[str, object]) -> None:
         self.operation_id = operation_id
@@ -555,6 +556,16 @@ class Watch:
             return
         if isinstance(activity, ErrorActivity):
             self.error = activity
+        self._note(operation_id, activity)
+
+    def close(self, operation_id: str) -> None:
+        """A call that ended without a word about its tokens (a CLI that never says, one that
+        died first) is written down as use nobody knows, so the count does not read it as none."""
+        if not self._usage_said:
+            self._note(operation_id, UsageActivity())
+
+    def _note(self, operation_id: str, activity: AgentActivity) -> None:
+        self._usage_said = self._usage_said or isinstance(activity, UsageActivity)
         self._log.append_progress(
             Level.ATTEMPT,
             self._ctx.attempt_id,
@@ -568,7 +579,8 @@ class Watch:
 def _payload(activity: AgentActivity) -> dict[str, Any]:
     match activity:
         case UsageActivity(input_tokens, output_tokens):
-            return {"type": "usage", "input": input_tokens or 0, "output": output_tokens or 0}
+            # a CLI that does not say what it used leaves null here: unknown is not zero
+            return {"type": "usage", "input": input_tokens, "output": output_tokens}
         case TextActivity(text):
             return {"type": "text", "text": text[:200]}
         case FileReadActivity(path):
@@ -682,6 +694,7 @@ class ExecutorAgentRunner:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            watch.close(operation_id)
         if stalled:
             message = f"the agent printed nothing for {self._idle_limit:.0f} seconds"
             return AgentResult(error=ErrorActivity(message, ErrorKind.TRANSIENT))

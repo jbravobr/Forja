@@ -26,6 +26,7 @@ USAGE = "usage"
 class Consumption:
     seconds: float
     tokens: int
+    unmeasured: int = 0  # calls to the agent whose CLI did not say what they used
 
 
 def _moment(event: Event) -> datetime:
@@ -44,13 +45,14 @@ def read_consumption(log_path: Path) -> Consumption:
             break
         tally.add(event)
     tally.close_open_session()
-    return Consumption(tally.seconds, tally.tokens)
+    return Consumption(tally.seconds, tally.tokens, tally.unmeasured)
 
 
 class _Tally:
     def __init__(self) -> None:
         self.seconds = 0.0
         self.tokens = 0
+        self.unmeasured = 0
         self._started: datetime | None = None
         self._last: datetime | None = None  # read only after the first event sets it
 
@@ -73,7 +75,9 @@ class _Tally:
             self.seconds += (moment - self._started).total_seconds()
             self._started = None
         elif kind == AGENT_ACTIVITY and event.payload.get("type") == USAGE:
-            self.tokens += _count(event.payload.get("input")) + _count(event.payload.get("output"))
+            sent, received = event.payload.get("input"), event.payload.get("output")
+            self.tokens += _count(sent) + _count(received)
+            self.unmeasured += sent is None or received is None
 
 
 def _count(value: object) -> int:
