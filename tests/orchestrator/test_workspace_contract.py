@@ -450,6 +450,20 @@ def test_a_branch_made_while_watching_is_a_difference_and_one_made_before_is_not
     assert asyncio.run(watched()) == [("ref_added", "refs/heads/sneaky")]
 
 
+@pytest.mark.parametrize("who", [("t1", None), (None, "t1-a1")])
+def test_a_watch_told_only_the_task_or_only_the_attempt_overlooks_nothing(
+    backend: Backend, who: tuple[str | None, str | None]
+) -> None:
+    other = task_branch_name(RUN, "t2")  # with both named, the branch of another task is Forja's
+
+    async def watched() -> list[tuple[str, str]]:
+        async with backend.workspace.watch(*who, lambda: ["t1", "t2"]) as watch:
+            backend.make_branch(other)
+        return [(d.kind.value, d.subject) for d in watch.differences]
+
+    assert asyncio.run(watched()) == [("ref_added", f"refs/heads/{other}")]
+
+
 def test_nothing_changing_while_watching_is_no_difference(backend: Backend) -> None:
     async def watched() -> list[Any]:
         async with backend.workspace.watch() as watch:
