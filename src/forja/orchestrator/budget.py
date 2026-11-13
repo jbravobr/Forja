@@ -14,7 +14,7 @@ from pathlib import Path
 from forja.core.events.models import Event
 from forja.core.events.state import RunState
 from forja.core.events.versioning import BadLine, parse_line
-from forja.core.states import AttemptState, Level
+from forja.core.states import AttemptState, Level, StageState
 
 SESSION_STARTED = "session_started"
 SESSION_ENDED = "session_ended"
@@ -135,13 +135,26 @@ def quality_attempts(state: RunState, stage_id: str) -> int:
 
 
 def consecutive_infra_failures(state: RunState, stage_id: str) -> int:
-    """Infrastructure failures at the end of the stage's attempts, with nothing else after them."""
+    """Infrastructure failures at the end of the stage's attempts, with nothing else after them.
+
+    Only those after the last pause of the stage: a run that paused on the limit and was taken up
+    again has the whole limit again, or the first failure after the resume would pause it at
+    once. Failures of sessions that died without pausing still add up.
+    """
+    paused = (
+        state.transition_seq(Level.STAGE, stage_id, StageState.INFRA_PAUSED)
+        if state.has_target(Level.STAGE, stage_id)
+        else None
+    )
     count = 0
     for attempt in reversed(state.children_of(Level.ATTEMPT, stage_id)):
         if state.state_of(Level.ATTEMPT, attempt) is not AttemptState.DISCARDED:
             break
         payload = state.transition_payload(Level.ATTEMPT, attempt, AttemptState.DISCARDED) or {}
         if payload.get("infra_failure") is not True:
+            break
+        discarded = state.transition_seq(Level.ATTEMPT, attempt, AttemptState.DISCARDED)
+        if paused is not None and discarded is not None and discarded < paused:
             break
         count += 1
     return count

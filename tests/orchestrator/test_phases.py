@@ -416,6 +416,21 @@ def test_too_many_failures_in_a_row_pause_the_run_and_a_later_run_finishes_it(
     assert log.state.open_operations == {}
 
 
+def test_a_run_resumed_after_the_limit_of_failures_has_the_whole_limit_again(
+    world: MemoryWorld,
+) -> None:
+    outcome, log = world.run(agent=ScriptedAgent(errors={n: ErrorKind.TRANSIENT for n in range(3)}))
+    assert outcome.state is ExecutionState.PAUSED
+    log.close()
+
+    agent = ScriptedAgent(errors={0: ErrorKind.TRANSIENT, 1: ErrorKind.TRANSIENT})
+    resumed, log = world.run(agent=agent, log=world.open())
+
+    assert resumed.state is ExecutionState.DELIVERED
+    assert task_state(log, "t1") is TaskState.INTEGRATED
+    assert world.slept == [30.0, 60.0, 30.0, 60.0]
+
+
 def test_a_blocking_error_pauses_the_run_at_once(world: MemoryWorld) -> None:
     agent = ScriptedAgent(errors={0: ErrorKind.BLOCKING})
 

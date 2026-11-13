@@ -44,6 +44,8 @@ class _Target:
     stack: list[StrEnum] = field(default_factory=list)
     # Payload of the latest transition into each state, by state value (small facts only).
     entered: dict[str, dict[str, JsonValue]] = field(default_factory=dict)
+    # Sequence number of the latest transition into each state, by state value.
+    entered_seq: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -97,6 +99,10 @@ class RunState:
         """Payload of the latest transition into ``state``, or ``None`` if it never happened."""
         return self._targets[(level, target_id)].entered.get(state.value)
 
+    def transition_seq(self, level: Level, target_id: str, state: StrEnum) -> int | None:
+        """Sequence number of the latest transition into ``state``, or ``None`` without one."""
+        return self._targets[(level, target_id)].entered_seq.get(state.value)
+
     def previous_state(self, level: Level, target_id: str) -> StrEnum | None:
         """The state a paused or failed target left, which is where resuming sends it back."""
         stack = self._targets[(level, target_id)].stack
@@ -149,11 +155,13 @@ class RunState:
                         event.parent_id,
                         move.new_stack,
                         {move.new_state.value: payload},
+                        {move.new_state.value: event.seq},
                     )
                 else:
                     move.target.state = move.new_state
                     move.target.stack = move.new_stack
                     move.target.entered[move.new_state.value] = payload
+                    move.target.entered_seq[move.new_state.value] = event.seq
             case IntentEvent():
                 self._open[event.operation_id] = OpenOperation(
                     event.operation,

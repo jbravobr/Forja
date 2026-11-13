@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 
 from forja.core.events import EventLog
-from forja.core.states import AttemptState, Level
+from forja.core.states import AttemptState, Level, StageState
 from forja.orchestrator.budget import (
     Consumption,
     Meter,
@@ -213,6 +213,50 @@ def test_a_discard_that_was_not_an_infrastructure_failure_ends_the_run_of_failur
 
         assert consecutive_infra_failures(log.state, "s1") == 0
         assert consecutive_infra_failures(log.state, "none") == 0
+
+
+def test_infrastructure_failures_from_before_the_last_pause_of_the_stage_are_not_counted(
+    tmp_path: Path, clock: ManualClock
+) -> None:
+    with open_with(clock, tmp_path / "events.jsonl") as log:
+        start_stage(log)
+        log.append_transition(Level.STAGE, "s1", StageState.PENDING, StageState.IN_PROGRESS)
+        add_attempt(log, "a1", AttemptState.DISCARDED, infra_failure=True)
+        add_attempt(log, "a2", AttemptState.DISCARDED, infra_failure=True)
+        assert consecutive_infra_failures(log.state, "s1") == 2
+
+        log.append_transition(Level.STAGE, "s1", StageState.IN_PROGRESS, StageState.INFRA_PAUSED)
+        assert consecutive_infra_failures(log.state, "s1") == 0
+
+        log.append_transition(Level.STAGE, "s1", StageState.INFRA_PAUSED, StageState.IN_PROGRESS)
+        assert consecutive_infra_failures(log.state, "s1") == 0
+        add_attempt(log, "a3", AttemptState.DISCARDED, infra_failure=True)
+        assert consecutive_infra_failures(log.state, "s1") == 1
+
+        log.append_transition(Level.STAGE, "s1", StageState.IN_PROGRESS, StageState.INFRA_PAUSED)
+        log.append_transition(Level.STAGE, "s1", StageState.INFRA_PAUSED, StageState.IN_PROGRESS)
+        add_attempt(log, "a4", AttemptState.DISCARDED, infra_failure=True)
+        add_attempt(log, "a5", AttemptState.DISCARDED, infra_failure=True)
+        assert consecutive_infra_failures(log.state, "s1") == 2
+
+
+def test_the_state_knows_when_each_state_was_last_entered(
+    tmp_path: Path, clock: ManualClock
+) -> None:
+    with open_with(clock, tmp_path / "events.jsonl") as log:
+        start_stage(log)
+        created = log.state.last_seq
+        assert log.state.transition_seq(Level.STAGE, "s1", StageState.PENDING) == created
+        assert log.state.transition_seq(Level.STAGE, "s1", StageState.IN_PROGRESS) is None
+
+        note(log, "tick")
+        log.append_transition(Level.STAGE, "s1", StageState.PENDING, StageState.IN_PROGRESS)
+        assert log.state.transition_seq(Level.STAGE, "s1", StageState.IN_PROGRESS) == created + 2
+        assert log.state.transition_seq(Level.STAGE, "s1", StageState.PENDING) == created
+
+        log.append_transition(Level.STAGE, "s1", StageState.IN_PROGRESS, StageState.INFRA_PAUSED)
+        log.append_transition(Level.STAGE, "s1", StageState.INFRA_PAUSED, StageState.IN_PROGRESS)
+        assert log.state.transition_seq(Level.STAGE, "s1", StageState.IN_PROGRESS) == created + 4
 
 
 # -- more edges of the reading -------------------------------------------------------------------
