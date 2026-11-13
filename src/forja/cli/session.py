@@ -9,7 +9,8 @@ import hashlib
 import os
 import random
 import sys
-from collections.abc import Awaitable, Callable, Mapping
+from collections import Counter
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -454,6 +455,16 @@ async def _context(
             if not config.scope or in_scope(key[0], config.scope)
         }
 
+    async def churn(worktree: Path) -> Mapping[str, int]:
+        """How many commits changed each file, in the history the run starts from."""
+        names = await git.at(worktree).lines("log", "--format=", "--name-only", config.base_commit)
+        return Counter(name for name in names if name)
+
+    async def weak_nets(
+        worktree: Path, found: Sequence[tuple[str, str]]
+    ) -> frozenset[tuple[str, str]]:
+        return await measurer.weak_nets(worktree, sinks, found)
+
     commands: tuple[str, ...] = ()
     if locate_in_path("forja"):
         commands = ("forja agente lint", "forja agente medir")
@@ -493,10 +504,18 @@ async def _context(
         Producer.DOCUMENTER: runner(config.implementer, Producer.DOCUMENTER)
     }
     complexity = policy.values().get("complexity", {})
-    planner: Planner = ComplexityPlanner(
-        functions, lambda file: ccn_limit(complexity, language_of(file))
-    )
     test_root = _test_root(policy.test_root, registry, repo)
+    planner: Planner = ComplexityPlanner(
+        functions,
+        lambda file: ccn_limit(complexity, language_of(file)),
+        churn=churn,
+        weak_nets=weak_nets,
+        test_root=test_root,
+    )
+    if config.objective is Objective.REFACTOR:  # a task whose tests are weak gets them first
+        agents[Producer.TEST_AUTHOR] = runner(
+            config.test_author or config.implementer, Producer.TEST_AUTHOR
+        )
     if config.fix is not None:
         agents[Producer.TEST_AUTHOR] = runner(
             config.test_author or config.implementer, Producer.TEST_AUTHOR

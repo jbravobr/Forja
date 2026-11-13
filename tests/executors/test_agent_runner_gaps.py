@@ -113,14 +113,20 @@ AUTHOR_OUTPUT = {
 }
 
 
-def _author(tmp_path: Path, reviews: str):  # type: ignore[no-untyped-def]
+def _author(tmp_path: Path, reviews: str, characterizes: bool = False):  # type: ignore[no-untyped-def]
     script = {
         "writes": {"tests/test_a.py": "def test_a():\n    assert True\n"},
         "saida": AUTHOR_OUTPUT,
         "lines": [USAGE],
     }
     r = rig(tmp_path, script, role=Producer.TEST_AUTHOR)
-    task = replace(r.ctx.task, role=Producer.TEST_AUTHOR, test_root="tests", reviews=reviews)
+    task = replace(
+        r.ctx.task,
+        role=Producer.TEST_AUTHOR,
+        test_root="tests",
+        reviews=reviews,
+        characterizes=characterizes,
+    )
     return replace(r, ctx=replace(r.ctx, task=task))
 
 
@@ -137,6 +143,15 @@ def test_a_test_author_that_reviews_another_stage_does_not_declare_a_manifest(
     tmp_path: Path,
 ) -> None:
     r = _author(tmp_path, reviews="t1-s")
+
+    go(work(r))
+    go(settle(r.runner.apply_diff(r.ctx)))
+
+
+def test_a_test_author_that_writes_before_a_refactoring_does_not_declare_a_manifest(
+    tmp_path: Path,
+) -> None:
+    r = _author(tmp_path, reviews="", characterizes=True)
 
     go(work(r))
     go(settle(r.runner.apply_diff(r.ctx)))

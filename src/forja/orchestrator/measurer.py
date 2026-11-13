@@ -32,7 +32,12 @@ from forja.checks.change_record_gate import ChangeRecordCheck
 from forja.checks.changes import ChangeKind, Changes, read_before, read_changes
 from forja.checks.citations import CitationCheck
 from forja.checks.comments import CommentsCheck
-from forja.checks.complexity import ComplexityCheck, lizard_plan, parse_functions
+from forja.checks.complexity import (
+    ComplexityCheck,
+    lizard_plan,
+    parse_functions,
+    parse_spans,
+)
 from forja.checks.coverage import CoverageShare
 from forja.checks.crap import CrapCheck
 from forja.checks.dependency_audit import DependencyAuditCheck, is_artifact
@@ -134,6 +139,8 @@ STATIC_METRICS = (
     "functions",
 )  # what a task is measured on afterwards
 HEAD = "HEAD"
+PLANNING = "planning"  # what a measurement made for the plan is filed under
+NO_CHANGES = Changes((), 0, ())  # the planner measures code as it is: no attempt wrote it
 UNSTABLE = "unstable"
 PASSING = "passing"
 E2E_UNSTABLE = "e2e_unstable"
@@ -636,14 +643,63 @@ class PipelineMeasurer:
         listed = await self._git.at(worktree).lines("ls-files")
         return tuple(p for p in listed if self._classify(p) is FileClass.PRODUCTION)
 
-    async def _complexity(
+    async def _lizard_lines(
         self, tools: Tools, worktree: Path, files: tuple[str, ...]
-    ) -> dict[tuple[str, str], int]:
+    ) -> list[str]:
         plan = lizard_plan(self._lizard, worktree, files)
         execution = await tools.run("complexity", plan)
         if not execution.finished or execution.result.exit_code != 0:
             raise Undecided(execution.inconclusive("complexity"))
-        return parse_functions(execution.lines)
+        return execution.lines
+
+    async def _complexity(
+        self, tools: Tools, worktree: Path, files: tuple[str, ...]
+    ) -> dict[tuple[str, str], int]:
+        return parse_functions(await self._lizard_lines(tools, worktree, files))
+
+    async def weak_nets(
+        self, worktree: Path, sinks: SinkFactory, functions: Sequence[tuple[str, str]]
+    ) -> frozenset[tuple[str, str]]:
+        """The functions of ``functions`` (file, name) the tests do not protect as gate 7 asks of
+        new code: a line no test runs, or a mutation score under the limit. For the planner.
+
+        A function that cannot be measured (no coverage tool, a file the mutation rules cannot
+        read, tests that do not run) is not called weak: nothing was seen of it."""
+        files = tuple(dict.fromkeys(file for file, _ in functions))
+        if not files:
+            return frozenset()
+        tools = self._tools(sinks, Level.EXECUTION, self._run_id)
+        try:
+            spans = parse_spans(await self._lizard_lines(tools, worktree, files))
+        except Undecided:
+            return frozenset()
+        active = self._active(worktree, files)
+        shares = {id(adapter): CoverageShare() for adapter in active}
+        head = (await self._git.at(worktree).lines("rev-parse", "HEAD"))[0]
+        values = self._values.get("mutation", {})
+        data = GateInput(worktree, head, PLANNING, PLANNING, PLANNING, values=values)
+        weak: set[tuple[str, str]] = set()
+        for file, name in functions:
+            adapter, span = owner_of(active, file), spans.get((file, name))
+            if adapter is None or span is None:
+                continue
+            check = MutationCheck(
+                tools,
+                adapter,
+                worktree,
+                NO_CHANGES,
+                (file,),
+                self._env,
+                adapter.language,
+                share=shares[id(adapter)],
+            )
+            try:
+                lines = {file: frozenset(range(span.first, span.last + 1))}
+                if not await check.protects(data, lines):
+                    weak.add((file, name))
+            except Undecided:
+                continue
+        return frozenset(weak)
 
     async def functions(self, worktree: Path, sinks: SinkFactory) -> dict[tuple[str, str], int]:
         """The cyclomatic complexity of every function of the production code, for the planner."""
@@ -996,8 +1052,10 @@ class PipelineMeasurer:
         passing: frozenset[str],
     ) -> Check:
         """The test author's tests are red on purpose, so its stage has its own judge of them;
-        the tests of an extra stage describe code that exists, so they must pass."""
-        if ctx.task.role is not Producer.TEST_AUTHOR or ctx.task.reviews:
+        the tests of an extra stage describe code that exists, so they must pass, and so do the
+        ones written before a refactoring."""
+        task = ctx.task
+        if task.role is not Producer.TEST_AUTHOR or task.reviews or task.characterizes:
             return TestsCheck(tools, active, ctx.worktree, unstable, passing)
         assert expectations is not None  # the cycle gives them to every test author stage
         return RedGreenCheck(

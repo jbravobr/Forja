@@ -166,6 +166,47 @@ def test_a_refactoring_package_keeps_its_own_instructions(tmp_path: Path) -> Non
     assert "frozen" not in text and "must FAIL" not in text
 
 
+def before_a_refactoring(tmp_path: Path, role: Producer, **more: str) -> str:
+    (tmp_path / "src").mkdir(exist_ok=True)
+    task = TaskInfo(
+        "t1", "t1-t", "reduce f", ("src/a.py",), 4, 200, role, "tests", characterizes=True, **more
+    )
+    return build_package(replace(context(tmp_path, ()), task=task), Redactor())
+
+
+def test_the_test_author_of_a_refactoring_is_told_to_write_tests_that_pass_now(
+    tmp_path: Path,
+) -> None:
+    text = before_a_refactoring(tmp_path, Producer.TEST_AUTHOR)
+
+    assert "You are writing tests before a refactoring" in text
+    assert "must PASS on the code as it is now" in text
+    assert "Only under `tests`. The production files below are for reading." in text
+    assert "only under `tests`." in text
+    assert "### `src/a.py`" in text
+    assert ".forja-agent/saida.json" in text
+    assert "must FAIL" not in text and "criterion" not in text
+
+
+def test_the_implementer_of_a_refactoring_with_frozen_tests_is_still_refactoring(
+    tmp_path: Path,
+) -> None:
+    text = before_a_refactoring(tmp_path, Producer.IMPLEMENTER, frozen_digest="abc")
+
+    assert "You are refactoring existing code" in text
+    assert "Do not change tests" in text
+    assert "defect" not in text
+
+
+def test_the_tests_asked_for_the_new_lines_of_a_refactoring_keep_their_own_instructions(
+    tmp_path: Path,
+) -> None:
+    text = before_a_refactoring(tmp_path, Producer.TEST_AUTHOR, reviews="t1-s")
+
+    assert "You are writing tests before a refactoring" not in text
+    assert "You are writing tests for a defect" in text
+
+
 def test_earlier_attempts_are_a_file_to_read_before_acting_and_only_when_there_are_some(
     tmp_path: Path,
 ) -> None:
@@ -361,6 +402,7 @@ def test_every_template_that_takes_assumptions_shows_their_shape() -> None:
     templates = [
         agent_runner.INSTRUCTIONS,
         agent_runner.AUTHOR_INSTRUCTIONS,
+        agent_runner.CHARACTERIZATION_INSTRUCTIONS,
         agent_runner.FIX_INSTRUCTIONS,
         agent_runner.DOCUMENTER_INSTRUCTIONS,
         agent_runner.SPECIFIER_INSTRUCTIONS,
@@ -377,6 +419,7 @@ def test_every_template_that_shows_the_actions_forbids_the_keys_it_does_not_show
     templates = [
         agent_runner.INSTRUCTIONS,
         agent_runner.AUTHOR_INSTRUCTIONS,
+        agent_runner.CHARACTERIZATION_INSTRUCTIONS,
         agent_runner.FIX_INSTRUCTIONS,
         agent_runner.DOCUMENTER_INSTRUCTIONS,
     ]
@@ -402,6 +445,7 @@ def test_a_refactoring_still_adds_no_dependency() -> None:
     from forja.orchestrator import agent_runner
 
     assert "do not add dependencies" in agent_runner.INSTRUCTIONS
+    assert "Do not add dependencies" in agent_runner.CHARACTERIZATION_INSTRUCTIONS
 
 
 def test_the_documenter_instructions_name_every_section_of_the_readme_model() -> None:

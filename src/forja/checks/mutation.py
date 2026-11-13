@@ -241,6 +241,19 @@ class MutationCheck:
         report = await self._run(data, mutants)
         return self._verdict(report, min_score(data, self.language))
 
+    async def protects(self, data: GateInput, lines: Mapping[str, frozenset[int]]) -> bool:
+        """Whether the tests protect ``lines`` as the gate asks of the lines an attempt adds: a
+        test runs every one of them and the score of their mutants reaches the limit. The planner
+        asks it of code nobody changed yet. Raises ``Undecided`` where the gate is inconclusive."""
+        coverage = await run_coverage(self.tools, self.adapter, self.worktree, data, self.share)
+        mutants = build_mutants(self.worktree, lines, coverage, whole_functions=False)
+        if untested_lines(lines, mutants, coverage):
+            return False
+        if not mutants:
+            return True
+        score = (await self._run(data, mutants)).score
+        return score is None or score >= min_score(data, self.language)
+
     async def _run(self, data: GateInput, mutants: list[Mutant]) -> MutationReport:
         with tempfile.TemporaryDirectory(prefix="forja-mutants-", ignore_cleanup_errors=True) as d:
             runner = AdapterRunner(self.adapter, self.host_env, Path(d) / "logs")

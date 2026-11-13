@@ -12,7 +12,7 @@ Comandos e flags estão em [comandos.md](comandos.md). Variáveis de ambiente es
 | Autor de testes (só em `corrigir` e `criar`) | `--cli-testes` ou `cli_testes` | `executavel_testes` | `--modelo-testes` ou `modelo_testes` |
 | Documentador, especificador e arqueólogo | a do implementador | a do implementador | o do implementador |
 
-O autor de testes só existe quando a execução escreve testes. Em `refatorar` e `investigar`, as chaves e flags `*_testes` não têm efeito.
+O autor de testes só existe quando a execução escreve testes. Em `refatorar` e `investigar`, as chaves e flags `*_testes` não têm efeito. Os testes que uma refatoração escreve antes de mudar código pouco testado são escritos pela CLI do implementador.
 
 ### Implementador
 

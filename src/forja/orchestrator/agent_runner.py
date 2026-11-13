@@ -146,6 +146,31 @@ guessed", "reason": "why", "missing_evidence": "what would settle it"}}, never p
 answer with one short sentence.
 """
 
+CHARACTERIZATION_INSTRUCTIONS = """\
+You are writing tests before a refactoring. The task above names code that is about to be
+restructured, and the tests that exist do not protect it. Your tests say what that code does
+today, so that a change of its behaviour makes one of them fail. You do not touch production code.
+
+{commands}Read the files you need and write the tests with the edit tools, only {tests_in}.
+Every test must PASS on the code as it is now: assert what the code does, right or wrong, not
+what it should do. Run every branch of the code the task names and assert on its results, so that
+a changed operator, constant or condition makes a test fail. Your work is rejected if a test fails
+or errors out, or if a test that exists now stops passing. Do not change the tests that exist;
+add new files or new tests. Do not add dependencies.
+
+When you are done, write the file `{agent_dir}/{output}` with this shape and nothing else, listing
+every file you created, modified or removed (the list is checked against what really changed):
+
+{{"actions": [{{"summary": "what changed", "reason": "what the tests protect",
+"files": [{{"path": "tests/test_x.py", "change": "created"}}]}}]}}
+
+`change` is one of `created`, `modified`, `removed`. Use no key that is not in the shape: an extra
+key, such as `evidence` in an action, makes the file invalid and costs an attempt. Add
+`"assumptions"` only for something you had to guess: a list of objects {{"statement": "what you
+guessed", "reason": "why", "missing_evidence": "what would settle it"}}, never plain strings. Then
+answer with one short sentence.
+"""
+
 FIX_INSTRUCTIONS = """\
 You are fixing a defect. The tests {tests_in} were written for it and are frozen: they
 fail now and must pass when you are done. Do not change, add, move or remove anything
@@ -404,10 +429,12 @@ def build_package(
         if specifier
         else ARCHAEOLOGIST_INSTRUCTIONS
         if archaeologist
+        else CHARACTERIZATION_INSTRUCTIONS
+        if author and task.characterizes and not task.reviews
         else AUTHOR_INSTRUCTIONS
         if author
         else FIX_INSTRUCTIONS
-        if task.frozen_digest
+        if task.frozen_digest and not task.characterizes  # a refactoring fixes no defect
         else INSTRUCTIONS
     )
     parts = [
@@ -679,7 +706,9 @@ class ExecutorAgentRunner:
                 _check_criteria(output)
             if self._role is Producer.ARCHAEOLOGIST:
                 _check_findings(output)
-            if self._role is Producer.TEST_AUTHOR and not ctx.task.reviews:
+            author = self._role is Producer.TEST_AUTHOR
+            # tests of code that exists answer to no criterion: there is no manifest to make
+            if author and not ctx.task.reviews and not ctx.task.characterizes:
                 _check_manifest(output)
             declaration = ChangeDeclaration.from_output(output)
             after = build_manifest(source, exclude={AGENT_DIR})

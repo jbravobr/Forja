@@ -57,6 +57,9 @@ TRACE_BYTES = MAX_PAYLOAD_BYTES - 512  # the margin holds the task id and the ke
 RETURNED = (
     "Returned to the test author: the new code has lines no test runs. Write tests for them; "
 )
+# The test author of a refactoring is told so; short, for the subject of its commit to keep the
+# name of the file.
+CHARACTERIZE = "before the change:"
 _FINISHED = (AttemptState.REJECTED, AttemptState.DISCARDED, AttemptState.COMMITTED)
 
 
@@ -138,11 +141,23 @@ class TaskCycle:
             test_root,
             f"{task_id}-{prefix}",
             "" if author else self._frozen_digest(task_id),
+            characterizes=self._characterizes(task_id),
         )
+
+    def _characterizes(self, task_id: str) -> bool:
+        """Whether the task's test author writes tests of what the code does today: a run with no
+        criteria has no defect for the tests to show, so they come before a refactoring."""
+        config = self._ctx.config
+        if config.fix is not None or config.create is not None:
+            return False
+        return Producer.TEST_AUTHOR in self.roles(task_id)
 
     def _intent(self, task_id: str, role: Producer, planned: str) -> str:
         """What the stage is told to do. The stages after the specifier get the criteria it wrote
-        added to the plan's intent, which could not have them when it was made."""
+        added to the plan's intent, which could not have them when it was made. The test author
+        of a refactoring is told its tests come before the change the plan names."""
+        if role is Producer.TEST_AUTHOR and self._characterizes(task_id):
+            return f"{CHARACTERIZE} {planned}"
         if role is Producer.SPECIFIER or Producer.SPECIFIER not in self.roles(task_id):
             return planned
         if self._state.state_of(Level.STAGE, f"{task_id}-c") is not StageState.COMMITTED:
@@ -254,6 +269,7 @@ class TaskCycle:
         author = self.info(info.task_id, Producer.TEST_AUTHOR)
         return replace(
             author,
+            intent=info.intent,  # the work it tests, not the tests that came before it
             stage_id=f"{info.task_id}-t{number}",
             attempt_prefix=f"{info.task_id}-t{number}a",
             test_root=author.test_root or self._ctx.test_root,

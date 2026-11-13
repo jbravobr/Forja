@@ -89,6 +89,10 @@ Sem `texto` nem `-f`, a Forja pergunta. Sem terminal, e sem a descrição no `ex
 
 Melhora a estrutura do código sem mudar o comportamento. Não precisa de descrição.
 
+A Forja escolhe as funções acima do limite de complexidade. A ordem é a da complexidade vezes o número de commits que mudaram o arquivo, do maior para o menor: código complexo que muda sempre vem antes de código complexo em que ninguém mexe.
+
+Antes da primeira tarefa, a Forja mede os testes de cada função escolhida, com a cobertura e a mutação do gate 7. Quando uma linha da função não tem teste, ou a nota de mutação fica abaixo do limite (`min_score`), a tarefa começa por uma etapa a mais: o agente escreve testes do que o código faz hoje, que precisam passar sem nenhuma mudança no código. Esses testes ficam congelados, e a refatoração vem depois. Função que não pode ser medida (linguagem sem cobertura, testes que não rodam) não ganha essa etapa.
+
 ```bash
 forja refatorar                         # a Forja pergunta o que ela precisa
 forja refatorar --escopo src/inv        # só a pasta src/inv

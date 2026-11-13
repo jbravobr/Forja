@@ -443,3 +443,44 @@ def test_the_run_draws_the_spread_of_its_waits_and_asks_the_cli_whether_the_netw
         assert asked == [("claude-code", Path("claude"))] * 2
     finally:
         close(session)
+
+
+def test_the_file_the_history_changed_most_is_planned_first(repo: Path, tmp_path: Path) -> None:
+    for number in range(3):
+        with (repo / "src" / "a.py").open("a", encoding="utf-8") as file:
+            file.write(f"# change {number}{NL}")
+        git(repo, "commit", "-q", "-am", f"change {number}")
+    session = asyncio.run(_open(config_for(repo), None, tmp_path / "home"))
+    try:
+        intents = plan_intents(session, repo).split(NL)
+        assert ["inside" in intent for intent in intents] == [True, False]
+    finally:
+        close(session)
+
+
+def test_the_changes_counted_are_those_of_the_history_the_run_starts_from(
+    repo: Path, tmp_path: Path
+) -> None:
+    config = config_for(repo)
+    for number in range(3):
+        with (repo / "src" / "a.py").open("a", encoding="utf-8") as file:
+            file.write(f"# change {number}{NL}")
+        git(repo, "commit", "-q", "-am", f"change {number}")
+    session = asyncio.run(_open(config, None, tmp_path / "home"))
+    try:
+        # one commit each at the base: the order is that of the names
+        intents = plan_intents(session, repo).split(NL)
+        assert ["outside" in intent for intent in intents] == [True, False]
+    finally:
+        close(session)
+
+
+def test_a_refactoring_has_a_test_author_for_the_code_the_tests_do_not_protect(
+    repo: Path, tmp_path: Path
+) -> None:
+    session = asyncio.run(_open(config_for(repo), None, tmp_path / "home"))
+    try:
+        author: Any = session.context.agents[Producer.TEST_AUTHOR]
+        assert author._role is Producer.TEST_AUTHOR
+    finally:
+        close(session)

@@ -1,8 +1,10 @@
 """The planner: the worst functions first, within the budget, with the limits of the budget."""
 
 import asyncio
+from collections.abc import Sequence
 from pathlib import Path
 
+from forja.core.artifacts.models import Producer
 from forja.orchestrator.config import Budget, FixRequest
 from forja.orchestrator.planner import ComplexityPlanner, FixPlanner
 from forja.orchestrator.ports import Baseline, PlannedTask
@@ -95,3 +97,88 @@ def test_a_fix_plan_puts_the_numbered_criteria_in_the_intent_of_its_one_task() -
     assert [task.intent for task in plan] == [
         "page 1 is wrong\n\nCriteria:\n1. page 1 is the first items\n2. the last page is shorter"
     ]
+
+
+CHURN = {"src/a.py": 9, "src/b.py": 1, "src/c.py": 2}
+
+
+def hotspots(
+    budget: Budget = Budget(),  # noqa: B008
+    churn: dict[str, int] | None = None,
+    weak: tuple[tuple[str, str], ...] = (),
+    asked: list[list[tuple[str, str]]] | None = None,
+) -> list[PlannedTask]:
+    async def functions(worktree: Path) -> dict[tuple[str, str], int]:
+        return FOUND
+
+    async def changes(worktree: Path) -> dict[str, int]:
+        return CHURN if churn is None else churn
+
+    async def weak_nets(
+        worktree: Path, found: Sequence[tuple[str, str]]
+    ) -> tuple[tuple[str, str], ...]:
+        if asked is not None:
+            asked.append(list(found))
+        return weak
+
+    planner = ComplexityPlanner(functions, 15, churn=changes, weak_nets=weak_nets, test_root="spec")
+    return list(asyncio.run(planner.plan(Path("."), Baseline(True), budget)))
+
+
+def test_a_function_comes_first_by_its_complexity_times_the_changes_of_its_file() -> None:
+    tasks = hotspots()
+
+    # tangled 22 x 9 = 198; tie_a and tie_b 20 x 2 = 40; worse 40 x 1 = 40, the most complex of 40
+    assert [t.intent for t in tasks] == [
+        "reduce the complexity of tangled in src/a.py",
+        "reduce the complexity of worse in src/b.py",
+        "reduce the complexity of tie_a in src/c.py",
+        "reduce the complexity of tie_b in src/c.py",
+    ]
+
+
+def test_a_file_the_history_never_changed_comes_last_and_is_still_planned() -> None:
+    tasks = hotspots(churn={"src/a.py": 1, "src/c.py": 1})
+
+    assert [t.scope for t in tasks] == [("src/a.py",), ("src/c.py",), ("src/c.py",), ("src/b.py",)]
+
+
+def test_a_function_the_tests_do_not_protect_gets_its_tests_first() -> None:
+    tasks = hotspots(weak=(("src/b.py", "worse"),))
+
+    assert [(t.stages, t.test_root) for t in tasks] == [
+        ((Producer.IMPLEMENTER, Producer.DOCUMENTER), ""),
+        ((Producer.TEST_AUTHOR, Producer.IMPLEMENTER, Producer.DOCUMENTER), "spec"),
+        ((Producer.IMPLEMENTER, Producer.DOCUMENTER), ""),
+        ((Producer.IMPLEMENTER, Producer.DOCUMENTER), ""),
+    ]
+
+
+def test_only_the_functions_the_budget_reaches_have_their_tests_measured() -> None:
+    asked: list[list[tuple[str, str]]] = []
+
+    hotspots(Budget(tasks=2), asked=asked)
+
+    assert asked == [[("src/a.py", "tangled"), ("src/b.py", "worse")]]
+
+
+def test_no_tests_are_measured_for_an_empty_plan() -> None:
+    asked: list[list[tuple[str, str]]] = []
+
+    assert hotspots(churn={}, asked=asked, budget=Budget(tasks=1))[0].scope == ("src/b.py",)
+    assert asked == [[("src/b.py", "worse")]]
+
+    async def nothing(worktree: Path) -> dict[tuple[str, str], int]:
+        return {}
+
+    async def weak_nets(worktree: Path, found: Sequence[tuple[str, str]]) -> list[tuple[str, str]]:
+        raise AssertionError("nothing was planned")
+
+    planner = ComplexityPlanner(nothing, 15, weak_nets=weak_nets)
+
+    assert asyncio.run(planner.plan(Path("."), Baseline(True), Budget())) == []
+
+
+def test_without_a_measure_of_the_tests_no_task_has_a_test_author() -> None:
+    assert {t.stages for t in plan()} == {(Producer.IMPLEMENTER, Producer.DOCUMENTER)}
+    assert {t.test_root for t in plan()} == {""}
