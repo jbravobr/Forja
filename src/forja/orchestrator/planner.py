@@ -50,7 +50,7 @@ class ComplexityPlanner:
         changes = await self._churn(worktree) if self._churn is not None else None
         worst = sorted(
             (
-                (ccn * (1 if changes is None else changes.get(file, 0)), ccn, file, name)
+                (ccn if changes is None else ccn * changes.get(file, 0), ccn, file, name)
                 for (file, name), ccn in found.items()
                 if ccn > self._max_ccn(file)
             ),

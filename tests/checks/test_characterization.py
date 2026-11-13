@@ -2,12 +2,14 @@
 told which functions the tests do not protect."""
 
 import asyncio
+from collections.abc import Mapping
 from typing import Any
 
 import pytest
 
+from forja.checks.mutation import MutationCheck
 from forja.core.artifacts.models import Producer
-from forja.core.gates import Verdict
+from forja.core.gates import GateInput, Verdict
 from forja.orchestrator.ports import AttemptContext, TaskInfo
 from tests.checks.support import Scene, sinks
 from tests.checks.test_measurer import findings, ran
@@ -116,3 +118,35 @@ def test_the_limit_of_the_score_is_the_one_of_the_policy(repo: Repo, tmp_path: A
     scene.measurer = scene.make_measurer(values=loose)
 
     assert weak(scene, "both") == set()
+
+
+def answers(monkeypatch: pytest.MonkeyPatch, protected: bool) -> list[Mapping[str, frozenset[int]]]:
+    """Stands in for the measure of one function; keeps the lines it was asked about."""
+    asked: list[Mapping[str, frozenset[int]]] = []
+
+    async def protects(
+        self: MutationCheck, data: GateInput, lines: Mapping[str, frozenset[int]]
+    ) -> bool:
+        asked.append(lines)
+        return protected
+
+    monkeypatch.setattr(MutationCheck, "protects", protects)
+    return asked
+
+
+def test_a_function_is_measured_over_its_own_lines_and_weak_when_they_are_not_protected(
+    scene: Scene, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked = answers(monkeypatch, protected=False)
+
+    assert weak(scene, "add") == {"add"}
+    assert asked == [{MOD: frozenset({1, 2})}]
+
+
+def test_a_function_the_tests_protect_is_not_weak(
+    scene: Scene, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked = answers(monkeypatch, protected=True)
+
+    assert weak(scene, "add") == set()
+    assert len(asked) == 1
