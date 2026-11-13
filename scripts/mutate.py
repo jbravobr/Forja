@@ -10,8 +10,15 @@ decides which sites are run (a site no test reaches is reported as uncovered, no
 is judged by the test command, and a failing or timed-out run kills it. The choice of tests is the
 script's: only those that exercise the file, found from a coverage run that records which test ran
 each line. A surviving mutant fails the run unless ``mutation-suppressions.toml`` names it, with a
-reason a person approved. Nothing in the source can switch the gate off: a comment that does is
-rejected by the scope gate.
+reason a person approved.
+
+What makes it faster changes no verdict. The coverage run deals the test files into several runs
+that go at the same time. The unchanged copy of each file, where every test of the file has to
+pass, is run over several processes. A mutant is judged first by the test files that run its
+line; one that survives them is judged again by every test of the file before it counts as a
+survivor, so the answer is always the one all of them give.
+
+Nothing in the source can switch the gate off: a comment that does is rejected by the scope gate.
 
 Exit: 0 every mutant was killed or suppressed; 2 the tests fail before any mutation; 3 a mutant
 survived; 4 the canary failed. It runs wherever Python runs, Windows included.
@@ -20,6 +27,9 @@ survived; 4 the canary failed. It runs wherever Python runs, Windows included.
 import argparse
 import ast
 import asyncio
+import functools
+import hashlib
+import io
 import json
 import os
 import signal
@@ -29,11 +39,14 @@ import tempfile
 import time
 import tomllib
 from collections import defaultdict
+from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from forja.core.reports.models import MutantStatus, MutationReport
 from forja.mutation import apply_site, discover
 from forja.mutation.executor import (
+    TIMEOUT_FACTOR,
     BaselineFailed,
     Mutant,
     TestsDidNotRun,
@@ -81,32 +94,99 @@ def deselected() -> list[str]:
     return [arg for name in settings().get("deselect", []) for arg in ("--deselect", name)]
 
 
-def record_coverage(reuse: bool) -> dict[str, list[str]]:
-    """Which test files ran each source file, from one run of the fast tests."""
+LinesToTests = dict[str, dict[int, set[str]]]
+
+
+def record_coverage(reuse: bool, workers: int) -> tuple[dict[str, list[str]], LinesToTests]:
+    """Which test files ran each source file, and which ran each of its lines, from one run of
+    the fast tests."""
     COVERAGE.mkdir(parents=True, exist_ok=True)
     data, report = COVERAGE / ".coverage", COVERAGE / "contexts.json"
     if not (reuse and report.exists() and LCOV.exists()):
-        measure_coverage(data, report)
-    files = json.loads(report.read_text(encoding="utf-8"))["files"]
-    tests_of: dict[str, set[str]] = defaultdict(set)
+        measure_coverage(data, report, workers)
+    by_line = tests_by_line(json.loads(report.read_text(encoding="utf-8"))["files"])
+    tests_of = {
+        name: ordered(name, set().union(*lines.values())) for name, lines in by_line.items()
+    }
+    return {name: tests for name, tests in tests_of.items() if tests}, by_line
+
+
+def tests_by_line(files: dict[str, dict[str, dict[str, list[str]]]]) -> LinesToTests:
+    """The test files that ran each line of each source file, from the contexts of the coverage
+    report. A statement of several lines is reached or it is not, so its other lines take the
+    tests of the first (as ``widen`` does with the hits)."""
+    found: LinesToTests = {}
     for name, info in files.items():
-        for contexts in info.get("contexts", {}).values():
-            for context in contexts:
-                module = test_file(context)
-                if module:
-                    tests_of[Path(name).as_posix()].add(module)
-    return {name: ordered(name, tests) for name, tests in tests_of.items()}
+        lines: dict[int, set[str]] = defaultdict(set)
+        for written, contexts in info.get("contexts", {}).items():
+            modules = {module for module in map(test_file, contexts) if module}
+            lines[int(written)] |= modules
+        path = Path(name) if Path(name).is_absolute() else ROOT / name
+        if path.is_file():
+            for first, last in statement_spans(path.read_text(encoding="utf-8")):
+                for number in range(first + 1, last + 1):
+                    lines[number] |= lines.get(first, set())
+        found[Path(name).as_posix()] = dict(lines)
+    return found
 
 
-def measure_coverage(data: Path, report: Path) -> None:
+def tests_of_line(by_line: LinesToTests, file: str, line: int, everything: list[str]) -> list[str]:
+    """The test files that run ``line``, in the order of ``everything`` (the tests of the whole
+    file). A line no test is named for (one that only runs while a module is imported) keeps
+    them all."""
+    reached = by_line.get(file, {}).get(line)
+    return [test for test in everything if test in reached] if reached else everything
+
+
+def all_test_files() -> list[str]:
+    """Every test file, the largest first: a rough order of how long each takes to run."""
+    found = [
+        path
+        for path in (ROOT / "tests").rglob("*.py")
+        if path.name.startswith("test_") or path.name.endswith("_test.py")
+    ]
+    found.sort(key=lambda path: (-path.stat().st_size, path.as_posix()))
+    return [path.relative_to(ROOT).as_posix() for path in found]
+
+
+def shards(files: list[str], count: int) -> list[list[str]]:
+    """``files`` dealt into at most ``count`` hands, each of about the same weight, and each
+    in the order of the names: the order pytest gives the files of a directory, which some
+    tests count on without saying (a fixture one ``conftest.py`` takes from another)."""
+    hands = [files[start :: max(1, count)] for start in range(max(1, count))]
+    return [sorted(hand) for hand in hands if hand]
+
+
+SHARD_OK = (0, 5)  # 5: every test of the hand was left out, which is no failure
+
+
+def measure_coverage(data: Path, report: Path, workers: int) -> None:
+    """Run the fast tests under coverage, the test files dealt into ``workers`` runs that go at
+    the same time, and join what each one saw. Every test still runs once, in a process that
+    runs its file from start to end, so what each test covers is what one run alone would say."""
     data.unlink(missing_ok=True)
-    tested = run(
-        sys.executable, "-m", "coverage", "run", f"--data-file={data}", "-m", "pytest", "-q",
-        "-p", "no:cacheprovider", "--no-header", "-n0", "-m", "not slow", *deselected(), "tests",
-        env=TESTS_ENV,
-    )  # fmt: skip
-    if tested.returncode != 0:
-        print(tested.stdout[-3000:], file=sys.stderr)
+    for stale in COVERAGE.glob(".coverage.part-*"):
+        stale.unlink()
+    hands = shards(all_test_files(), workers)
+    parts = [COVERAGE / f".coverage.part-{number}" for number in range(len(hands))]
+
+    def one(part: Path, files: list[str]) -> subprocess.CompletedProcess[str]:
+        return run(
+            sys.executable, "-m", "coverage", "run", f"--data-file={part}", "-m", "pytest", "-q",
+            "-p", "no:cacheprovider", "--no-header", "-n0", "-m", "not slow", *deselected(),
+            *files, env=TESTS_ENV,
+        )  # fmt: skip
+
+    with ThreadPoolExecutor(max_workers=len(hands) or 1) as pool:
+        finished = list(pool.map(one, parts, hands))
+    for tested in finished:
+        if tested.returncode not in SHARD_OK:
+            print(tested.stdout[-3000:], file=sys.stderr)
+            raise SystemExit(2)
+    written = [str(part) for part in parts if part.is_file()]
+    joined = run(sys.executable, "-m", "coverage", "combine", f"--data-file={data}", *written)
+    if joined.returncode != 0:
+        print(joined.stderr, file=sys.stderr)
         raise SystemExit(2)
     for kind, target in (("json", report), ("lcov", LCOV)):
         extra = ["--show-contexts"] if kind == "json" else []
@@ -185,6 +265,7 @@ def ordered(source: str, tests: set[str]) -> list[str]:
     return sorted(tests, key=lambda test: (stem not in Path(test).stem, test))
 
 
+@functools.cache  # the report names each test once for every line it ran
 def test_file(context: str) -> str | None:
     """The test file of a coverage context (``tests.pkg.test_mod.Class.test_x``), if any."""
     parts = [part for part in context.split("|")[0].split(".") if part]
@@ -246,21 +327,59 @@ def stop_tree(pid: int) -> None:
         os.killpg(pid, signal.SIGKILL)
 
 
+def fingerprint(content: bytes) -> bytes:
+    return hashlib.sha256(content).digest()
+
+
 class PytestRunner:
-    """Runs the chosen test files in a copy of the project, as the executor asks."""
+    """Runs the chosen test files in a copy of the project, as the executor asks.
+
+    ``tests`` are the test files of the whole source file. With ``source`` and ``narrowed``, a
+    copy that holds a mutant (known by the content of ``source``) is judged by the tests of the
+    mutated line alone; the unchanged copy, and a mutant nobody narrowed, by all of them.
+    """
 
     __test__ = False
 
-    def __init__(self, tests: list[str], deselect: list[str]) -> None:
+    def __init__(
+        self,
+        tests: list[str],
+        deselect: list[str],
+        source: str | None = None,
+        narrowed: Mapping[bytes, list[str]] | None = None,
+        base_workers: int = 1,
+    ) -> None:
         self.tests, self.deselect = tests, deselect
+        self.source, self.narrowed = source, narrowed or {}
+        self.base_workers = max(1, base_workers)
+        self.base_seconds: float | None = None  # how long the unchanged copy took, once known
+
+    def chosen(self, root: Path) -> list[str]:
+        if self.source is None:
+            return self.tests
+        return self.narrowed.get(fingerprint((root / self.source).read_bytes()), self.tests)
+
+    def patience(self, timeout: float | None) -> float | None:
+        """How long a mutant may run. The executor gives ten times what the unchanged copy took;
+        that run was spread over ``base_workers`` processes and a mutant runs in one, so a mutant
+        is given that many times more: never less than ten times the run of one process."""
+        if timeout is None or self.base_seconds is None:
+            return timeout
+        return max(timeout, TIMEOUT_FACTOR * self.base_workers * self.base_seconds)
 
     async def __call__(self, root: Path, timeout: float | None) -> TestVerdict:
+        # The executor asks without a limit only for the unchanged copy, before any mutant. Every
+        # test of the file has to pass there, and they are many: that one run is spread over
+        # ``base_workers`` processes. A mutant stops at its first failure and runs in one.
+        base = timeout is None and self.base_workers > 1
         # --timeout: a mutant that loops forever fails its test in seconds, instead of the
         # executor waiting ten times the whole baseline for it
         command = [
-            sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider", "-n0",
-            f"--timeout={TEST_TIMEOUT}", "-m", "not slow", *self.deselect, *self.tests,
+            sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider",
+            f"-n{self.base_workers if base else 0}",
+            f"--timeout={TEST_TIMEOUT}", "-m", "not slow", *self.deselect, *self.chosen(root),
         ]  # fmt: skip
+        started = time.monotonic()
         # the copy's own source must be the one imported, not the installed project's
         env = {
             **os.environ,
@@ -273,12 +392,14 @@ class PytestRunner:
             start_new_session=sys.platform != "win32",
         )  # fmt: skip
         try:
-            code = await asyncio.wait_for(process.wait(), timeout)
+            code = await asyncio.wait_for(process.wait(), self.patience(timeout))
         except TimeoutError:
             stop_tree(process.pid)
             await process.wait()
             return TestVerdict.TIMED_OUT
         if code == 0:
+            if timeout is None:
+                self.base_seconds = time.monotonic() - started
             return TestVerdict.PASSED
         if code in (1, 2):  # a test failed, or the changed code no longer loads
             return TestVerdict.FAILED
@@ -288,6 +409,45 @@ class PytestRunner:
 def judge(mutants: list[Mutant], runner: PytestRunner, workers: int) -> MutationReport:
     with tempfile.TemporaryDirectory(prefix="forja-mutants-", ignore_cleanup_errors=True) as copies:
         return asyncio.run(run_mutants(ROOT, Path(copies), mutants, runner, workers=workers))
+
+
+def judge_file(
+    file: str,
+    mutants: list[Mutant],
+    tests: list[str],
+    by_line: LinesToTests,
+    workers: int,
+) -> tuple[MutationReport, int]:
+    """The verdict on every mutant of ``file``, and how many had to be judged twice.
+
+    Each mutant is first judged by the test files that run its line: a test that never reaches
+    the line cannot notice the change, and ``tests`` (every test file that touches the source
+    file) is many times more than that. Killed there, it is killed by ``tests`` too, which holds
+    those files. A mutant that survives there is not yet a survivor: coverage may have named the
+    wrong test for a line (what runs while a fixture is set up is counted for the test before),
+    so it is judged again by all of ``tests``, as every mutant used to be. The verdicts are the
+    ones the whole of ``tests`` gives; only the time changes.
+    """
+    narrowed = {
+        fingerprint(mutant.mutated): tests_of_line(by_line, file, mutant.line, tests)
+        for mutant in mutants
+        if mutant.covered
+    }
+    first = judge(mutants, PytestRunner(tests, deselected(), file, narrowed, workers), workers)
+    doubted = [
+        index
+        for index, (mutant, result) in enumerate(zip(mutants, first.mutants, strict=True))
+        if result.status is MutantStatus.SURVIVED
+        and narrowed.get(fingerprint(mutant.mutated), tests) != tests
+    ]
+    if not doubted:
+        return first, 0
+    whole = PytestRunner(tests, deselected(), base_workers=workers)
+    again = judge([mutants[i] for i in doubted], whole, workers)
+    results = list(first.mutants)
+    for index, result in zip(doubted, again.mutants, strict=True):
+        results[index] = result
+    return MutationReport(tuple(results)), len(doubted)
 
 
 def canary() -> bool:
@@ -345,6 +505,9 @@ def report_survivors(report: MutationReport, allowed: list[dict[str, str]]) -> i
 
 def main() -> int:
     args = parse_args()
+    # a line at a time even into a pipe or a file: whoever waits an hour sees where the run is
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(line_buffering=True)
     files = args.files or (all_sources() if args.all else changed_sources())
     if not files:
         print("no source file changed: nothing to mutate")
@@ -355,7 +518,9 @@ def main() -> int:
         return 4
     print(f"canary: {time.monotonic() - started:.0f}s")
     started = time.monotonic()
-    tests_of = record_coverage(args.reuse_coverage)
+    if not args.reuse_coverage:
+        print(f"coverage by test: the fast tests, in {args.workers} run(s) at once...")
+    tests_of, by_line = record_coverage(args.reuse_coverage, args.workers)
     covered = covered_lines()
     print(f"coverage by test: {time.monotonic() - started:.0f}s")
     allowed = suppressions()
@@ -368,13 +533,16 @@ def main() -> int:
             continue
         started = time.monotonic()
         mutants = mutants_of(file, ROOT, covered.get(file, frozenset()))
+        place = f"[{number}/{len(files)}] {file}"
+        print(f"{place}: {len(mutants)} mutant(s), {len(tests)} test file(s)...")
         try:
-            report = judge(mutants, PytestRunner(tests, deselected()), args.workers)
+            report, twice = judge_file(file, mutants, tests, by_line, args.workers)
         except (BaselineFailed, TestsDidNotRun) as error:
             print(f"{file}: the tests fail before any mutation ({error})")
             return 2
         took = time.monotonic() - started
-        print(f"[{number}/{len(files)}] {file}: {len(tests)} test file(s), {took:.0f}s", flush=True)
+        again = f", {twice} judged again by every test" if twice else ""
+        print(f"{place}: {len(tests)} test file(s), {took:.0f}s{again}", flush=True)
         survivors += report_survivors(report, allowed)
         missed = len(report.with_status(MutantStatus.UNCOVERED))
         if missed:
