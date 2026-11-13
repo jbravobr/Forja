@@ -112,7 +112,7 @@ REDUCE_MOTION=1 forja refatorar         # sem animação
 | Arquivo | Conteúdo |
 | --- | --- |
 | `config.toml` | suas escolhas lembradas: `cli`, `executaveis`, `clis` e `interface`. Veja `execucao-toml.md` |
-| `provas.json` | cache das provas de vida das CLIs feitas por `forja doctor` |
+| `provas.json` | cache das provas de vida das CLIs, cada uma com o momento em que foi feita; vale por um dia |
 
 ### No repositório
 

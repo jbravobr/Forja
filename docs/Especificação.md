@@ -433,7 +433,7 @@ A Forja não chama modelos diretamente: invoca CLIs de agentes em modo headless.
 
 ### Prova de vida
 
-Antes do ponto sem retorno, cada CLI recebe uma tarefa trivial num diretório temporário, com tempo-limite. Verifica-se que ela roda sem interação, está autenticada e alcança o endpoint configurado (como o gateway corporativo), usa bash, edita arquivos e produz saída legível. O resultado fica em cache por caminho e versão; uma atualização da CLI dispara nova prova.
+Antes do ponto sem retorno, cada CLI recebe uma tarefa trivial num diretório temporário, com tempo-limite. Verifica-se que ela roda sem interação, está autenticada e alcança o endpoint configurado (como o gateway corporativo), usa bash, edita arquivos e produz saída legível. O resultado fica em cache por caminho e versão, por um dia; uma atualização da CLI dispara nova prova, e `forja doctor` sempre prova de novo.
 
 ### Adaptador de executor
 

@@ -4,9 +4,12 @@ After the confirmation there are no more questions. Everything that is asked her
 ``execucao.toml`` holds, so ``forja --config`` can run the same thing without a person.
 """
 
+import dataclasses
+import hashlib
 import json
 import tempfile
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,6 +54,7 @@ from forja.orchestrator.facts import Fact, FactsError, parse_facts
 AVAILABLE = frozenset({"refatorar", "corrigir", "investigar", "criar"})
 PENDING_BASE = "sem-commit-ainda"  # the base of a new project: the scaffold makes it, after the yes
 CRITERIA_FILE = "criterios.json"
+PROOF_VALID_SECONDS = 24 * 60 * 60  # a proof of life older than a day is made again
 
 
 class Refused(Exception):
@@ -319,6 +323,24 @@ def cli_templates(profile: Perfil, saved: Execucao | None) -> dict[str, CommandT
     return {name: model.template() for name, model in described.items()}
 
 
+def _template_hash(template: CommandTemplate | None) -> str:
+    """What tells one way of calling the CLI from another; empty for a CLI the Forja knows."""
+    if template is None:
+        return ""
+    described = json.dumps(dataclasses.asdict(template), sort_keys=True)
+    return hashlib.sha256(described.encode("utf-8")).hexdigest()[:16]
+
+
+def _still_valid(proven_at: object, now: float) -> bool:
+    """A proof counts from the moment it was made until it is ``PROOF_VALID_SECONDS`` old.
+
+    What an older Forja wrote (``true``) carries no moment and does not count.
+    """
+    if isinstance(proven_at, bool) or not isinstance(proven_at, int | float):
+        return False
+    return 0 <= now - proven_at < PROOF_VALID_SECONDS
+
+
 async def prove(
     name: str,
     choice: ExecutorChoice,
@@ -326,19 +348,29 @@ async def prove(
     cache: Path,
     console: Console,
     template: CommandTemplate | None = None,
+    *,
+    fresh: bool = False,
+    clock: Callable[[], float] = time.time,
 ) -> str:
-    """The version of the CLI, after proving it works; remembered per path and version."""
+    """The version of the CLI, after proving it works.
+
+    The proof is remembered per path, version and command template, for ``PROOF_VALID_SECONDS``:
+    a login expires without the executable changing. ``fresh`` proves again whatever is
+    remembered, which is what ``forja doctor`` asks.
+    """
     adapter = adapter_for(name, template)
     version = await executable_version(adapter, choice.path)
     if problem := version_problem(adapter, version):
         raise Refused(f"{choice.path}: {problem}.")
     assert version is not None
-    key = f"{choice.path}|{version}"
+    key = f"{choice.path}|{version}|{_template_hash(template)}"
     try:
         proven = json.loads(cache.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         proven = {}
-    if key in proven:
+    if not isinstance(proven, dict):
+        proven = {}
+    if not fresh and _still_valid(proven.get(key), clock()):
         return version
     console.say(f"Provando que {name} {version} funciona (uma tarefa de teste)…")
     problems = await run_probe(adapter, choice.path, environ)
@@ -348,7 +380,7 @@ async def prove(
             "A configuração da CLI (login, modelo, gateway) é sua e precisa estar pronta antes. "
             "Corrija e rode `forja doctor`."
         )
-    proven[key] = True
+    proven[key] = clock()
     try:
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(proven), encoding="utf-8")

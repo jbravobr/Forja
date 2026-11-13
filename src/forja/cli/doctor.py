@@ -315,7 +315,7 @@ async def _agent_check(
     if problem := version_problem(adapter, version):
         return Check(label, False, problem, "atualize a CLI")
     try:
-        await prove(name, found[0], environ, cache, console, template)
+        await prove(name, found[0], environ, cache, console, template, fresh=True)
     except Refused as refused:
         return Check(label, False, refused.message, "corrija a CLI e rode `forja doctor`")
     return Check(label, True, f"{found[0].path} ({version}) responde a uma tarefa de teste")

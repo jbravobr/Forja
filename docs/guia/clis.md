@@ -62,7 +62,7 @@ modelo_testes = "outro-modelo"
 
 A Forja traz adaptador para `claude-code`, `codex`, `cursor` e `grok`. `claude-code` é a padrão. A Gemini CLI está suspensa: não é registrada e não pode ser escolhida.
 
-Tudo sobre a CLI em si (instalação, login, chave de API, modelo padrão, gateway) é do usuário e precisa estar pronto antes de rodar a Forja. A Forja só confere a versão e prova que a CLI funciona, com uma tarefa de teste: criar `probe.txt` com o conteúdo `forja-ok`. A prova é lembrada por caminho e versão do executável.
+Tudo sobre a CLI em si (instalação, login, chave de API, modelo padrão, gateway) é do usuário e precisa estar pronto antes de rodar a Forja. A Forja só confere a versão e prova que a CLI funciona, com uma tarefa de teste: criar `probe.txt` com o conteúdo `forja-ok`. A prova é lembrada por um dia, por caminho e versão do executável (e, numa CLI genérica, pelo `comando` descrito); depois disso é refeita, porque um login expira sem o executável mudar. `forja doctor` sempre refaz a prova.
 
 Só as variáveis de ambiente listadas abaixo chegam ao agente. As demais ficam de fora. `NO_COLOR=1` é definida em todos os adaptadores.
 

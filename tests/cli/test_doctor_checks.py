@@ -248,13 +248,17 @@ def agent_check() -> Check:
 def test_an_agent_that_answers_the_test_task_is_ok(
     installed: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def proven(*args: object) -> str:
+    asked: list[object] = []
+
+    async def proven(*args: object, fresh: bool = False) -> str:
+        asked.append(fresh)
         return "ok"
 
     monkeypatch.setattr(doctor_module, "prove", proven)
 
     check = agent_check()
 
+    assert asked == [True]  # the doctor never answers from a proof it remembers
     assert check.ok
     assert check.detail == "p (1.2.3) responde a uma tarefa de teste"
 
@@ -274,7 +278,7 @@ def test_an_agent_with_an_old_version_is_reported(
 def test_an_agent_that_refuses_the_test_task_is_reported(
     installed: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def refused(*args: object) -> str:
+    async def refused(*args: object, **kwargs: object) -> str:
         raise Refused("recusou")
 
     monkeypatch.setattr(doctor_module, "prove", refused)
