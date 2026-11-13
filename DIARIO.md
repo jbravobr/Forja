@@ -398,3 +398,36 @@ Só os três de `keep_worst` são de código escrito nesta leva. Os outros 21 es
 - **Itens 15 a 20 e 31 a 40** (o 30 adiado), e os restos dos itens 2 e 6.
 - **Verificação que falta:** a da lista acima.
 - **Decisões do dono ainda abertas:** ADR 0041 (item 24); item 29; as três do item 5; a observação sobre a etapa de caracterização (item 12).
+
+## 13/11/2026 — item 15: token que a CLI não informou é desconhecido, não zero
+
+### O que foi feito
+
+| Mudança | Arquivos | Teste novo | Commit |
+| --- | --- | --- | --- |
+| O evento de uso guarda `null` no lado que a CLI não informou. Antes gravava `0`. | `orchestrator/agent_runner.py` | três linhas em `tests/executors/test_agent_runner.py` | `df54063` |
+| Chamada que termina sem nenhum evento de uso (CLI genérica, CLI que caiu, CLI encerrada por silêncio) ganha um evento de uso desconhecido, escrito pela Forja ao fim da chamada. | `orchestrator/agent_runner.py` | quatro em `tests/executors/test_agent_runner.py` | `df54063` |
+| `Consumption.unmeasured` conta as chamadas com um lado desconhecido. O lado informado continua somado. | `orchestrator/budget.py` | oito casos em `tests/orchestrator/test_unmeasured_tokens.py` | `df54063` |
+| O resumo diz, em "Ambiente e garantias", quantas chamadas ficaram sem medida e que o gasto delas não entrou na conta. Sem chamada desconhecida, não diz nada. | `orchestrator/summary.py` | três em `test_unmeasured_tokens.py` | `df54063` |
+| Guia: Cursor e CLI genérica. | `docs/guia/clis.md` | nenhum | `df54063` |
+
+### Conclusões
+
+- **O plano falava só do Cursor; a CLI genérica tinha o mesmo furo por outro caminho.** O Cursor emite um evento de uso sem números. A genérica não emite evento nenhum, e contar só `null` a deixaria de fora. Por isso a chamada sem evento de uso também é registrada.
+- **O limite continua sem parar a execução com essas CLIs.** Desconhecido soma zero na conta. O que mudou é que o registro e o resumo dizem que não foi medido. Parar ou recusar a execução quando a CLI não informa tokens seria comportamento novo, que ninguém pediu.
+- **Registro antigo não muda de leitura.** Eventos gravados antes têm `0` nos dois lados e continuam contando como medidos.
+- **O painel não mudou.** Mostra `0/<limite>` para uma CLI que não informa tokens.
+- **Falta de chave conta como não informado.** Evento de uso sem `input` ou sem `output` entra em `unmeasured`.
+
+### Verificação
+
+- `ruff check .`, `ruff format --check src tests` e `mypy` strict: limpos, 622 arquivos.
+- `pytest -m "not slow" -n 6`: 9658 aprovados, 41 pulados, nenhuma falha, 533 s.
+- Mutação em `df54063`, no checkout de verificação: `orchestrator/budget.py` (30 mutantes), `orchestrator/summary.py` (48) e `orchestrator/agent_runner.py` (120), saída 0, nenhum sobrevivente.
+- Não rodou: suíte completa com `slow` na ponta; E2E com agente real; nenhuma execução com o Cursor de verdade.
+
+### Pendências
+
+- **Itens 16 a 20 e 31 a 40** (o 30 adiado), e os restos dos itens 2 e 6.
+- **Verificação que falta:** suíte completa com `slow`; mutação de `common.py`, dos `parsers.py` de C# e Java, de `ports.py`, `cli/session.py`, `cli/detect.py`, `cli/prepare.py`, `cli/doctor.py`, `testing/workspace.py` e `testing/repo.py`.
+- **Decisões do dono ainda abertas:** ADR 0041 (item 24); item 29; as três do item 5; a observação sobre a etapa de caracterização (item 12).
