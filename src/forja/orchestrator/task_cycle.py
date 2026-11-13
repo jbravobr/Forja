@@ -42,6 +42,7 @@ from forja.orchestrator.findings import findings_artifact_id, findings_of, findi
 from forja.orchestrator.outcome import StopRun
 from forja.orchestrator.ports import (
     NO_COMMIT,
+    STAGE_LETTER,
     AgentResult,
     AttemptContext,
     Expectations,
@@ -117,12 +118,7 @@ class TaskCycle:
         payload = self._state.transition_payload(Level.TASK, task_id, TaskState.PENDING) or {}
         scope = payload.get("scope")
         author = role is Producer.TEST_AUTHOR
-        letter = {
-            Producer.TEST_AUTHOR: "t",
-            Producer.DOCUMENTER: "d",
-            Producer.SPECIFIER: "c",
-            Producer.ARCHAEOLOGIST: "f",
-        }.get(role, "s")
+        letter = STAGE_LETTER.get(role, STAGE_LETTER[Producer.IMPLEMENTER])
         prefix = {
             Producer.TEST_AUTHOR: "ta",
             Producer.DOCUMENTER: "da",

@@ -18,7 +18,7 @@ from forja.core.idempotency.reconcilers import normalize_stage_id
 from forja.core.states import AttemptState, Level, StageState, TaskState
 from forja.orchestrator.config import Objective, RunConfig
 from forja.orchestrator.facts import Fact
-from forja.orchestrator.ports import NO_COMMIT
+from forja.orchestrator.ports import NO_COMMIT, role_of_stage
 from forja.orchestrator.summary import Premise
 
 # how a rejected attempt says which check stopped it (``describe_stop`` in the task cycle)
@@ -78,12 +78,11 @@ def cli_of(role: Producer, config: RunConfig) -> str:
 def stages_of(state: RunState, config: RunConfig) -> list[Stage]:
     found = []
     for task in state.children_of(Level.TASK, state.run_id):
-        payload = state.transition_payload(Level.TASK, task, TaskState.PENDING) or {}
-        named = payload.get("stages")
-        roles = [Producer(str(n)) for n in named] if isinstance(named, list) else []
-        stages = state.children_of(Level.STAGE, task)
-        for role, stage in zip(roles or [Producer.IMPLEMENTER], stages, strict=False):
-            found.append(_stage(state, config, task, stage, role))
+        for stage in state.children_of(Level.STAGE, task):
+            # by the id, not the place in the plan: an extra test author stage comes in between
+            role = role_of_stage(task, stage)
+            if role is not None:
+                found.append(_stage(state, config, task, stage, role))
     return found
 
 

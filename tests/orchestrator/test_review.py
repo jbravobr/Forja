@@ -7,12 +7,13 @@ import pytest
 
 from forja.core.artifacts.llm_output import Criterion, CriterionLevel
 from forja.core.artifacts.models import Producer
+from forja.core.artifacts.schemas import CriteriaBody
 from forja.core.events import EventLog
 from forja.core.events.state import RunState
 from forja.core.states import Level
 from forja.orchestrator.config import ExecutorRef, FixRequest, Objective, RunConfig, load_config
 from forja.orchestrator.facts import Fact
-from forja.orchestrator.ports import PlannedTask
+from forja.orchestrator.ports import STAGE_LETTER, PlannedTask, role_of_stage
 from forja.orchestrator.review import (
     NO_GATE,
     Landed,
@@ -29,6 +30,7 @@ from tests.orchestrator.fakes import (
     PASSED,
     PASSED_WITH_A_GAP,
     REJECTED,
+    UNTESTED,
     ScriptedAgent,
     ScriptedMeasurer,
     ScriptedPlanner,
@@ -410,7 +412,7 @@ class WithoutStages:
         return self.inner.transition_payload(level, ident, state)  # type: ignore[arg-type]
 
 
-def test_stages_without_a_list_of_roles_are_read_as_far_as_the_roles_go(
+def test_the_role_of_a_stage_does_not_need_the_list_of_roles_of_the_task(
     world: MemoryWorld,
 ) -> None:
     log = refactor(world)
@@ -418,4 +420,82 @@ def test_stages_without_a_list_of_roles_are_read_as_far_as_the_roles_go(
 
     found = stages_of(cast(RunState, WithoutStages(log.state)), config)
 
-    assert [stage.role for stage in found] == [Producer.IMPLEMENTER]
+    assert [(stage.id, stage.role) for stage in found] == [
+        ("t1-s", Producer.IMPLEMENTER),
+        ("t1-d", Producer.DOCUMENTER),
+    ]
+
+
+def test_an_extra_test_author_stage_does_not_shift_the_roles_after_it(
+    world: MemoryWorld,
+) -> None:
+    other = ExecutorRef(name="other-cli", path="/bin/other", version="2.0")
+    criteria = CriteriaBody(criteria=CRITERIA)
+    config = world.config.model_copy(
+        update={
+            "objective": Objective.FIX,
+            "fix": FixRequest(description=DESCRIPTION, criteria=criteria),
+            "test_author": other,
+        }
+    )
+    plan = PlannedTask(
+        DESCRIPTION,
+        ("src/a.py",),
+        8,
+        400,
+        stages=(Producer.TEST_AUTHOR, Producer.IMPLEMENTER, Producer.DOCUMENTER),
+        test_root="tests",
+    )
+    more = {"tests/test_b.py": "def test_b():\n    assert True\n"}
+    _, log = world.run(
+        config=config,
+        measurer=ScriptedMeasurer(verdicts=(PASSED, UNTESTED, PASSED, PASSED)),
+        agent=ScriptedAgent(edits=[CODE]),
+        agents={
+            Producer.TEST_AUTHOR: ScriptedAgent(edits=[TESTS, more]),
+            Producer.DOCUMENTER: ScriptedAgent(edits=[README]),
+        },
+        planner=ScriptedPlanner((plan,)),
+    )
+
+    found = [(s.id, s.role, s.cli) for s in stages_of(log.state, load_config(log.state))]
+
+    assert found == [
+        ("t1-t", Producer.TEST_AUTHOR, "other-cli"),
+        ("t1-s", Producer.IMPLEMENTER, "fake-cli"),
+        ("t1-t2", Producer.TEST_AUTHOR, "other-cli"),
+        ("t1-d", Producer.DOCUMENTER, "fake-cli"),
+    ]
+    assert "`Stage-Id: t1-d` (documentador)" in render(log)
+    assert "`Stage-Id: t1-t2` (autor de testes)" in render(log)
+
+
+@pytest.mark.parametrize(
+    ("stage", "role"),
+    [
+        ("t1-s", Producer.IMPLEMENTER),
+        ("t1-t", Producer.TEST_AUTHOR),
+        ("t1-d", Producer.DOCUMENTER),
+        ("t1-c", Producer.SPECIFIER),
+        ("t1-f", Producer.ARCHAEOLOGIST),
+        ("t1-t2", Producer.TEST_AUTHOR),
+        ("t1-t13", Producer.TEST_AUTHOR),
+        ("t1-s2", None),
+        ("t1-d2", None),
+        ("t1-tx", None),
+        ("t1-t²", None),
+        ("t1-x", None),
+        ("t1-", None),
+        ("t1", None),
+        ("t1s", None),
+        ("t2-s", None),
+        ("t11-s", None),
+    ],
+)
+def test_the_id_of_a_stage_says_which_role_did_it(stage: str, role: Producer | None) -> None:
+    assert role_of_stage("t1", stage) is role
+
+
+def test_every_role_that_has_a_stage_has_a_letter_of_its_own() -> None:
+    assert set(STAGE_LETTER) == set(Producer) - {Producer.FORJA}
+    assert len(set(STAGE_LETTER.values())) == len(STAGE_LETTER)

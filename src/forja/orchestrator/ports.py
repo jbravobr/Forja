@@ -33,6 +33,31 @@ from forja.orchestrator.workspace_git import CommitMessage
 # the roles whose stage ends in an artifact of the run, with nothing changed and nothing committed
 NO_COMMIT = frozenset({Producer.SPECIFIER, Producer.ARCHAEOLOGIST})
 
+# the letter that ends the id of a role's stage (``<task>-s``); an extra test author stage has a
+# number after its letter (``<task>-t2``)
+STAGE_LETTER: Mapping[Producer, str] = {
+    Producer.IMPLEMENTER: "s",
+    Producer.TEST_AUTHOR: "t",
+    Producer.DOCUMENTER: "d",
+    Producer.SPECIFIER: "c",
+    Producer.ARCHAEOLOGIST: "f",
+}
+
+
+def role_of_stage(task_id: str, stage_id: str) -> Producer | None:
+    """The role that did the stage, read from its id; ``None`` for an id no role makes."""
+    suffix = stage_id.removeprefix(f"{task_id}-")
+    if suffix == stage_id:
+        return None
+    for role, letter in STAGE_LETTER.items():
+        if suffix == letter:
+            return role
+    number = suffix.removeprefix(STAGE_LETTER[Producer.TEST_AUTHOR])
+    if number != suffix and number.isascii() and number.isdigit():
+        return Producer.TEST_AUTHOR
+    return None
+
+
 # (level, target id, operation) -> where a process reports to; the orchestrator builds these.
 SinkFactory = Callable[[Level, str, str], EventSink]
 
