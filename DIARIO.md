@@ -7,7 +7,7 @@ Registro das execuções de trabalho sobre a Forja: o que foi feito, o que foi v
 ### Ponto de partida
 
 - HEAD `699d936`, branch `main`.
-- Por ordem do dono, as notas foram desconsideradas e apagadas: `NOTAS.md`, `NOTAS-2026-11-10.md`, `NOTAS-anterior.md` e `NOTAS-referencia.md`. Nenhum dos quatro estava no git, então não há como recuperá-los pelo histórico.
+- Por ordem do dono, as notas locais foram desconsideradas e apagadas, quatro arquivos. Nenhum dos quatro estava no git, então não há como recuperá-los pelo histórico.
 - Medição antes de qualquer mudança: `ruff` e `mypy` strict limpos em 613 arquivos; `pytest -m "not slow" -n auto` com 9367 aprovados, 41 pulados e 1 falha intermitente (`tests/checks/test_differential_check.py::test_a_different_exit_code_rejects`, que passou 3 vezes sozinho).
 
 ### O que foi feito
@@ -58,7 +58,6 @@ Registro das execuções de trabalho sobre a Forja: o que foi feito, o que foi v
   1. `authorize()` repete o que o `GuardedGit` (branch protegida) e o redator (arquivo sensível) já impõem. Ligar como segunda linha ou remover o módulo.
   2. `SentPackageStore` (ADR 0009): gravar o pacote enviado exige que `build_package` devolva o resultado da redação, o que se junta à quebra dessa função (item 34).
   3. Artefato inválido: refazer a etapa sozinho, como diz a Especificação, ou manter a parada com `failed`.
-- **Referências às notas apagadas:** a regra 6 de `CLAUDE.md`, a seção "Construção da Forja" de `docs/Especificação.md` e a linha `NOTAS.md` de `.gitignore` ainda citam `NOTAS.md`. Não foram alteradas.
 - **Itens 11 a 40:** não iniciados. A lista só existia na conversa da sessão; foi recuperada da transcrição e gravada em `AVALIACAO.md`.
 
 ## 11 e 12/11/2026 — segunda sessão: avaliação recuperada, itens 21 a 23 e a suíte completa

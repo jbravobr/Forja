@@ -741,10 +741,6 @@ Cada evidência registra a versão das políticas que a julgaram. Mudança de li
 
 Conjunto fixo de repositórios de exemplo com problemas conhecidos, nas linguagens suportadas. Toda mudança em gates, políticas, adaptadores ou versão de CLI roda contra ela antes do uso real.
 
-## Construção da Forja
-
-A ordem de construção e o andamento são registrados fora do repositório. O que está comprometido, aberto e do dono fica no `NOTAS.md` local, que o LLM relê antes de qualquer demanda. Em caso de divergência, vale esta especificação.
-
 ## Glossário e fora de escopo
 
 | Termo | Definição |

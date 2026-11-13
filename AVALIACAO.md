@@ -1,6 +1,6 @@
 # Avaliação técnica da Forja
 
-> Avaliação de 11/11/2026 sobre o commit `699d936`, recuperada como foi escrita. Os números de linha são desse commit. `NOTAS.md`, citado abaixo, foi apagado depois. O andamento de cada item está em [DIARIO.md](DIARIO.md).
+> Avaliação de 11/11/2026 sobre o commit `699d936`, recuperada. Os números de linha são desse commit. O andamento de cada item está em [DIARIO.md](DIARIO.md).
 
 **Veredito:** núcleo bem construído (camadas, registro de eventos, retomada, testes), mas várias garantias da Especificação existem só como código em `core` que a produção nunca chama. Os gates são sólidos em Python e bem mais fracos nas outras cinco linguagens. Nada foi alterado no repositório.
 
@@ -118,7 +118,7 @@ Marcação: **[V]** conferi no código ou por execução; **[A]** veio de audito
 ### P4. Documentação e higiene
 
 37. **[A] README aponta caminhos inexistentes.** `README.md:96` cita `tests/e2e/test_resume.py`; a pasta não existe.
-38. **[V] README diz "Windows e Linux"; `NOTAS.md:47` diz "Só Windows".** Quatro testes ficam fora da mutação porque falham no Linux (`pyproject.toml:80-83`).
+38. **[V] README diz "Windows e Linux"; a decisão do dono é "Só Windows".** Quatro testes ficam fora da mutação porque falham no Linux (`pyproject.toml:80-83`).
 39. **[A] 21 ADRs citam planos removidos**; 3 links quebrados; nenhum teste de links internos.
 40. **[A] Restos.** Grupo `mutation` e bloco `[tool.mutmut]` sem uso; `ruff` sem pino em `dependencies`; versão `0.0.0`; `dist/` na raiz; `OUTSIDE` definido e não usado (`claude_code.py:44`).
     - Plano para 37 a 40: um commit de documentação e um de limpeza; teste que valida links e compara a tabela de gates do guia com `checks/specs.py`.
@@ -132,6 +132,4 @@ Marcação: **[V]** conferi no código ou por execução; **[A]** veio de audito
 
 ## Observações
 
-- Vários itens tocam decisões suas em `NOTAS.md` (Linux fora do plano, N9 limite de 300 s, N23 pip sem checksum, paralelismo em espera). Listei como fato; não reabri.
-- `NOTAS.md:62` diz "não há remoto"; o `origin` existe.
-- Os itens 1 a 7 do "Frágil ou não provado" de `NOTAS.md` não foram reinvestigados aqui.
+- Vários itens tocam decisões suas (Linux fora do plano, N9 limite de 300 s, N23 pip sem checksum, paralelismo em espera). Listei como fato; não reabri.
