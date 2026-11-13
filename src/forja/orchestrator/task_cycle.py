@@ -229,6 +229,9 @@ class TaskCycle:
         if self._ctx.meter.exhausted():
             self._exhaust(info, "token_budget_exhausted")
             return None
+        if self._ctx.disk_is_low():
+            self._stage_pause(info)
+            raise StopRun("the disk is nearly full")
         return f"{info.attempt_prefix}{len(children) + 1}"
 
     def _exhaust(self, info: TaskInfo, reason: str, **details: JsonValue) -> None:

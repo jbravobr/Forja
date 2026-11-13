@@ -261,6 +261,10 @@ async def _network_is_up() -> bool:
     return True
 
 
+def _disk_has_room() -> bool:
+    return False
+
+
 def _no_jitter() -> float:
     return 0.5  # the middle of the range: the wait is the one of the table
 
@@ -289,6 +293,9 @@ class RunContext:
     jitter: Callable[[], float] = _no_jitter
     probe_interval: float = 60.0
     max_network_probes: int | None = None  # None waits for the network as long as it takes
+    # asked before every new attempt: with too little free space the run pauses instead of
+    # filling the disk with one more worktree
+    disk_is_low: Callable[[], bool] = _disk_has_room
     agents: Mapping[Producer, AgentRunner] = field(default_factory=dict)
     # the tracked test files of a worktree, for the digest the test author freezes; with none,
     # only what lies under the task's ``test_root`` is frozen

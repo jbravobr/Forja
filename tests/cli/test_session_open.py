@@ -6,6 +6,7 @@ No agent runs: the session is opened and looked at, with the real git and the re
 import asyncio
 import os
 import random
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -441,6 +442,30 @@ def test_the_run_draws_the_spread_of_its_waits_and_asks_the_cli_whether_the_netw
         assert asyncio.run(ask()) is False  # the proof of life found a problem
         assert asyncio.run(ask()) is True
         assert asked == [("claude-code", Path("claude"))] * 2
+    finally:
+        close(session)
+
+
+def test_the_run_asks_the_disks_of_the_repository_and_of_its_own_directory_for_room(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    free = {repo: 2 * 2**30, home: 2 * 2**30}
+
+    real = shutil.disk_usage(tmp_path)
+
+    def usage(place: Path) -> Any:
+        return real._replace(free=free[place])
+
+    session = asyncio.run(_open(config_for(repo), None, home))
+    try:
+        monkeypatch.setattr(shutil, "disk_usage", usage)
+        low = session.context.disk_is_low
+        assert not low()  # exactly what the preparation asks for is enough
+        free[home] -= 1
+        assert low()
+        free[home], free[repo] = free[repo], free[home]
+        assert low()
     finally:
         close(session)
 

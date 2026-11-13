@@ -38,7 +38,7 @@ Depois do primeiro commit, todo repositório é "existente": a criação a parti
 ### Preparação guiada
 
 1. **Detecção automática:** repositório existente ou vazio, linguagens, toolchains e versões, CLIs instaladas e seu shell, terminal, README, testes, espaço em disco.
-2. **Perguntas mínimas:** só o que não pode ser detectado — objetivo, entrada (descrição ou arquivo de especificação), CLI por papel (sugerindo diversidade de autor entre testes e implementação) e orçamento (tempo e tentativas).
+2. **Perguntas mínimas:** só o que não pode ser detectado — objetivo, entrada (descrição ou arquivo de especificação), CLI por papel (sugerindo diversidade de autor entre testes e implementação) e orçamento (tokens e tentativas).
 3. **Prova de vida** de cada CLI escolhida.
 4. **Resumo e confirmação única.** Esse é o ponto sem retorno: depois dele, a ferramenta não faz perguntas durante a execução. O que surgir sem evidência vira premissa declarada no resumo da execução.
 
@@ -143,7 +143,7 @@ Uma execução encontrada em estado não terminal sem processo vivo é tratada c
 | `aprovada` | → `commitada` |
 | `rejeitada`, `descartada`, `commitada` | Terminais |
 
-Uma tentativa `rejeitada` gera a próxima tentativa da mesma etapa com o motivo da rejeição, até o limite de qualidade. Uma tentativa `descartada` por falha de infraestrutura ou interrupção não conta nesse limite, mas conta num limite próprio de falhas de infraestrutura consecutivas por etapa e no orçamento de tempo; o consumo é registrado por chamada à CLI, não por tentativa. A tarefa vai para `integrada` quando todas as etapas estão `commitadas` e a integração passa no gate de integração.
+Uma tentativa `rejeitada` gera a próxima tentativa da mesma etapa com o motivo da rejeição, até o limite de qualidade. Uma tentativa `descartada` por falha de infraestrutura ou interrupção não conta nesse limite, mas conta num limite próprio de falhas de infraestrutura consecutivas por etapa e no orçamento de tokens; o consumo é registrado por chamada à CLI, não por tentativa. A tarefa vai para `integrada` quando todas as etapas estão `commitadas` e a integração passa no gate de integração.
 
 ### Contrato 2: protocolo de subprocesso e idempotência
 
@@ -506,7 +506,7 @@ Uma tarefa tem uma intenção, um escopo declarado (lista de arquivos) e limites
 
 ### Critério de parada
 
-Cada execução tem objetivos explícitos, por exemplo: nenhum hotspot acima do limiar X, README aprovado, zero violações novas. Atingidos os objetivos ou esgotado o orçamento (tempo, tentativas), a execução termina, mesmo que ainda existam melhorias possíveis.
+Cada execução tem objetivos explícitos, por exemplo: nenhum hotspot acima do limiar X, README aprovado, zero violações novas. Atingidos os objetivos ou esgotado o orçamento (tokens, tentativas), a execução termina, mesmo que ainda existam melhorias possíveis.
 
 ### Premissas e fatos registrados
 

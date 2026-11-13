@@ -456,6 +456,29 @@ def test_a_network_that_never_comes_back_pauses_the_run_when_the_probes_are_used
     assert world.slept == [60.0, 60.0]
 
 
+def test_a_disk_nearly_full_pauses_the_run_before_an_attempt_and_a_later_run_finishes_it(
+    world: MemoryWorld,
+) -> None:
+    agent = ScriptedAgent()
+    log = world.open()
+    confirm_run(log, world.config, ISOLATION)
+    ctx = world.context(log, measurer=ScriptedMeasurer(), agent=agent, planner=ScriptedPlanner())
+    ctx.disk_is_low = lambda: True
+
+    outcome = asyncio.run(Orchestrator(ctx).run())
+
+    assert outcome.state is ExecutionState.PAUSED
+    assert outcome.message == "the disk is nearly full"
+    assert agent.seen == []
+    assert log.state.state_of(Level.STAGE, "t1-s") is StageState.INFRA_PAUSED
+    log.close()
+
+    resumed, _ = world.run(agent=agent, log=world.open())
+
+    assert resumed.state is ExecutionState.DELIVERED
+    assert [ctx.attempt_id for ctx in agent.seen] == ["t1-a1"]
+
+
 # -- tokens -------------------------------------------------------------------------------------
 
 

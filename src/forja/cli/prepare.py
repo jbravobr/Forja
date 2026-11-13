@@ -25,6 +25,7 @@ from forja.cli.security_notes import (
 )
 from forja.cli.semgrep_rules import RulesError, explicit_rules, rules_in_commit
 from forja.cli.session import (
+    LOW_DISK_GIB,
     OBJECTIVE_NAMES,
     e2e_commands,
     executor_ref,
@@ -50,7 +51,6 @@ from forja.orchestrator.facts import Fact, FactsError, parse_facts
 AVAILABLE = frozenset({"refatorar", "corrigir", "investigar", "criar"})
 PENDING_BASE = "sem-commit-ainda"  # the base of a new project: the scaffold makes it, after the yes
 CRITERIA_FILE = "criterios.json"
-LOW_DISK_GIB = 2.0
 
 
 class Refused(Exception):

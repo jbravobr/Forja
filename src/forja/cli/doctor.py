@@ -16,9 +16,9 @@ from pathlib import Path
 
 from forja.cli.console import Console
 from forja.cli.detect import Detection, installed_clis
-from forja.cli.prepare import LOW_DISK_GIB, Refused, prove
+from forja.cli.prepare import Refused, prove
 from forja.cli.semgrep_rules import RULE_DIR, RULE_FILE
-from forja.cli.session import repo_python
+from forja.cli.session import LOW_DISK_GIB, repo_python
 from forja.cli.settings import Perfil
 from forja.core.adapters.executor import locate_in_path
 from forja.executors import DEFAULT_CLI, KNOWN_CLIS, adapter_for

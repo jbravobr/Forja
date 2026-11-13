@@ -22,8 +22,6 @@ from forja.core.idempotency.git import Git
 from forja.executors import adapter_for
 from forja.languages.java.gradle import MANIFESTS as GRADLE_MANIFESTS
 
-LOW_DISK_GIB = 2.0
-
 
 @dataclass(frozen=True)
 class Detection:

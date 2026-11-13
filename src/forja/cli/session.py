@@ -8,6 +8,7 @@ the work; this only connects the pieces the orchestrator is written against.
 import hashlib
 import os
 import random
+import shutil
 import sys
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -95,6 +96,7 @@ GIT_ENVIRONMENT = (
     "LANG", "LC_ALL", "PATHEXT", "COMSPEC",
 )  # fmt: skip
 NETWORK_PROBES_WITHOUT_A_PERSON = 60
+LOW_DISK_GIB = 2.0  # free space a run needs, at the start and before every attempt
 
 
 def cli_answers(executor: ExecutorRef, env: Mapping[str, str]) -> Callable[[], Awaitable[bool]]:
@@ -107,6 +109,15 @@ def cli_answers(executor: ExecutorRef, env: Mapping[str, str]) -> Callable[[], A
         return not await run_probe(adapter, Path(executor.path), env)
 
     return answers
+
+
+def low_disk(*places: Path) -> Callable[[], bool]:
+    """Whether any place the run writes to has less free space than the preparation asks for."""
+
+    def low() -> bool:
+        return any(shutil.disk_usage(place).free / 2**30 < LOW_DISK_GIB for place in places)
+
+    return low
 
 
 INSTALL_TIMEOUT = 600.0  # seconds for one venv or pip command
@@ -546,6 +557,7 @@ async def _context(
         test_root=test_root,
         max_network_probes=None if interactive else NETWORK_PROBES_WITHOUT_A_PERSON,
         network_is_up=cli_answers(config.implementer, env),
+        disk_is_low=low_disk(repo, base),
         jitter=random.random,
         notices=(
             *security_notices(

@@ -9,9 +9,10 @@ from types import SimpleNamespace
 import pytest
 
 from forja.cli import doctor as doctor_module
-from forja.cli.detect import LOW_DISK_GIB, Detection
+from forja.cli.detect import Detection
 from forja.cli.doctor import Check, doctor, render, run_checks
 from forja.cli.prepare import Refused
+from forja.cli.session import LOW_DISK_GIB
 from forja.cli.settings import ModeloCli, Perfil
 
 

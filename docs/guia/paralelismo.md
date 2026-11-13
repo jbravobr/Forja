@@ -91,7 +91,7 @@ O orçamento (`tokens`) é da execução inteira. Os tokens de todas as tarefas 
 
 ## Parada e retomada
 
-Quando uma tarefa não pode continuar (o agente falha de modo que não dá para seguir, falhas de infraestrutura seguidas, rede que não volta) ou quando um erro escapa de uma tarefa, a Forja cancela as outras tarefas em andamento e pausa a execução.
+Quando uma tarefa não pode continuar (o agente falha de modo que não dá para seguir, falhas de infraestrutura seguidas, rede que não volta, disco quase cheio) ou quando um erro escapa de uma tarefa, a Forja cancela as outras tarefas em andamento e pausa a execução.
 
 Na retomada, rode `forja` de novo no repositório, num terminal, e escolha retomar. Com `--config` ou sem terminal a Forja recusa retomar (veja "Execução incompleta" em `execucao-toml.md`). Ao retomar:
 

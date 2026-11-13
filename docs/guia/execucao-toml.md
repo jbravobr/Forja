@@ -321,7 +321,7 @@ Uma CLI conhecida com instalação única não gera pergunta nem recusa: a Forja
 
 ### Exigências por objetivo
 
-Valem para qualquer objetivo, antes de tudo: repositório limpo (abaixo), ao menos 2 GiB livres em disco, `forja.toml` do repositório sem erros, CLI achada, com versão aceita e que passe na prova de que funciona (uma tarefa de teste, lembrada por caminho e versão).
+Valem para qualquer objetivo, antes de tudo: repositório limpo (abaixo), ao menos 2 GiB livres em disco, `forja.toml` do repositório sem erros, CLI achada, com versão aceita e que passe na prova de que funciona (uma tarefa de teste, lembrada por caminho e versão). O espaço em disco é conferido de novo antes de cada tentativa, no disco do repositório e no da pasta da Forja: com menos de 2 GiB livres a execução pausa, e `forja` a retoma depois de liberado o espaço.
 
 | Objetivo | Chaves e condições sem terminal |
 | --- | --- |
