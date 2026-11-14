@@ -101,6 +101,9 @@ class OperationRequest:
     changed_files: tuple[str, ...] = ()
     incremental: bool = False
     check_only: bool = False  # format: verify without rewriting
+    # tests: the same copy is tested again and again, and nobody reads a report of the run. A
+    # hint, not a filter: an adapter with nothing to save by it plans the same command
+    rerun: bool = False
 
 
 # What a new project may be called: lower-case words joined by hyphens. Every language derives its

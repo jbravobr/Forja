@@ -78,7 +78,7 @@ A verificação só age se a tentativa acrescentou linhas em arquivo de produç�
 
 Limites de tempo: a verificação inicial dos testes pode levar até 600 segundos. Cada mutante tem como limite dez vezes a duração dessa verificação inicial, nunca menos de 2 segundos. Estourar o limite mata o mutante.
 
-O comando de testes dos mutantes é o do adaptador da linguagem. Um comando de teste trocado em `[checks.tests.commands]` não vale para a mutação, e a mutação não aceita `commands`.
+O comando de testes dos mutantes é o do adaptador da linguagem. Em projeto Maven ele é `mvn test`, sem o `clean` do gate de testes: os mutantes de um trabalhador rodam um depois do outro na mesma cópia, e o compilador refaz o que mudou. Um comando de teste trocado em `[checks.tests.commands]` não vale para a mutação, e a mutação não aceita `commands`.
 
 ### Mutação incremental
 

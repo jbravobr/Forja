@@ -204,6 +204,10 @@ class JavaAdapter:
                 argv = (*mvn, "clean", "test-compile")
             case Operation.TEST | Operation.COVERAGE if request.tests or request.test_files:
                 return NotSupported(operation.value, "filtering the tests is not offered")
+            case Operation.TEST if request.rerun:
+                # mutant after mutant in one copy, as the mutator runs them: the compiler sees
+                # the file that changed, and no report of an earlier run is read
+                argv = (*mvn, "test")
             case Operation.TEST:
                 argv = (*mvn, "clean", "test")
             case Operation.COVERAGE:

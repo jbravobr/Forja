@@ -184,7 +184,7 @@ class AdapterRunner:
     ids: "itertools.count[int]" = field(default_factory=itertools.count)
 
     async def __call__(self, root: Path, timeout: float | None) -> TestVerdict:
-        plan = self.adapter.plan(Operation.TEST, OperationRequest(root=root))
+        plan = self.adapter.plan(Operation.TEST, OperationRequest(root=root, rerun=True))
         if isinstance(plan, NotSupported):
             raise TestsDidNotRun(plan.reason)
         # a stale bytecode file could run the original code in place of the mutant

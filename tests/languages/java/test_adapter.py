@@ -158,6 +158,15 @@ def test_build_and_tests_start_from_a_clean_target(project: Path) -> None:
     assert argv(Operation.TEST, project) == ("m", "-B", "-ntp", "clean", "test")
 
 
+def test_tests_run_again_in_the_same_copy_do_not_start_over_and_nothing_else_changes(
+    project: Path,
+) -> None:
+    assert argv(Operation.TEST, project, rerun=True) == ("m", "-B", "-ntp", "test")
+    assert argv(Operation.BUILD, project, rerun=True) == argv(Operation.BUILD, project)
+    assert argv(Operation.COVERAGE, project, rerun=True) == argv(Operation.COVERAGE, project)
+    assert isinstance(plan(Operation.TEST, project, rerun=True, tests=("a",)), NotSupported)
+
+
 def test_coverage_names_the_jacoco_goals_in_full_so_the_pom_needs_nothing(project: Path) -> None:
     assert argv(Operation.COVERAGE, project) == (
         "m", "-B", "-ntp", "clean", f"{JACOCO}:prepare-agent", "test", f"{JACOCO}:report",

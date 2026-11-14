@@ -9,6 +9,7 @@ from forja.checks.base import Undecided
 from forja.checks.changes import Changes
 from forja.checks.mutation import (
     DEFAULT_MIN_SCORE,
+    AdapterRunner,
     MutationCheck,
     build_mutants,
     changed_lines,
@@ -17,6 +18,7 @@ from forja.checks.mutation import (
     untested_lines,
     worker_count,
 )
+from forja.core.adapters import NotSupported, Operation, OperationRequest
 from forja.core.gates import GateInput
 from forja.core.gates.models import (
     Approved,
@@ -27,7 +29,7 @@ from forja.core.gates.models import (
 )
 from forja.core.reports.models import CoverageReport, FileCoverage
 from forja.core.states import Level
-from forja.mutation.executor import Mutant
+from forja.mutation.executor import Mutant, TestsDidNotRun
 from tests.checks.support import Scene, sinks
 from tests.core.idempotency.conftest import Repo
 
@@ -129,6 +131,24 @@ def test_a_file_the_rules_cannot_read_leaves_the_measurement_undecided(tmp_path:
     assert isinstance(result, Inconclusive)
     assert result.reason is InconclusiveReason.UNSUPPORTED_CONSTRUCT
     assert "broken.py" in result.detail
+
+
+def test_each_mutant_asks_for_the_tests_as_a_run_repeated_in_the_same_copy(
+    tmp_path: Path,
+) -> None:
+    asked: list[tuple[Operation, OperationRequest]] = []
+
+    class Recording:
+        def plan(self, operation: Operation, request: OperationRequest) -> NotSupported:
+            asked.append((operation, request))
+            return NotSupported(operation.value, "only listening")
+
+    runner = AdapterRunner(Recording(), {}, tmp_path / "logs")  # type: ignore[arg-type]
+
+    with pytest.raises(TestsDidNotRun, match="only listening"):
+        asyncio.run(runner(tmp_path / "copy", 5.0))
+
+    assert asked == [(Operation.TEST, OperationRequest(root=tmp_path / "copy", rerun=True))]
 
 
 def judge(scene: Scene) -> object:
