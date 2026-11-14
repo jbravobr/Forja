@@ -431,7 +431,7 @@ Só os três de `keep_worst` são de código escrito nesta leva. Os outros 21 es
 - **Verificação que falta:** suíte completa com `slow`; mutação de `common.py`, dos `parsers.py` de C# e Java, de `ports.py`, `cli/session.py`, `cli/detect.py`, `cli/prepare.py`, `cli/doctor.py`, `testing/workspace.py` e `testing/repo.py`.
 - **Decisões do dono ainda abertas:** ADR 0041 (item 24); item 29; as três do item 5; a observação sobre a etapa de caracterização (item 12).
 
-## 13 e 14/11/2026 — itens 16 a 20, e as notas apagadas deixam de ser citadas
+## 13/11/2026 — itens 16 a 20, e as notas apagadas deixam de ser citadas
 
 ### Decisão do dono
 
@@ -467,7 +467,7 @@ Só os três de `keep_worst` são de código escrito nesta leva. Os outros 21 es
 - Mutação em `a30b11c`: `cli/run.py` (27), `cli/prepare.py` (126), `core/events/state.py` (27), `orchestrator/ports.py` (8), `orchestrator/review.py` (36) e `orchestrator/task_cycle.py` (78) sem sobrevivente; `orchestrator/budget.py` (33) com um, o equivalente acima. Ficam 3 pontos de `prepare.py` em linhas que nenhum teste executa.
 - Não rodou: suíte completa com `slow`; E2E com agente real; a mutação de `budget.py` depois de `cd4308e`.
 
-## 14/11/2026 — a mutação comparada com o `unclebob/mutator` e o `unclebob/crapper`, e a primeira parte do realinhamento
+## 13/11/2026 — a mutação comparada com o `unclebob/mutator` e o `unclebob/crapper`, e a primeira parte do realinhamento
 
 ### O que motivou
 
