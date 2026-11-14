@@ -31,7 +31,6 @@ import asyncio
 import functools
 import hashlib
 import io
-import json
 import os
 import signal
 import subprocess
@@ -40,9 +39,11 @@ import tempfile
 import time
 import tomllib
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+from coverage import CoverageData
 
 from forja.core.reports.models import MutantStatus, MutationReport
 from forja.mutation import apply_site, discover
@@ -102,26 +103,42 @@ def record_coverage(reuse: bool, workers: int) -> tuple[dict[str, list[str]], Li
     """Which test files ran each source file, and which ran each of its lines, from one run of
     the fast tests."""
     COVERAGE.mkdir(parents=True, exist_ok=True)
-    data, report = COVERAGE / ".coverage", COVERAGE / "contexts.json"
-    if not (reuse and report.exists() and LCOV.exists()):
-        measure_coverage(data, report, workers)
-    by_line = tests_by_line(json.loads(report.read_text(encoding="utf-8"))["files"])
+    data = COVERAGE / ".coverage"
+    # the report this script once wrote here: gigabytes nobody reads any more
+    (COVERAGE / "contexts.json").unlink(missing_ok=True)
+    if not (reuse and data.exists() and LCOV.exists()):
+        measure_coverage(data, workers)
+    by_line = tests_by_line(recorded_contexts(data))
     tests_of = {
         name: ordered(name, set().union(*lines.values())) for name, lines in by_line.items()
     }
     return {name: tests for name, tests in tests_of.items() if tests}, by_line
 
 
-def tests_by_line(files: dict[str, dict[str, dict[str, list[str]]]]) -> LinesToTests:
+def recorded_contexts(data: Path) -> Iterator[tuple[str, dict[int, list[str]]]]:
+    """Each measured file of the project with the tests that ran each of its lines, read from
+    the coverage data a file at a time. The same thing as a report with every context written
+    out weighs gigabytes, on the disk and again in memory."""
+    recorded = CoverageData(str(data))
+    recorded.read()
+    for name in sorted(recorded.measured_files()):
+        try:
+            inside = Path(name).resolve().relative_to(ROOT).as_posix()
+        except ValueError:
+            continue
+        yield inside, recorded.contexts_by_lineno(name)
+
+
+def tests_by_line(files: Iterable[tuple[str, Mapping[int, Iterable[str]]]]) -> LinesToTests:
     """The test files that ran each line of each source file, from the contexts of the coverage
-    report. A statement of several lines is reached or it is not, so its other lines take the
+    data. A statement of several lines is reached or it is not, so its other lines take the
     tests of the first (as ``widen`` does with the hits)."""
     found: LinesToTests = {}
-    for name, info in files.items():
+    for name, by_number in files:
         lines: dict[int, set[str]] = defaultdict(set)
-        for written, contexts in info.get("contexts", {}).items():
+        for written, contexts in by_number.items():
             modules = {module for module in map(test_file, contexts) if module}
-            lines[int(written)] |= modules
+            lines[written] |= modules
         path = Path(name) if Path(name).is_absolute() else ROOT / name
         if path.is_file():
             for first, last in statement_spans(path.read_text(encoding="utf-8")):
@@ -161,7 +178,7 @@ def shards(files: list[str], count: int) -> list[list[str]]:
 SHARD_OK = (0, 5)  # 5: every test of the hand was left out, which is no failure
 
 
-def measure_coverage(data: Path, report: Path, workers: int) -> None:
+def measure_coverage(data: Path, workers: int) -> None:
     """Run the fast tests under coverage, the test files dealt into ``workers`` runs that go at
     the same time, and join what each one saw. Every test still runs once, in a process that
     runs its file from start to end, so what each test covers is what one run alone would say."""
@@ -189,14 +206,12 @@ def measure_coverage(data: Path, report: Path, workers: int) -> None:
     if joined.returncode != 0:
         print(joined.stderr, file=sys.stderr)
         raise SystemExit(2)
-    for kind, target in (("json", report), ("lcov", LCOV)):
-        extra = ["--show-contexts"] if kind == "json" else []
-        exported = run(
-            sys.executable, "-m", "coverage", kind, f"--data-file={data}", *extra, "-o", str(target)
-        )  # fmt: skip
-        if exported.returncode != 0:
-            print(exported.stderr, file=sys.stderr)
-            raise SystemExit(2)
+    exported = run(
+        sys.executable, "-m", "coverage", "lcov", f"--data-file={data}", "-o", str(LCOV)
+    )  # fmt: skip
+    if exported.returncode != 0:
+        print(exported.stderr, file=sys.stderr)
+        raise SystemExit(2)
     LCOV.write_text(widen(LCOV.read_text(encoding="utf-8")), encoding="utf-8")
 
 

@@ -96,17 +96,40 @@ def test_every_test_file_of_the_project_is_found_once(mutate: Any) -> None:
 
 def test_each_line_gets_the_test_files_that_ran_it(mutate: Any, monkeypatch: Any) -> None:
     monkeypatch.setattr(mutate, "test_file", lambda context: context or None)
-    files = {
-        "src\\forja\\nowhere.py": {
-            "contexts": {"3": ["tests/a.py", ""], "4": ["tests/a.py", "tests/b.py"], "9": [""]}
-        }
-    }
+    files = [
+        (
+            "src\\forja\\nowhere.py",
+            {3: ["tests/a.py", ""], 4: ["tests/a.py", "tests/b.py"], 9: [""]},
+        )
+    ]
 
     by_line = mutate.tests_by_line(files)
 
     assert by_line == {
         "src/forja/nowhere.py": {3: {"tests/a.py"}, 4: {"tests/a.py", "tests/b.py"}, 9: set()}
     }
+
+
+def test_the_tests_of_each_line_are_read_from_the_coverage_data_for_the_files_of_the_project(
+    mutate: Any, tmp_path: Path
+) -> None:
+    from coverage import CoverageData  # noqa: PLC0415
+
+    inside, later = mutate.ROOT / "src" / "forja" / "nowhere.py", mutate.ROOT / "src" / "z.py"
+    outside = tmp_path / "elsewhere.py"
+    data = CoverageData(str(tmp_path / ".coverage"))
+    data.set_context("tests.a.test_x")
+    data.add_lines({str(later): [1], str(inside): [3, 4], str(outside): [1]})
+    data.set_context("tests.b.test_y")
+    data.add_lines({str(inside): [4]})
+    data.write()
+
+    found = list(mutate.recorded_contexts(tmp_path / ".coverage"))
+
+    assert [name for name, _ in found] == ["src/forja/nowhere.py", "src/z.py"]
+    lines = found[0][1]
+    assert lines[3] == ["tests.a.test_x"]
+    assert sorted(lines[4]) == ["tests.a.test_x", "tests.b.test_y"]
 
 
 def test_the_other_lines_of_a_statement_take_the_tests_of_its_first(
@@ -116,7 +139,7 @@ def test_the_other_lines_of_a_statement_take_the_tests_of_its_first(
     source.write_text("x = f(\n    1,\n    2,\n)\ny = 3\n", encoding="utf-8")
     monkeypatch.setattr(mutate, "test_file", lambda context: context or None)
 
-    by_line = mutate.tests_by_line({str(source): {"contexts": {"1": ["tests/a.py"], "5": []}}})
+    by_line = mutate.tests_by_line([(str(source), {1: ["tests/a.py"], 5: []})])
 
     lines = by_line[source.as_posix()]
     assert lines[1] == lines[2] == lines[3] == lines[4] == {"tests/a.py"}
