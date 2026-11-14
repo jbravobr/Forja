@@ -29,3 +29,9 @@ Dois fatos mudaram a forma dessa decisão. O modo diferencial do `unclebob/mutat
 - **Testes.** `tests\checks\test_mutation.py` cobre a mutação de função inteira.
 
 O uso está em `docs/guia/gates/mutacao.md`.
+
+## Revisão de 13 e 14/11/2026
+
+- **O gate continua sem snapshot.** Cada tentativa roda todos os mutantes das funções que tocou.
+- **`scripts/mutate.py` ganhou o modo diferencial do mutator,** com o histórico em `.metrics/mutate/<arquivo>.json`. Vale só para a mutação da própria Forja, fora do gate. Os detalhes estão na revisão do [ADR 0021](0021-a-mutacao-segue-o-unclebob-mutator.md).
+- **`MUTATION_INCREMENTAL` continua sem uso.** O Maven sem `clean` por mutante não passa por ela: o pedido ao adaptador ganhou o aviso `rerun`, que um adaptador pode ignorar. O contrato da capacidade é planejar um comando de mutação, e nenhum adaptador planeja.
