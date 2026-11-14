@@ -67,9 +67,10 @@ from forja.core.manifest import (
     find_violations,
 )
 from forja.core.process import EventSink, ProcessIdentity, ProcessRunner
-from forja.core.redaction import PackageItem, Redactor
+from forja.core.redaction import PackageItem, RedactionResult, Redactor
 from forja.core.redaction.engine import ItemKind
 from forja.core.states import Level
+from forja.core.task import TaskInfo
 from forja.orchestrator.budget import AGENT_ACTIVITY
 from forja.orchestrator.criteria import manifest_of
 from forja.orchestrator.operations import Step
@@ -372,6 +373,144 @@ def _fence(text: str) -> str:
     return "`" * ticks
 
 
+_REPORTS = (
+    README_REPORT,
+    ADR_REPORT,
+    FACTS_REPORT,
+    FINDINGS_REPORT,
+    SAID_REPORT,
+    REJECTION_REPORT,
+)
+_READS_ONLY = (Producer.SPECIFIER, Producer.ARCHAEOLOGIST)
+
+
+def _scope_items(ctx: AttemptContext) -> tuple[list[PackageItem], list[str]]:
+    """The files of the scope the agent is shown, and a note for each entry it is not."""
+    items, notes = [], []
+    for name in ctx.task.scope:
+        path = ctx.worktree / name
+        if path.is_file():
+            try:
+                content = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:  # a binary file, or text in another encoding
+                notes.append(f"`{name}` is not UTF-8 text: read it yourself if you need it.")
+                continue
+            items.append(PackageItem(ItemKind.FILE, name, content, True))
+        else:
+            notes.append(f"`{name}` is a directory: read the files you need from it.")
+    return items, notes
+
+
+def _report_items(ctx: AttemptContext) -> list[PackageItem]:
+    """What the run tells the agent besides the files, all of it redacted like a file."""
+    reports = []
+    if ctx.task.role is Producer.DOCUMENTER:
+        reports += [
+            (README_REPORT, ctx.readme),  # text from the repository's README
+            (ADR_REPORT, ctx.adr),  # names come from the repository's manifests
+            (FINDINGS_REPORT, ctx.findings),  # the archaeologist read the repository
+        ]
+    # text a person wrote
+    recorded = "\n".join(f"- `{f.id}` ({f.author}, {f.date}): {f.text}" for f in ctx.facts)
+    reports += [
+        (FACTS_REPORT, recorded),
+        # what the agent itself said in the last rejected attempt
+        (SAID_REPORT, ctx.previous_said),
+        # the output of the repository's tools and tests
+        (REJECTION_REPORT, ctx.previous_rejection or ""),
+    ]
+    return [PackageItem(ItemKind.TEXT, name, text, True) for name, text in reports if text]
+
+
+def _instructions(task: TaskInfo) -> str:
+    """The instructions of the role of the stage."""
+    by_role = {
+        Producer.DOCUMENTER: DOCUMENTER_INSTRUCTIONS,
+        Producer.SPECIFIER: SPECIFIER_INSTRUCTIONS,
+        Producer.ARCHAEOLOGIST: ARCHAEOLOGIST_INSTRUCTIONS,
+    }
+    if task.role in by_role:
+        return by_role[task.role]
+    if task.role is Producer.TEST_AUTHOR:
+        characterizes = task.characterizes and not task.reviews
+        return CHARACTERIZATION_INSTRUCTIONS if characterizes else AUTHOR_INSTRUCTIONS
+    if task.frozen_digest and not task.characterizes:  # a refactoring fixes no defect
+        return FIX_INSTRUCTIONS
+    return INSTRUCTIONS
+
+
+def _may_change(task: TaskInfo, tests_in: str) -> str:
+    if task.role is Producer.DOCUMENTER:
+        return "Only documentation files. The files below are the ones the change touched."
+    if task.role in _READS_ONLY:
+        return "No file. The files below are for reading."
+    if task.role is Producer.TEST_AUTHOR:
+        return f"Only {tests_in}. The production files below are for reading."
+    if task.scope:
+        return f"Only inside: {', '.join(f'`{name}`' for name in task.scope)}."
+    return "Any production file."
+
+
+def _briefs(task: TaskInfo, voice: str, dry: str, properties: str) -> list[str]:
+    """The Forja's own instructions on how to write, each for the roles it is given to."""
+    parts = []
+    if voice:
+        parts.append(f"## Voice\n\n{voice}")
+    if dry and task.role not in (*_READS_ONLY, Producer.DOCUMENTER, Producer.TEST_AUTHOR):
+        parts.append(f"## Duplication\n\n{dry}")
+    if properties and task.role is Producer.TEST_AUTHOR:
+        parts.append(f"## Property tests\n\n{properties}")
+    if task.role is Producer.SPECIFIER:
+        listed = "\n".join(f"- {e.id}: {e.text}" for e in elements_of(task.intent))
+        parts.append(f"## {ELEMENTS}\n\n{listed}\n")
+    return parts
+
+
+def _files_in_scope(result: RedactionResult, notes: list[str]) -> list[str]:
+    shown = [i for i in result.items if i.name not in _REPORTS]
+    parts = ["## Files in scope\n"] if shown or notes else []
+    for item in shown:
+        fence = _fence(item.content)
+        parts.append(f"### `{item.name}`\n\n{fence}\n{item.content}\n{fence}\n")
+    parts += notes
+    for dropped in result.dropped:
+        parts.append(f"`{dropped.name}` was withheld ({dropped.reason.value}).")
+    return parts
+
+
+def _report_sections(ctx: AttemptContext, result: RedactionResult) -> list[str]:
+    """One section for each thing the run has to tell, in the text the redactor let through."""
+    told: dict[str, str] = {}
+    for item in result.items:
+        if item.name in _REPORTS:
+            told.setdefault(item.name, item.content)
+    parts = []
+    if told.get(README_REPORT):
+        parts.append(
+            f"## README sections to fix\n\n{told[README_REPORT]}\n\n"
+            "Change only these sections of the README (or add the one that is missing); every "
+            "other section stays exactly as it is.\n"
+        )
+    if told.get(FACTS_REPORT):
+        parts.append(
+            f"## Facts a person recorded\n\n{told[FACTS_REPORT]}\n\n"
+            'They are true. To rest a claim on one, cite it: {"kind": "fact", "fact_id": "<id>"}.\n'
+        )
+    if told.get(FINDINGS_REPORT):
+        parts.append(f"## Findings\n\n{FINDINGS_INSTRUCTIONS}\n{told[FINDINGS_REPORT]}\n")
+    if told.get(ADR_REPORT):
+        parts.append(f"## Decision record owed\n\n{told[ADR_REPORT]}\n")
+    if ctx.diary:  # fixed text of the Forja: the attempts themselves are in the file
+        parts.append(f"## Earlier attempts of this stage\n\n{DIARY_ORDER}\n")
+    if ctx.hypothesis:  # fixed text of the Forja: nothing to redact
+        parts.append(f"## Attack the hypothesis\n\n{ctx.hypothesis}\n")
+    if told.get(REJECTION_REPORT):
+        parts.append(f"## The previous attempt was rejected\n\n{told[REJECTION_REPORT]}\n")
+        if told.get(SAID_REPORT):
+            parts.append(f"What you said in that attempt:\n\n{_quote(told[SAID_REPORT])}\n")
+    return parts
+
+
 def build_package(
     ctx: AttemptContext,
     redactor: Redactor,
@@ -390,132 +529,26 @@ def build_package(
     given only to the test author.
     """
     task = ctx.task
-    items, notes = [], []
-    for name in task.scope:
-        path = ctx.worktree / name
-        if path.is_file():
-            try:
-                content = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:  # a binary file, or text in another encoding
-                notes.append(f"`{name}` is not UTF-8 text: read it yourself if you need it.")
-                continue
-            items.append(PackageItem(ItemKind.FILE, name, content, True))
-        else:
-            notes.append(f"`{name}` is a directory: read the files you need from it.")
-    documenter = task.role is Producer.DOCUMENTER
-    if documenter and ctx.readme:  # text from the repository's README: redacted like a file
-        items.append(PackageItem(ItemKind.TEXT, README_REPORT, ctx.readme, True))
-    if documenter and ctx.adr:  # names come from the repository's manifests: redacted too
-        items.append(PackageItem(ItemKind.TEXT, ADR_REPORT, ctx.adr, True))
-    if documenter and ctx.findings:  # the archaeologist read the repository: redacted like a file
-        items.append(PackageItem(ItemKind.TEXT, FINDINGS_REPORT, ctx.findings, True))
-    if ctx.facts:  # text a person wrote: redacted like the rest
-        recorded = "\n".join(f"- `{f.id}` ({f.author}, {f.date}): {f.text}" for f in ctx.facts)
-        items.append(PackageItem(ItemKind.TEXT, FACTS_REPORT, recorded, True))
-    if ctx.previous_said:  # what the agent itself said in the last rejected attempt
-        items.append(PackageItem(ItemKind.TEXT, SAID_REPORT, ctx.previous_said, True))
-    if ctx.previous_rejection:  # the output of the repository's tools and tests: redacted too
-        items.append(PackageItem(ItemKind.TEXT, REJECTION_REPORT, ctx.previous_rejection, True))
-    result = redactor.redact(items)
-    report = next((i.content for i in result.items if i.name == README_REPORT), "")
-    author = task.role is Producer.TEST_AUTHOR
-    specifier = task.role is Producer.SPECIFIER
-    archaeologist = task.role is Producer.ARCHAEOLOGIST
-    commands = FACADE_COMMANDS if facade else NO_COMMANDS
+    items, notes = _scope_items(ctx)
+    result = redactor.redact([*items, *_report_items(ctx)])
     tests_in = f"under `{task.test_root}`" if task.test_root else "in the project's test files"
-    template = (
-        DOCUMENTER_INSTRUCTIONS
-        if documenter
-        else SPECIFIER_INSTRUCTIONS
-        if specifier
-        else ARCHAEOLOGIST_INSTRUCTIONS
-        if archaeologist
-        else CHARACTERIZATION_INSTRUCTIONS
-        if author and task.characterizes and not task.reviews
-        else AUTHOR_INSTRUCTIONS
-        if author
-        else FIX_INSTRUCTIONS
-        if task.frozen_digest and not task.characterizes  # a refactoring fixes no defect
-        else INSTRUCTIONS
-    )
     parts = [
         f"# Task\n\n{task.intent}\n",
-        template.format(
+        _instructions(task).format(
             agent_dir=AGENT_DIR,
             output=OUTPUT,
-            commands=commands,
+            commands=FACADE_COMMANDS if facade else NO_COMMANDS,
             tests_in=tests_in,
             model=README_SECTIONS,
             required=README_REQUIRED,
         ),
         "## What you may change\n",
-        (
-            "Only documentation files. The files below are the ones the change touched."
-            if documenter
-            else "No file. The files below are for reading."
-            if specifier or archaeologist
-            else f"Only {tests_in}. The production files below are for reading."
-            if author
-            else f"Only inside: {', '.join(f'`{name}`' for name in task.scope)}."
-            if task.scope
-            else "Any production file."
-        ),
+        _may_change(task, tests_in),
         f"At most {task.max_files} files and {task.max_lines} changed lines.\n",
+        *_briefs(task, voice, dry, properties),
+        *_files_in_scope(result, notes),
+        *_report_sections(ctx, result),
     ]
-    if voice:
-        parts.append(f"## Voice\n\n{voice}")
-    if dry and not (documenter or specifier or archaeologist or author):
-        parts.append(f"## Duplication\n\n{dry}")
-    if properties and author:
-        parts.append(f"## Property tests\n\n{properties}")
-    if specifier:
-        listed = "\n".join(f"- {e.id}: {e.text}" for e in elements_of(task.intent))
-        parts.append(f"## {ELEMENTS}\n\n{listed}\n")
-    adr = next((i.content for i in result.items if i.name == ADR_REPORT), "")
-    recorded = next((i.content for i in result.items if i.name == FACTS_REPORT), "")
-    found = next((i.content for i in result.items if i.name == FINDINGS_REPORT), "")
-    said = next((i.content for i in result.items if i.name == SAID_REPORT), "")
-    rejection = next((i.content for i in result.items if i.name == REJECTION_REPORT), "")
-    hidden_names = (
-        README_REPORT,
-        ADR_REPORT,
-        FACTS_REPORT,
-        FINDINGS_REPORT,
-        SAID_REPORT,
-        REJECTION_REPORT,
-    )
-    shown = [i for i in result.items if i.name not in hidden_names]
-    if shown or notes:
-        parts.append("## Files in scope\n")
-    for item in shown:
-        fence = _fence(item.content)
-        parts.append(f"### `{item.name}`\n\n{fence}\n{item.content}\n{fence}\n")
-    parts += notes
-    for dropped in result.dropped:
-        parts.append(f"`{dropped.name}` was withheld ({dropped.reason.value}).")
-    if report:
-        parts.append(
-            f"## README sections to fix\n\n{report}\n\n"
-            "Change only these sections of the README (or add the one that is missing); every "
-            "other section stays exactly as it is.\n"
-        )
-    if recorded:
-        parts.append(
-            f"## Facts a person recorded\n\n{recorded}\n\n"
-            'They are true. To rest a claim on one, cite it: {"kind": "fact", "fact_id": "<id>"}.\n'
-        )
-    if found:
-        parts.append(f"## Findings\n\n{FINDINGS_INSTRUCTIONS}\n{found}\n")
-    if adr:
-        parts.append(f"## Decision record owed\n\n{adr}\n")
-    if ctx.diary:  # fixed text of the Forja: the attempts themselves are in the file
-        parts.append(f"## Earlier attempts of this stage\n\n{DIARY_ORDER}\n")
-    if ctx.hypothesis:  # fixed text of the Forja: nothing to redact
-        parts.append(f"## Attack the hypothesis\n\n{ctx.hypothesis}\n")
-    if rejection:
-        parts.append(f"## The previous attempt was rejected\n\n{rejection}\n")
-        if said:
-            parts.append(f"What you said in that attempt:\n\n{_quote(said)}\n")
     return "\n".join(parts) + "\n"
 
 
