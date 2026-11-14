@@ -384,9 +384,10 @@ _REPORTS = (
 _READS_ONLY = (Producer.SPECIFIER, Producer.ARCHAEOLOGIST)
 
 
-def _scope_items(ctx: AttemptContext) -> tuple[list[PackageItem], list[str]]:
-    """The files of the scope the agent is shown, and a note for each entry it is not."""
-    items, notes = [], []
+def _scope_files(ctx: AttemptContext) -> tuple[list[tuple[str, str]], list[str]]:
+    """The files of the scope the agent is shown, each with its text, and a note for each entry
+    it is not."""
+    files, notes = [], []
     for name in ctx.task.scope:
         path = ctx.worktree / name
         if path.is_file():
@@ -395,13 +396,13 @@ def _scope_items(ctx: AttemptContext) -> tuple[list[PackageItem], list[str]]:
             except UnicodeDecodeError:  # a binary file, or text in another encoding
                 notes.append(f"`{name}` is not UTF-8 text: read it yourself if you need it.")
                 continue
-            items.append(PackageItem(ItemKind.FILE, name, content, True))
+            files.append((name, content))
         else:
             notes.append(f"`{name}` is a directory: read the files you need from it.")
-    return items, notes
+    return files, notes
 
 
-def _report_items(ctx: AttemptContext) -> list[PackageItem]:
+def _reports(ctx: AttemptContext) -> list[tuple[str, str]]:
     """What the run tells the agent besides the files, all of it redacted like a file."""
     reports = []
     if ctx.task.role is Producer.DOCUMENTER:
@@ -419,7 +420,7 @@ def _report_items(ctx: AttemptContext) -> list[PackageItem]:
         # the output of the repository's tools and tests
         (REJECTION_REPORT, ctx.previous_rejection or ""),
     ]
-    return [PackageItem(ItemKind.TEXT, name, text, True) for name, text in reports if text]
+    return [(name, text) for name, text in reports if text]
 
 
 def _instructions(task: TaskInfo) -> str:
@@ -529,8 +530,10 @@ def build_package(
     given only to the test author.
     """
     task = ctx.task
-    items, notes = _scope_items(ctx)
-    result = redactor.redact([*items, *_report_items(ctx)])
+    files, notes = _scope_files(ctx)
+    items = [PackageItem(ItemKind.FILE, name, content, True) for name, content in files]
+    items += [PackageItem(ItemKind.TEXT, name, text, True) for name, text in _reports(ctx)]
+    result = redactor.redact(items)
     tests_in = f"under `{task.test_root}`" if task.test_root else "in the project's test files"
     parts = [
         f"# Task\n\n{task.intent}\n",
