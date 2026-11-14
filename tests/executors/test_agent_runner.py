@@ -15,6 +15,7 @@ from forja.core.adapters.common import CommandPlan
 from forja.core.adapters.executor import (
     AgentRequest,
     ErrorKind,
+    ExecutorAdapter,
     PermissionSetup,
     RolePermissions,
     UsageActivity,
@@ -24,7 +25,7 @@ from forja.core.events import EventLog, OpenOperation
 from forja.core.idempotency import Decision
 from forja.core.manifest import EntryKind, Manifest, ManifestDiff, ManifestEntry
 from forja.core.states import ExecutionState, Level
-from forja.executors import ClaudeCodeAdapter
+from forja.executors import ClaudeCodeAdapter, CursorAdapter, GrokAdapter
 from forja.orchestrator.agent_runner import (
     PACKAGE,
     ExecutorAgentRunner,
@@ -159,6 +160,21 @@ def test_the_package_the_agent_gets_carries_the_voice_the_runner_was_given(tmp_p
     package = (r.workcopy / ".forja-agent" / "package.md").read_text("utf-8")
     assert "## Voice" in package
     assert "Write plainly." in package
+
+
+@pytest.mark.parametrize("adapter", [CursorAdapter(), GrokAdapter()], ids=["cursor", "grok"])
+def test_a_permission_file_in_a_subfolder_is_written_in_the_copy(
+    tmp_path: Path, adapter: ExecutorAdapter
+) -> None:
+    r = rig(tmp_path, GOOD)
+    runner = ExecutorAgentRunner(adapter, Path("agent"), _host_env(), r.log)
+
+    go(settle(runner.prepare_workcopy(r.ctx)))
+
+    declared = runner._setup().files
+    assert any("/" in name for name in declared)
+    for name, data in declared.items():
+        assert (r.workcopy / ".forja-agent" / name).read_bytes() == data
 
 
 def test_a_copy_is_made_again_from_scratch(tmp_path: Path) -> None:
