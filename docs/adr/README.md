@@ -46,4 +46,4 @@ Status: Aceito, Proposto (ainda sem revisão específica) ou Substituído.
 | [0038](0038-a-duplicacao-e-medida-pelo-jscpd-no-gate-8-com-a-catraca-do-proprio-jscpd.md) | A duplicação é medida pelo jscpd no gate 8, com a catraca do próprio jscpd | Aceito |
 | [0039](0039-os-tipos-do-python-sao-medidos-pelo-mypy-na-catraca-do-lint.md) | Os tipos do Python são medidos pelo mypy, na catraca do lint | Aceito (a linha sobre a configuração do repositório foi substituída pelo 0041) |
 | [0040](0040-teste-de-propriedades-por-instrucao-ao-agente-e-check-em-observacao.md) | Teste de propriedades por instrução ao agente e check em observação | Aceito |
-| [0041](0041-o-mypy-le-a-configuracao-do-repositorio-sem-os-plugins.md) | O mypy lê a configuração do repositório, sem os plugins | Proposto |
+| [0041](0041-o-mypy-le-a-configuracao-do-repositorio-sem-os-plugins.md) | O mypy lê a configuração do repositório, sem os plugins | Aceito |

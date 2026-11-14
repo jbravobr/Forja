@@ -1,6 +1,6 @@
 # 0041. O mypy lê a configuração do repositório, sem os plugins
 
-Status: proposto. Substitui a linha "A configuração do repositório não vale" do [ADR 0039](0039-os-tipos-do-python-sao-medidos-pelo-mypy-na-catraca-do-lint.md).
+Status: aceito pelo dono em 14/11/2026. Substitui a linha "A configuração do repositório não vale" do [ADR 0039](0039-os-tipos-do-python-sao-medidos-pelo-mypy-na-catraca-do-lint.md).
 
 ## Contexto
 
