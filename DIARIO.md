@@ -524,3 +524,48 @@ Adotar o executor do mutator, mantendo da Forja a função dona do sítio, a rec
 - **Itens 31 a 40** (o 30 adiado), e os restos dos itens 2 e 6.
 - **Verificação que falta:** suíte completa com `slow`; mutação de `common.py`, dos `parsers.py` de C# e Java, de `cli/session.py`, `cli/detect.py`, `testing/workspace.py` e `testing/repo.py`.
 - **Decisões do dono ainda abertas:** ADR 0041 (item 24); item 29; as três do item 5; a observação sobre a etapa de caracterização (item 12).
+
+## 13/11/2026 — o resto do realinhamento da mutação com o `unclebob/mutator`
+
+Continuação da entrada anterior, na mesma sessão. As duas entradas anteriores estavam datadas de 14/11; os commits são todos de 13/11 e os títulos foram corrigidos (`621524b`).
+
+### O que foi feito
+
+| Mudança | Arquivos | Teste novo | Commit |
+| --- | --- | --- | --- |
+| Literal dentro de um tipo de TypeScript não é sítio (`_in_type`). O sítio conta como coberto pela própria linha ou pela linha onde o comando começa (`anchor_line`), no gate e no script. | `mutation/sites.py`, `mutation/model.py`, `checks/mutation.py`, `scripts/mutate.py`, `docs/guia/gates/mutacao.md` | em `tests/mutation/test_sites.py` e `tests/checks/test_mutation.py` | `cc209e3` |
+| A opção do script passa a se chamar `--max-workers`, como no mutator. `--workers` deixou de existir. O padrão continua o menor entre 8 e o número de processadores. | `scripts/mutate.py` | um | `585b7ab` |
+| O script lê os testes de cada linha direto do banco do `coverage` (`.coverage`), um arquivo por vez. Não gera mais o `contexts.json`, e apaga o que uma rodada antiga deixou. | `scripts/mutate.py` | um; dois ajustados | `f9fe4db` |
+| O mutante de um projeto Maven roda `mvn test`, sem `clean`. O pedido ao adaptador ganhou o aviso `rerun`, que só o Maven lê; o gate de testes continua com `clean`. | `core/adapters/language.py`, `languages/java/adapter.py`, `checks/mutation.py`, `docs/guia/gates/mutacao.md` | dois | `17d06c6` |
+| Dois sobreviventes de `sites.py` mortos por teste; a chamada e o índice opcionais (`a?.()`, `a?.[b]`) ganharam teste. | `tests/mutation/test_sites.py` | três | `6a68aff` |
+| Modo diferencial no script, como no mutator: cada rodada deixa em `.metrics/mutate/<arquivo>.json` o hash de cada função e o destino de cada mutante. Na rodada seguinte, mutante morto em função de texto igual não roda de novo; sobrevivente e mutante de função alterada rodam. `--mutate-all` ignora o histórico; `--since-last-run` é o nome do padrão; os dois juntos são recusados. Testes que falham antes da mutação não regravam o histórico. | `scripts/mutate.py` | dezessete | `a74d680` |
+
+### Medições
+
+- **`contexts.json`:** 1,8 GB em disco. Lê-lo custava 4,34 GB de memória e 5,1 s. Ler o mesmo do `.coverage` (2,2 MB) custa 0,03 GB e 0,9 s. As duas leituras deram a mesma resposta nos 275 arquivos da rodada guardada: nenhuma linha diferente.
+- **Maven sem `clean`:** projeto de 300 classes e 300 testes, um arquivo trocado por rodada. Com `clean`, 9,3 s; sem, 8,6 s (7%). Sem `clean` o mutante foi recompilado e pego, e o arquivo restaurado voltou a passar, três vezes seguidas.
+- **Modo diferencial:** `mutation/model.py` e `mutation/sites.py` (51 mutantes) com `--reuse-coverage`. Primeira rodada, 108 s. Segunda, 4 s, com 49 mutantes aproveitados e o mesmo veredito.
+
+### Conclusões
+
+- **`mutation_incremental` não serve para o Maven sem `clean`.** O contrato dessa capacidade é planejar `Operation.MUTATION` com `changed_files`; nenhum adaptador a declara. Por isso o aviso novo (`rerun`), que um adaptador pode ignorar.
+- **O identificador do mutante usa a posição do token no arquivo, como no mutator.** Mexer numa função desloca as de baixo, e os mutantes delas rodam de novo mesmo sem mudança. É seguro; só aproveita menos.
+- **O modo diferencial não vê os testes.** O hash é do texto da função. Depois de enfraquecer ou apagar um teste, a rodada que vale é `--mutate-all`. É o comportamento do mutator. Fica só no script; o gate da Forja continua rodando todos os mutantes.
+- **Formato do histórico:** JSON por arquivo-fonte, não o EDN por namespace do mutator. O EDN existe para o `uml-viewer`, que ninguém pediu.
+- **O sobrevivente de `_statement_line` passava porque o teste punha o sítio na linha 1:** âncora 0 vira a própria linha no modelo. O teste novo usa a linha 3.
+
+### Verificação
+
+- `ruff check .`, `ruff format --check src tests` e `mypy` strict: limpos, 624 arquivos.
+- `pytest -m "not slow" -n 6` em `17d06c6`: 9755 aprovados, 41 pulados, nenhuma falha, 404 s. Depois disso só mudaram `scripts/mutate.py` e dois arquivos de `tests/mutation`, que passaram sozinhos (364 e 38 testes).
+- Mutação em `96edf08`: `mutation/executor.py` (21 mutantes) e `orchestrator/budget.py` (33), nenhum sobrevivente.
+- Mutação em `cc209e3`: `mutation/model.py` (4) sem sobrevivente; `mutation/sites.py` (47) com dois, mortos em `6a68aff`, conferidos à mão e por nova rodada em `a74d680`; `checks/mutation.py` (43) sem sobrevivente, com 18 sítios em linhas que os testes rápidos não executam.
+- Não rodou: suíte completa com `slow`; mutação de `checks/mutation.py` e `languages/java/adapter.py` depois de `17d06c6`. `scripts/mutate.py` não é mutado: o script só muta `src`.
+
+### Pendências
+
+- **Overlay de links: decisão do dono, ainda aberta.** Recomendação: não fazer. Ganho medido de 0,65 s por worker contra o risco de escrita no lugar descrito na entrada anterior.
+- **Não adotados do mutator:** um worker por núcleo; em Go, só o pacote do arquivo; base uma vez por comando no lugar de uma por arquivo.
+- **ADRs 0021 e 0034** descrevem a mutação de antes do realinhamento e não foram atualizadas.
+- **CRAP pelo `crapper`:** não iniciado; depende de ordem do dono.
+- As demais pendências da entrada anterior continuam: itens 31 a 40, restos dos itens 2 e 6, suíte com `slow`, mutações antigas e as decisões abertas do dono.
