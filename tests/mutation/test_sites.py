@@ -167,6 +167,9 @@ def test_a_site_knows_the_line_its_statement_starts_on() -> None:
         ("1 -> 0", 6, 4, (6, 4)),
         ("- -> +", 8, 8, (8,)),
     ]
+    # the same default further down the file: still its own line, not the one before
+    (lower,) = discover("\n\ndef f(a, b=0):\n    pass\n", "m.py")
+    assert (lower.line, lower.anchor_line) == (3, 3)
 
 
 def test_the_statement_of_a_site_is_found_in_every_language() -> None:
@@ -275,6 +278,25 @@ def test_java_has_the_set_and_no_site_in_a_constructor() -> None:
 def test_typescript_adds_strict_equality_nullish_and_optional_chaining() -> None:
     source = "function f(a, b) { return a === b ?? a?.c; }"
     assert lines(source, "f.ts") == ["=== -> !==", "?? -> ||", "?. -> ."]
+
+
+@pytest.mark.parametrize(
+    ("body", "without"),
+    [("return a?.();", "return a();"), ("return a?.[b];", "return a[b];")],
+)
+def test_an_optional_call_or_index_loses_the_chain_and_nothing_takes_its_place(
+    body: str, without: str
+) -> None:
+    source = f"function f(a, b) {{ {body} }}"
+
+    (site,) = discover(source, "f.ts")
+
+    assert site.description == "delete ?."
+    assert apply_site(source, site) == f"function f(a, b) {{ {without} }}"
+
+
+def test_a_name_spelled_like_a_boolean_is_not_one() -> None:
+    assert discover("def f(true):\n    return true\n", "m.py") == []
 
 
 @pytest.mark.parametrize(
