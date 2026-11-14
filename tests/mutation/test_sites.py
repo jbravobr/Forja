@@ -145,6 +145,54 @@ def test_offsets_are_bytes_of_utf_8_and_lines_are_one_based() -> None:
     assert apply_site(source, site) == 'def f(a, b):\n    x = "ção"; return a - b\n'
 
 
+def test_a_site_knows_the_line_its_statement_starts_on() -> None:
+    source = (
+        "def f(a, b=0):\n"  # a default is in no statement: its own line
+        "    if (a\n"
+        "            > 0):\n"  # the condition belongs to the if
+        "        return (\n"
+        "            a\n"
+        "            + 1\n"
+        "        )\n"
+        "    return a - b\n"
+    )
+
+    found = [(s.description, s.line, s.anchor_line, s.lines) for s in discover(source, "m.py")]
+
+    assert found == [
+        ("0 -> 1", 1, 1, (1,)),
+        ("> -> >=", 3, 2, (3, 2)),
+        ("0 -> 1", 3, 2, (3, 2)),
+        ("+ -> -", 6, 4, (6, 4)),
+        ("1 -> 0", 6, 4, (6, 4)),
+        ("- -> +", 8, 8, (8,)),
+    ]
+
+
+def test_the_statement_of_a_site_is_found_in_every_language() -> None:
+    java = "class C {\n  int m(int a) {\n    return a\n      + 1;\n  }\n}\n"
+    go = "package p\n\nfunc F(a int) int {\n\treturn a +\n\t\t1\n}\n"
+    script = "function f(a) {\n  return a\n    + 1;\n}\n"
+    csharp = "class C {\n  int M(int a) {\n    return a\n      + 1;\n  }\n}\n"
+
+    def anchors(source: str, path: str) -> list[tuple[int, int]]:
+        return [(site.line, site.anchor_line) for site in discover(source, path)]
+
+    assert anchors(java, "C.java") == [(4, 3), (4, 3)]
+    assert anchors(go, "p.go") == [(4, 4), (5, 4)]
+    assert anchors(script, "f.ts") == [(3, 2), (3, 2)]
+    assert anchors(csharp, "C.cs") == [(4, 3), (4, 3)]
+
+
+def test_a_site_built_without_a_statement_line_is_anchored_on_its_own() -> None:
+    site = Site(
+        line=7, start=0, end=1, original="+", mutant="-", category="arithmetic", function="f"
+    )
+
+    assert site.anchor_line == 7
+    assert site.lines == (7,)
+
+
 def test_sites_come_in_file_order() -> None:
     sites = sites_of("if a > 0:\n    return b + 1\nreturn c")
     assert [(s.line, s.start) for s in sites] == sorted((s.line, s.start) for s in sites)
@@ -227,6 +275,23 @@ def test_java_has_the_set_and_no_site_in_a_constructor() -> None:
 def test_typescript_adds_strict_equality_nullish_and_optional_chaining() -> None:
     source = "function f(a, b) { return a === b ?? a?.c; }"
     assert lines(source, "f.ts") == ["=== -> !==", "?? -> ||", "?. -> ."]
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        # the return type and the parameter type hold literals; only the body runs
+        ("function f(a: 0 | 1): { ok: true } { return { ok: a > 0 }; }", ["> -> >=", "0 -> 1"]),
+        ("function f() { type T = { n: 1; b: false }; return 1; }", ["1 -> 0"]),
+        ("function f() { interface I { n: 0 } return 0; }", ["0 -> 1"]),
+        ("function f() { return g<1>(0); }", ["0 -> 1"]),
+        ("function f<T extends 1>(a: T) { return a === 1; }", ["=== -> !==", "1 -> 0"]),
+        ("function f() { const a: true = true; return a; }", ["true -> false"]),
+        ("function f() { return (x as 1) + 1; }", ["+ -> -", "1 -> 0"]),
+    ],
+)
+def test_a_literal_inside_a_typescript_type_is_not_a_site(source: str, expected: list[str]) -> None:
+    assert lines(source, "f.ts") == expected
 
 
 def test_javascript_uses_the_typescript_rules() -> None:

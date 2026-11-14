@@ -313,7 +313,7 @@ def mutants_of(file: str, root: Path, covered: frozenset[int]) -> list[Mutant]:
     return [
         Mutant(
             file, site.line, site.description, site.function,
-            apply_site(source, site).encode("utf-8"), site.line in covered,
+            apply_site(source, site).encode("utf-8"), any(line in covered for line in site.lines),
         )
         for site in discover(source, file)
     ]  # fmt: skip

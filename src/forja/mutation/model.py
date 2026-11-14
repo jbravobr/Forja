@@ -12,6 +12,18 @@ class Site:
     mutant: str  # empty when the change deletes the token
     category: str
     function: str  # qualified name of the innermost function that holds the site
+    # The line its statement starts on. A coverage report may mark only that line of a statement
+    # that spans several, so a site counts as covered when either line is (as in the mutator).
+    anchor_line: int = 0
+
+    def __post_init__(self) -> None:
+        if self.anchor_line == 0:
+            object.__setattr__(self, "anchor_line", self.line)
+
+    @property
+    def lines(self) -> tuple[int, ...]:
+        """The lines whose coverage says a test reaches the site."""
+        return (self.line,) if self.anchor_line == self.line else (self.line, self.anchor_line)
 
     @property
     def description(self) -> str:

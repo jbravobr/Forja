@@ -134,7 +134,7 @@ def build_mutants(
             if site.line not in wanted and site.function not in touched:
                 continue
             mutated = apply_site(source, site).encode("utf-8")
-            covered = coverage.is_covered(path, site.line)
+            covered = any(coverage.is_covered(path, line) for line in site.lines)
             mutants.append(
                 Mutant(path, site.line, site.description, site.function, mutated, covered)
             )

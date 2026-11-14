@@ -41,7 +41,7 @@ A nota é a fração de mutantes mortos:
 nota = mortos / (mortos + sobreviventes)
 ```
 
-Um mutante que estoura o tempo conta como morto. Um mutante em linha que nenhum teste executa não roda e fica fora da nota. Se nenhum mutante rodou, não há nota e o gate passa. Uma nota abaixo de `min_score` reprova.
+Um mutante que estoura o tempo conta como morto. Um mutante em linha que nenhum teste executa não roda e fica fora da nota; num comando que ocupa várias linhas, basta que o relatório de cobertura marque a linha do mutante ou a linha onde o comando começa. Se nenhum mutante rodou, não há nota e o gate passa. Uma nota abaixo de `min_score` reprova.
 
 ### Que alterações a Forja faz
 
@@ -63,6 +63,7 @@ Regras gerais:
 - Um operador só muda dentro de uma expressão binária.
 - Texto de string e comentário nunca muda.
 - Código fora de função nunca muda. Em Java, construtor não conta como função.
+- Em TypeScript, o que está dentro de um tipo nunca muda: o `true` de `{ ok: true }` num tipo de retorno não é executado.
 - Em Go, `/` não muda; `*` vira `/`.
 - A mutação serve Python, Go, Java, C#, JavaScript e TypeScript. JavaScript e TypeScript são tratados como uma família só.
 

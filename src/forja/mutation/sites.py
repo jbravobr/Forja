@@ -47,6 +47,17 @@ NUMBERS = frozenset(
     {"decimal_integer_literal", "integer_literal", "int_literal", "integer", "number"}
 )
 
+TYPE_NODES = frozenset(
+    {
+        "type_annotation",
+        "type_alias_declaration",
+        "interface_declaration",
+        "type_arguments",
+        "type_parameters",
+        "literal_type",
+    }
+)
+
 FUNCTIONS = {
     "python": frozenset({"function_definition"}),
     "go": frozenset({"function_declaration", "method_declaration"}),
@@ -111,8 +122,21 @@ def _optional_mutant(node: Node) -> str | None:
     return None
 
 
+def _in_type(node: Node) -> bool:
+    """Whether the leaf is part of a TypeScript type: a literal such as the ``true`` of
+    ``{ ok: true }`` in a return type never runs, so the mutator leaves it alone."""
+    current = node.parent
+    while current is not None:
+        if current.type in TYPE_NODES:
+            return True
+        current = current.parent
+    return False
+
+
 def _change(node: Node, language: str) -> tuple[str, str, str] | None:
     """The one change a leaf allows as ``(original, mutant, category)``, if any."""
+    if language == "typescript" and _in_type(node):
+        return None
     token = _text(node)
     parent = node.parent.type if node.parent is not None else ""
     if parent in BINARY_PARENTS:
@@ -132,6 +156,16 @@ def _change(node: Node, language: str) -> tuple[str, str, str] | None:
     if node.type in NUMBERS and token in {"0", "1"}:
         return token, "1" if token == "0" else "0", "constant"
     return None
+
+
+def _statement_line(node: Node) -> int:
+    """The line the statement or declaration around ``node`` starts on; its own line if none."""
+    current = node.parent
+    while current is not None:
+        if current.type.endswith(("_statement", "_declaration")):
+            return current.start_point[0] + 1
+        current = current.parent
+    return node.start_point[0] + 1
 
 
 def _leaves(root: Node) -> Iterator[Node]:
@@ -227,6 +261,7 @@ def discover(source: str, path: str) -> list[Site]:
                 mutant=mutant,
                 category=category,
                 function=owner,
+                anchor_line=_statement_line(leaf),
             )
         )
     return sorted(found, key=lambda site: (site.line, site.start, site.end))

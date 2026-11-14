@@ -95,6 +95,28 @@ def test_a_changed_line_no_test_runs_gives_an_uncovered_mutant(tmp_path: Path) -
         assert not mutant.covered
 
 
+@pytest.mark.parametrize(
+    ("covered", "runs"),
+    [
+        ({2}, True),  # the report marks only the line the statement starts on
+        ({4}, True),  # or the line of the site itself
+        ({2, 4}, True),
+        ({1, 3, 5}, False),
+        (set(), False),
+    ],
+)
+def test_a_site_counts_as_covered_by_its_own_line_or_the_line_its_statement_starts_on(
+    tmp_path: Path, covered: set[int], runs: bool
+) -> None:
+    (tmp_path / "m.py").write_text("def f(a, b):\n    return (\n        a\n        - b\n    )\n")
+    coverage = CoverageReport({"m.py": FileCoverage(covered=frozenset(covered), tests={})})
+
+    (mutant,) = build_mutants(tmp_path, {"m.py": frozenset({4})}, coverage)
+
+    assert (mutant.line, mutant.change) == (4, "- -> +")
+    assert mutant.covered is runs
+
+
 def test_a_file_the_rules_cannot_read_leaves_the_measurement_undecided(tmp_path: Path) -> None:
     (tmp_path / "m.py").write_text("def f(a, b):\n    return a - b\n")
     (tmp_path / "broken.py").write_text("def (:\n")
