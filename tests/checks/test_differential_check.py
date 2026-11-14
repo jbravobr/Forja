@@ -145,7 +145,12 @@ def test_each_output_of_a_case_is_judged_by_its_own_rule(log: EventLog, tmp_path
 
 def test_a_different_exit_code_rejects(log: EventLog, tmp_path: Path) -> None:
     result = judge(
-        log, tmp_path, (case("e", EXIT, DifferentialOutput(EXIT_CODE)),), was="0", now="3"
+        log,
+        tmp_path,
+        (case("e", EXIT, DifferentialOutput(EXIT_CODE)),),
+        was="0",
+        now="3",
+        values=LOOSE,
     )
 
     assert [target for _, target in findings(result)] == ["e: exit_code"]
