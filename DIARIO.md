@@ -569,3 +569,33 @@ Continuação da entrada anterior, na mesma sessão. As duas entradas anteriores
 - **ADRs 0021 e 0034** descrevem a mutação de antes do realinhamento e não foram atualizadas.
 - **CRAP pelo `crapper`:** não iniciado; depende de ordem do dono.
 - As demais pendências da entrada anterior continuam: itens 31 a 40, restos dos itens 2 e 6, suíte com `slow`, mutações antigas e as decisões abertas do dono.
+
+### Pontos de atenção a endereçar
+
+O dono pediu, em 13/11, que estes três pontos sejam tratados. Nenhum foi tratado ainda.
+
+1. **O modo diferencial não vê os testes.**
+   - O que acontece: o histórico guarda o hash do texto de cada função e o destino de cada mutante. Se um teste for enfraquecido ou apagado e a função não mudar, o mutante continua dado como morto e não roda.
+   - Consequência: `scripts/mutate.py` pode sair com 0 tendo um sobrevivente que só `--mutate-all` mostraria.
+   - Hoje: avisado no texto de ajuda do script. Nada impede o engano.
+   - A endereçar: fazer o histórico depender também dos testes. Caminho a avaliar: guardar junto de cada função um hash dos arquivos de teste que executam suas linhas (o script já sabe quais são, pela cobertura) e rodar de novo os mutantes da função quando esse hash mudar. É divergência do mutator, que não olha os testes; pede decisão do dono.
+   - Até lá: rodar `--mutate-all` depois de qualquer mudança em `tests/` e antes de cada release.
+
+2. **O histórico é JSON por arquivo-fonte, não o EDN por namespace do mutator.**
+   - O que acontece: `.metrics/mutate/<arquivo>.json` no lugar de `.metrics/mutate/<namespace>.edn`.
+   - Consequência: o `uml-viewer`, que lê o EDN do mutator, não lê o histórico da Forja. Não é cópia fiel neste ponto.
+   - A endereçar: decisão do dono entre manter o JSON ou escrever o EDN do mutator. O EDN pede o namespace e o identificador de forma (`defn/nome`, `defn-/nome`) que no mutator vêm do `crapper`; faz sentido decidir junto com a adoção do `crapper`.
+
+3. **O commit `621524b` tem a mensagem errada.**
+   - O que acontece: a mensagem diz que é o diário do realinhamento, mas o commit só corrige duas datas de título (14/11 para 13/11). A entrada está em `b50146e`, com a mesma mensagem.
+   - Consequência: dois commits seguidos com a mesma mensagem; o histórico engana quem ler.
+   - A endereçar: reescrever a mensagem de `621524b` antes de enviar a branch. Nada foi enviado ainda, então a reescrita não afeta ninguém; mesmo assim muda os hashes dos commits seguintes, e por isso espera ordem do dono.
+
+### Limpeza do que as rodadas antigas deixaram
+
+Pedida pelo dono em 13/11, depois de conferir o disco.
+
+- **Apagado:** `target/coverage/python/contexts.json` da árvore principal (1,8 GB; `target/` caiu de 1,7 GB para 2,5 MB); cinco pastas `forja-mutants-*` no `%TEMP%`, restos de rodadas interrompidas (3 MB); o projeto Maven e os scripts de medição do scratchpad da sessão.
+- **Já não existia:** as cópias de worker de 15 GB no `%TEMP%`; o `contexts.json` do checkout de verificação, apagado pelo script novo; processos de mutação pendurados.
+- **Mantido:** `.coverage` e `lcov.info` (usados por `--reuse-coverage`); `.metrics/mutate/` do checkout de verificação (o histórico do modo diferencial); o checkout `%LOCALAPPDATA%\forja-verif`.
+- **Não tocado, a conferir:** dez pastas `forja-captura-*` no `%TEMP%`. Pelo nome vêm de `scripts/capturas/terminal.py`; o conteúdo não foi conferido.
