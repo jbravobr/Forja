@@ -154,7 +154,8 @@ def consecutive_infra_failures(state: RunState, stage_id: str) -> int:
         if payload.get("infra_failure") is not True:
             break
         discarded = state.transition_seq(Level.ATTEMPT, attempt, AttemptState.DISCARDED)
-        if paused is not None and discarded is not None and discarded < paused:
+        # two events never share a number, so the later of the two tells which came first
+        if paused is not None and discarded is not None and max(discarded, paused) == paused:
             break
         count += 1
     return count
