@@ -430,3 +430,97 @@ Só os três de `keep_worst` são de código escrito nesta leva. Os outros 21 es
 - **Itens 16 a 20 e 31 a 40** (o 30 adiado), e os restos dos itens 2 e 6.
 - **Verificação que falta:** suíte completa com `slow`; mutação de `common.py`, dos `parsers.py` de C# e Java, de `ports.py`, `cli/session.py`, `cli/detect.py`, `cli/prepare.py`, `cli/doctor.py`, `testing/workspace.py` e `testing/repo.py`.
 - **Decisões do dono ainda abertas:** ADR 0041 (item 24); item 29; as três do item 5; a observação sobre a etapa de caracterização (item 12).
+
+## 13 e 14/11/2026 — itens 16 a 20, e as notas apagadas deixam de ser citadas
+
+### Decisão do dono
+
+- **Notas apagadas:** tirar toda menção a elas. Saíram a regra 6 de `CLAUDE.md`, a seção "Construção da Forja" da Especificação, a linha do `.gitignore`, a pendência deste diário e as citações em `AVALIACAO.md`, que por isso deixou de ser "como foi escrita" (`000bda1`).
+
+### O que foi feito
+
+| Item | Mudança | Arquivos | Teste novo | Commit |
+| --- | --- | --- | --- | --- |
+| 16 | Sem terminal e sem `--config`, a Forja recusa no ponto da confirmação ("Sem terminal não há quem confirme"), com código 2 e sem alterar nada. `--plano` continua valendo sem terminal. | `cli/main.py`, guia `execucao-toml.md` | um em `tests/cli/test_main.py` | `11c28fe` |
+| 17 | Tela ou leitor de teclas que quebra não derruba a execução: o rastro vai para `interface.log`, ao lado do resumo, e a execução segue até o fim. Vale para `start`, `update` e `stop` da tela e para as tarefas auxiliares. | `cli/run.py` | cinco em `tests/cli/test_run.py` | `7d51a47` |
+| 18 | A prova de vida da CLI é lembrada por um dia, por caminho, versão e, na CLI genérica, pelo modelo de comando. `forja doctor` sempre prova de novo. | `cli/prepare.py`, `cli/doctor.py`, guias `clis.md`, `ambiente.md`, `execucao-toml.md`, Especificação | `tests/cli/test_proof_of_life.py` (19 casos), um ajuste em `test_doctor_checks.py` | `440d9d2` |
+| 19 | O contador de falhas de infraestrutura de uma etapa recomeça depois da última pausa dela. `RunState` passou a guardar o número do evento de cada entrada num estado (`transition_seq`). | `core/events/state.py`, `orchestrator/budget.py` | dois em `test_budget.py`, um em `test_phases.py` | `cfcec50`, `cd4308e` |
+| 20 | `forja revisao` lê o papel de cada etapa do id dela (`-s`, `-t`, `-t<n>`, `-d`, `-c`, `-f`), e não da posição no plano. A letra de cada papel ficou num só lugar (`STAGE_LETTER`). | `orchestrator/ports.py`, `orchestrator/review.py`, `orchestrator/task_cycle.py` | 21 casos em `tests/orchestrator/test_review.py` | `a2bd76f` |
+| mutantes | 18 sobreviventes em código antigo de `cli/run.py` (5, em `exit_code` e `closing_lines`) e de `cli/prepare.py` (10, mais 3 do item 18). | `tests/cli/test_exit_code.py`, `tests/cli/test_prepare_edges.py` (novo), `test_proof_of_life.py` | os próprios | `44375ec`, `a30b11c` |
+
+### Conclusões
+
+- **Item 16, onde a recusa fica.** No ponto da confirmação, não na entrada: sem terminal, as outras recusas da preparação (descrição que falta, repositório sujo, execução incompleta) continuam aparecendo primeiro, com a mensagem delas.
+- **Item 17, a tela parada não é avisada.** Depois da falha a tela deixa de atualizar e a execução segue. As linhas finais não dizem que a tela quebrou; só o `interface.log` diz.
+- **Item 18, um dia.** O plano pedia validade sem dizer quanto. Ficou 24 horas (`PROOF_VALID_SECONDS`). Prova gravada por uma Forja anterior (`true`, sem momento) não vale e é refeita.
+- **Item 19, o plano foi trocado.** O plano dizia "contar só depois do último `session_started`". Isso quebrava um teste que protege contra laço de quedas (`test_results_lost_again_and_again_pause_the_run_like_any_infrastructure_failure`): cada queda abre uma sessão, e o contador nunca chegaria ao limite. O corte ficou na última pausa da etapa: quem retoma depois de pausar tem o limite inteiro; quedas sem pausa continuam somando.
+- **Item 19, toda pausa zera.** A etapa também entra em `infra_paused` por disco cheio, rede que não volta e erro bloqueante. Retomar depois de qualquer uma zera o contador.
+- **Item 19, mutante equivalente.** `discarded < paused` e `<=` valem o mesmo, porque dois eventos nunca têm o mesmo número. A comparação foi reescrita com `max` e o operador saiu (`cd4308e`).
+- **Item 20, etapa de id desconhecido fica fora do relatório.** Nenhum papel escreve outro id hoje.
+
+### Verificação
+
+- `ruff check .`, `ruff format --check src tests` e `mypy` strict: limpos, 624 arquivos.
+- `pytest -m "not slow" -n 6` em `a30b11c`: 9731 aprovados, 41 pulados, nenhuma falha.
+- Mutação em `11c28fe`: `cli/main.py` (34 mutantes), nenhum sobrevivente.
+- Mutação em `440d9d2`: `cli/doctor.py` sem sobrevivente; `cli/run.py` com 5 e `cli/prepare.py` com 13, todos mortos por teste depois.
+- Mutação em `a30b11c`: `cli/run.py` (27), `cli/prepare.py` (126), `core/events/state.py` (27), `orchestrator/ports.py` (8), `orchestrator/review.py` (36) e `orchestrator/task_cycle.py` (78) sem sobrevivente; `orchestrator/budget.py` (33) com um, o equivalente acima. Ficam 3 pontos de `prepare.py` em linhas que nenhum teste executa.
+- Não rodou: suíte completa com `slow`; E2E com agente real; a mutação de `budget.py` depois de `cd4308e`.
+
+## 14/11/2026 — a mutação comparada com o `unclebob/mutator` e o `unclebob/crapper`, e a primeira parte do realinhamento
+
+### O que motivou
+
+O dono notou que as rodadas de mutação deixavam o PC lento e que o README do mutator descreve opções que a Forja não tem (`--max-workers`). Pediu a comparação com a referência.
+
+### O que foi lido
+
+`unclebob/mutator` no commit `830ec7e` (README e todo `src/mutator`) e `unclebob/crapper` no commit `c757ec7` (menos `cli.py` e os leitores de Rust e Clojure), contra `src/forja/mutation`, `checks/mutation.py`, `checks/crap.py`, `checks/complexity.py` e `scripts/mutate.py`.
+
+### Medições
+
+- **A cópia de cada worker levava `target/` junto.** `target/coverage/python/contexts.json` tem 1,9 GB; o código copiado, cerca de 10 MB. Uma rodada com 8 workers tinha 15 GB em `%TEMP%\forja-mutants-*`, refeitos a cada arquivo mutado e de novo na reconferência.
+- **Depois da mudança:** uma cópia tem 852 arquivos e 10,4 MB e leva 0,96 s. A mesma árvore em links físicos leva 0,31 s.
+- **A máquina:** Ryzen 9 7900X3D (24 threads), 32 GB, C: em NVMe. O arquivo de paginação teve pico de 737 MB; a memória não foi o gargalo nesta sessão.
+
+### Conclusões da comparação
+
+- **A Forja não é cópia do mutator.** Portou as regras de sítio e a regra de julgamento. O executor, a seleção de mutantes e a linha de comando são próprios. O `crapper`, de que o mutator depende, não foi copiado nem citado.
+- **Iguais:** tabela de operadores, pais binários e unários, booleanos, `0`/`1`, Go só `*` para `/`, `??` e `?.`; mutante morto por falha ou tempo; tempo-limite de 10 vezes a base, mínimo 2 s; linha sem cobertura não roda; nota = mortos / (mortos + sobreviventes); saídas 0, 2 e 3.
+- **O mutator faz e a Forja não:** worker como overlay de links; um worker por núcleo, limitado por `--max-workers` e pelo número de sítios; snapshot em `.metrics/mutate` com modo diferencial; base uma vez por comando; `anchor_line` (a linha onde o comando começa também vale como coberta); `_in_type` (literal em tipo de TypeScript não é sítio); em Go, só o pacote do arquivo; em Java, `mvn -q test` sem `clean`.
+- **A Forja faz e o mutator não:** escolha de testes pela linha mutada (só em `scripts/mutate.py`), reconferência do mutante que estourou o tempo ao lado dos outros, canário, arquivo de supressões, C#.
+- **A função dona do sítio diverge em TypeScript e Java.** O `crapper` só tem por entrada função de topo, método de classe, `const f = () =>` de topo e callback de rota Express; sítio fora delas é descartado. A Forja aceita qualquer função. A Forja muta mais código.
+- **CRAP:** fórmula e limite iguais. O `crapper` conta complexidade com tree-sitter e lê a cobertura por instrução (JaCoCo) e por ramo (LCOV); a Forja usa o `lizard` e a fração de linhas.
+
+### Decisão do dono
+
+Adotar o executor do mutator, mantendo da Forja a função dona do sítio, a reconferência e o canário. O CRAP fica para depois.
+
+### O que foi feito (primeira parte)
+
+| Mudança | Arquivos | Teste novo | Commit |
+| --- | --- | --- | --- |
+| A cópia do worker deixa de fora, na raiz, `target`, `coverage`, `.metrics`, `.forja-coverage` e `.forja-cover.out`; em qualquer nível, os caches (`.pytest_cache`, `.gradle`, `.hg`, `.svn`, `.idea`, além dos que já saíam). | `mutation/executor.py` | um em `tests/mutation/test_executor.py` | `b9f241e` |
+| Nunca há mais workers que mutantes a rodar. Sem nenhum mutante coberto, nada é copiado e nenhum teste roda. | `mutation/executor.py` | três | `b9f241e` |
+| Só o bytecode do arquivo mutado é removido (`__pycache__/<nome>.*.pyc`), como no mutator. Antes a cópia inteira era varrida duas vezes por mutante. | `mutation/executor.py` | dois | `b9f241e` |
+
+### Conclusões desta parte
+
+- **`dist`, `build` e `out` continuam na cópia,** ao contrário do mutator. O comando de testes que a Forja recebe pode rodar o que foi construído ali; sem eles a rodada de base falharia e o gate ficaria inconclusivo.
+- **Um mutante só não é reconferido.** Com um mutante a rodar há um worker, e ele já rodou sozinho.
+- **O overlay de links ainda não foi feito, e pede decisão.** Medido aqui, o ganho sobre a cópia já enxuta é de 0,65 s por worker. O risco é escrita no lugar: num worker de links, uma ferramenta que reescreve um arquivo existente (compilador sobre `bin`/`obj`, formatador, teste que regrava um fixture) altera a árvore que o gate está julgando. A cópia é imune a isso.
+
+### Verificação
+
+- `ruff check .`, `ruff format --check src tests` e `mypy` strict: limpos, 624 arquivos.
+- `pytest -m "not slow" -n 6` em `b9f241e`: 9736 aprovados, 41 pulados, nenhuma falha, 361 s.
+- Não rodou: mutação de `mutation/executor.py`; suíte completa com `slow`.
+
+### Pendências
+
+- **Realinhamento da mutação, o que falta:** decisão sobre o overlay de links; `anchor_line` no gate; `_in_type` em `sites.py`; `mvn -q test` sem `clean` por mutante; snapshot com modo diferencial em `scripts/mutate.py`; `--max-workers`.
+- **`scripts/mutate.py` carrega `contexts.json` (1,9 GB) inteiro na memória.** Não medido; suspeito das quedas por falta de memória das entradas anteriores.
+- **CRAP pelo `crapper`:** cobertura por instrução e por ramo; contagem com tree-sitter no lugar do `lizard`. Não iniciado.
+- **Itens 31 a 40** (o 30 adiado), e os restos dos itens 2 e 6.
+- **Verificação que falta:** suíte completa com `slow`; mutação de `common.py`, dos `parsers.py` de C# e Java, de `cli/session.py`, `cli/detect.py`, `testing/workspace.py` e `testing/repo.py`.
+- **Decisões do dono ainda abertas:** ADR 0041 (item 24); item 29; as três do item 5; a observação sobre a etapa de caracterização (item 12).
