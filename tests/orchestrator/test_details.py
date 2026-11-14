@@ -602,8 +602,10 @@ def test_a_cut_after_the_rollback_blocks_the_task_without_judging_the_integratio
     outcome, log = crash_then_resume(MemoryWorld(tmp_path / "world"), cut, measurer=spy)
 
     assert outcome.state is ExecutionState.DELIVERED
+    assert REJECTED.stopped_by is not None
     assert log.state.transition_payload(Level.TASK, "t1", TaskState.BLOCKED) == {
-        "reason": "integration_gate"
+        "reason": "integration_gate",
+        "detail": describe_stop(REJECTED.stopped_by),  # the same a run with no cut records
     }
     assert len(spy.integrated) == 1  # the process that died; the resumed one did not judge again
 

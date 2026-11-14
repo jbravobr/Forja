@@ -273,6 +273,18 @@ def test_the_effect_that_closed_an_operation_can_be_read_back(log: EventLog) -> 
     assert log.state.effect_of("never-used") is None
 
 
+def test_what_an_intent_said_can_be_read_back_after_the_operation_is_closed(log: EventLog) -> None:
+    create_run(log)
+    log.append_intent(Level.EXECUTION, RUN, "integrate_task", "op1", payload={"branch": "b"})
+    while_open = log.state.intent_of("op1")
+
+    log.append_effect(Level.EXECUTION, RUN, "integrate_task", "op1")
+
+    assert while_open == {"branch": "b"}
+    assert log.state.intent_of("op1") == {"branch": "b"}
+    assert log.state.intent_of("never-used") is None
+
+
 # -- what the state remembers and how it says no -----------------------------------------------
 
 

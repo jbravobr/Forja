@@ -40,6 +40,7 @@ from forja.orchestrator.criteria import (
 )
 from forja.orchestrator.diary import stage_diary, stage_hypothesis, stage_last_said, task_diary
 from forja.orchestrator.findings import findings_artifact_id, findings_of, findings_report
+from forja.orchestrator.operations import Step
 from forja.orchestrator.outcome import StopRun
 from forja.orchestrator.ports import (
     NO_COMMIT,
@@ -864,27 +865,36 @@ class TaskCycle:
                 )
             return
         if journal.done(OperationName.ROLLBACK_INTEGRATION, task):
-            journal.enter(
-                Level.TASK, task, TaskState.BLOCKED, payload={"reason": "integration_gate"}
-            )
+            # the verdict died with the process: the intent of the rollback kept why it was given
+            said = journal.intent_of(OperationName.ROLLBACK_INTEGRATION, task).get("detail")
+            blocked: dict[str, JsonValue] = {"reason": "integration_gate"}
+            if isinstance(said, str):
+                blocked["detail"] = said
+            journal.enter(Level.TASK, task, TaskState.BLOCKED, payload=blocked)
             return
         outcome = await run.measurer.integration(run.workspace.run_worktree, run.sinks)
         stopper = outcome.stopped_by
         if stopper is None:
             journal.enter(Level.TASK, task, TaskState.INTEGRATED)
             return
+        detail = describe_stop(stopper)
+        rollback = run.workspace.rollback_integration(task)
+
+        async def why_and_what() -> dict[str, JsonValue]:
+            return {**await rollback.payload(), "detail": detail}
+
         await journal.operate(
             OperationName.ROLLBACK_INTEGRATION,
             Level.TASK,
             task,
             task,
-            run.workspace.rollback_integration(task),
+            Step(why_and_what, rollback.run),
         )
         journal.enter(
             Level.TASK,
             task,
             TaskState.BLOCKED,
-            payload={"reason": "integration_gate", "detail": describe_stop(stopper)},
+            payload={"reason": "integration_gate", "detail": detail},
         )
 
 

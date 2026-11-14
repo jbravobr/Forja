@@ -83,6 +83,7 @@ class RunState:
         self._targets: dict[tuple[Level, str], _Target] = {}
         self._open: dict[str, OpenOperation] = {}
         self._closed: dict[str, dict[str, JsonValue]] = {}
+        self._intents: dict[str, dict[str, JsonValue]] = {}
 
     def has_target(self, level: Level, target_id: str) -> bool:
         return (level, target_id) in self._targets
@@ -122,6 +123,11 @@ class RunState:
         """Payload of the effect that closed the operation, or ``None`` if it is not closed."""
         closed = self._closed.get(operation_id)
         return None if closed is None else dict(closed)
+
+    def intent_of(self, operation_id: str) -> dict[str, JsonValue] | None:
+        """Payload of the intent that began the operation, open or closed; ``None`` if none did."""
+        said = self._intents.get(operation_id)
+        return None if said is None else dict(said)
 
     @property
     def open_operations(self) -> Mapping[str, OpenOperation]:
@@ -163,6 +169,7 @@ class RunState:
                     move.target.entered[move.new_state.value] = payload
                     move.target.entered_seq[move.new_state.value] = event.seq
             case IntentEvent():
+                self._intents[event.operation_id] = dict(event.payload)
                 self._open[event.operation_id] = OpenOperation(
                     event.operation,
                     event.operation_id,

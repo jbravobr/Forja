@@ -175,6 +175,23 @@ def test_an_operation_the_resume_found_already_done_is_not_repeated(log: EventLo
     assert done == []
 
 
+def test_what_the_intent_said_is_read_from_the_operation_that_happened(log: EventLog) -> None:
+    journal = Journal(log)
+    name = OperationName.CREATE_TASK_BRANCH
+    before = journal.intent_of(name, "t1")
+    log.append_intent(Level.EXECUTION, RUN, name, "create_task_branch:t1", payload={"n": 1})
+    log.append_effect(
+        Level.EXECUTION, RUN, name, "create_task_branch:t1", payload={"reconciled": "redo"}
+    )
+    redone = journal.intent_of(name, "t1")
+    log.append_intent(Level.EXECUTION, RUN, name, "create_task_branch:t1:1", payload={"n": 2})
+    still_open = journal.intent_of(name, "t1")
+    log.append_effect(Level.EXECUTION, RUN, name, "create_task_branch:t1:1")
+
+    assert (before, redone, still_open) == ({}, {}, {})
+    assert journal.intent_of(name, "t1") == {"n": 2}
+
+
 def test_two_redos_in_a_row_count_up(log: EventLog) -> None:
     journal = Journal(log)
     settle(log, "create_task_branch:t1", Decision.REDO)

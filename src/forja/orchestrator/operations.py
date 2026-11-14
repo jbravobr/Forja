@@ -119,6 +119,20 @@ class Journal:
     def done(self, name: OperationName, subject: str) -> bool:
         return self.operation_id(name, subject) is None
 
+    def intent_of(self, name: OperationName, subject: str) -> dict[str, JsonValue]:
+        """What the intent of ``name`` on ``subject`` recorded, read from the one that happened;
+        empty if none did. It is what a resumed run knows of an operation it does not repeat."""
+        state = self.log.state
+        retry = 0
+        while True:
+            candidate = f"{name}:{subject}" + (f":{retry}" if retry else "")
+            effect = state.effect_of(candidate)
+            if effect is None:
+                return {}
+            if effect.get("reconciled") != Decision.REDO.value:
+                return state.intent_of(candidate) or {}
+            retry += 1
+
     async def operate(
         self, name: OperationName, level: Level, target: str, subject: str, step: Step
     ) -> bool:
