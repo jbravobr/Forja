@@ -1,6 +1,5 @@
 import asyncio
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -210,30 +209,132 @@ def test_when_the_processors_cannot_be_counted_one_worker_runs(
     assert len(_roots_used(project, tmp_path)) == 1
 
 
-def test_bytecode_caches_that_cannot_be_removed_do_not_stop_the_run(
+def test_bytecode_that_cannot_be_removed_does_not_stop_the_run(
     project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    real = shutil.rmtree
-    asked: list[object] = []
+    real = Path.unlink
+    refused: list[str] = []
 
-    def spy(path: Path, ignore_errors: bool = False) -> None:
-        asked.append(ignore_errors)
-        real(path, ignore_errors=ignore_errors)
+    def locked(self: Path, missing_ok: bool = False) -> None:
+        if self.suffix == ".pyc":
+            refused.append(self.name)
+            raise PermissionError("in use")
+        real(self, missing_ok=missing_ok)
 
-    monkeypatch.setattr(shutil, "rmtree", spy)
-    (project / "__pycache__").mkdir()
+    monkeypatch.setattr(Path, "unlink", locked)
 
-    run(project, tmp_path, [mutant(b"x > 0", b"x < 0")], workers=1)
+    report = run(project, tmp_path, [mutant(b"x > 0", b"x < 0")], workers=1)
 
-    assert asked and all(asked)
+    assert refused and all(name.startswith("calc.") for name in refused)
+    assert len(report.mutants) == 1
+
+
+def test_only_the_bytecode_of_the_mutated_file_is_removed(project: Path, tmp_path: Path) -> None:
+    kept: list[bool] = []
+
+    async def runner(root: Path, timeout: float | None) -> TestVerdict:
+        cache = root / "__pycache__"
+        if (root / "calc.py").read_bytes() == CALC:  # the unchanged copy: as if Python had run
+            cache.mkdir(exist_ok=True)
+            for name in (
+                "calc.cpython-312.pyc",
+                "calculus.cpython-312.pyc",
+                "other.cpython-312.pyc",
+            ):
+                (cache / name).write_bytes(b"compiled")
+            return TestVerdict.PASSED
+        kept.append((cache / "calc.cpython-312.pyc").exists())
+        kept.append((cache / "calculus.cpython-312.pyc").exists())
+        kept.append((cache / "other.cpython-312.pyc").exists())
+        (cache / "calc.cpython-312.pyc").write_bytes(b"of the mutant")
+        return TestVerdict.FAILED
+
+    run(project, tmp_path, [mutant(b"x > 0", b"x < 0")], runner, workers=1)
+
+    assert kept == [False, True, True]
+    # what the mutant compiled is removed too, or the next run would load it
+    assert not (tmp_path / "scratch" / "worker-0" / "__pycache__" / "calc.cpython-312.pyc").exists()
+
+
+def test_a_copy_leaves_out_the_reports_at_the_root_and_the_caches_everywhere(
+    project: Path, tmp_path: Path
+) -> None:
+    for left in ("target/coverage/big.json", "coverage/lcov.info", ".metrics/crap.edn"):
+        (project / left).parent.mkdir(parents=True, exist_ok=True)
+        (project / left).write_text("x", encoding="utf-8")
+    (project / ".forja-cover.out").write_text("x", encoding="utf-8")
+    for cache in ("__pycache__/a.pyc", "pkg/.pytest_cache/v", "pkg/.mypy_cache/v", "pkg/.gradle/v"):
+        (project / cache).parent.mkdir(parents=True, exist_ok=True)
+        (project / cache).write_text("x", encoding="utf-8")
+    for kept in ("pkg/target/classes/A.class", "pkg/coverage/mod.py", "dist/app.js", "build/x"):
+        (project / kept).parent.mkdir(parents=True, exist_ok=True)
+        (project / kept).write_text("x", encoding="utf-8")
+
+    async def runner(root: Path, timeout: float | None) -> TestVerdict:
+        return TestVerdict.PASSED
+
+    run(project, tmp_path, [mutant(b"x > 0", b"x < 0")], runner, workers=1)
+
+    copy = tmp_path / "scratch" / "worker-0"
+    found = {path.relative_to(copy).as_posix() for path in copy.rglob("*") if path.is_file()}
+    assert found == {
+        "calc.py",
+        "conftest.py",
+        "tests/test_calc.py",
+        "pkg/target/classes/A.class",
+        "pkg/coverage/mod.py",
+        "dist/app.js",
+        "build/x",
+    }
+
+
+def test_there_are_never_more_copies_than_mutants_to_run(project: Path, tmp_path: Path) -> None:
+    async def runner(root: Path, timeout: float | None) -> TestVerdict:
+        return TestVerdict.PASSED
+
+    mutants = [
+        mutant(b"x > 0", b"x < 0"),
+        mutant(b"x > 0", b"x >= 0"),
+        mutant(b"x > 0", b"x != 0", covered=False),
+    ]
+    run(project, tmp_path, mutants, runner, workers=8)
+
+    assert sorted(p.name for p in (tmp_path / "scratch").iterdir()) == ["worker-0", "worker-1"]
+
+
+def test_with_no_mutant_to_run_nothing_is_copied_and_no_test_runs(
+    project: Path, tmp_path: Path
+) -> None:
+    calls: list[Path] = []
+
+    async def runner(root: Path, timeout: float | None) -> TestVerdict:
+        calls.append(root)
+        return TestVerdict.PASSED
+
+    first, second = mutant(b"x > 0", b"x < 0", covered=False), mutant(b"1", b"0", covered=False)
+    report = run(project, tmp_path, [first, second], runner, workers=4)
+
+    assert [m.status for m in report.mutants] == [MutantStatus.UNCOVERED] * 2
+    assert [(m.file, m.line, m.change, m.function) for m in report.mutants] == [
+        ("calc.py", 2, "change", "is_pos")
+    ] * 2
+    assert calls == []
+    assert not (tmp_path / "scratch").exists()
+
+
+SLOW = CALC.replace(b"x > 0", b"x >= 0")
 
 
 def _slow_beside_the_others(answers: list[TestVerdict], calls: list[Path]) -> object:
-    """A runner whose mutant runs answer ``answers`` in turn; the unchanged copy passes."""
+    """A runner whose runs of the ``SLOW`` mutant answer ``answers`` in turn; the unchanged copy
+    passes and any other mutant is killed."""
 
     async def runner(root: Path, timeout: float | None) -> TestVerdict:
-        if (root / "calc.py").read_bytes() == CALC:
+        content = (root / "calc.py").read_bytes()
+        if content == CALC:
             return TestVerdict.PASSED
+        if content != SLOW:
+            return TestVerdict.FAILED
         calls.append(root)
         return answers[len(calls) - 1]
 
@@ -245,10 +346,11 @@ def test_a_mutant_that_only_ran_out_of_time_beside_the_others_is_judged_again_al
 ) -> None:
     calls: list[Path] = []
     runner = _slow_beside_the_others([TestVerdict.TIMED_OUT, TestVerdict.PASSED], calls)
+    mutants = [mutant(b"x > 0", b"x >= 0"), mutant(b"x > 0", b"x < 0")]
 
-    report = run(project, tmp_path, [mutant(b"x > 0", b"x >= 0")], runner, workers=2)
+    report = run(project, tmp_path, mutants, runner, workers=2)
 
-    assert [m.status for m in report.mutants] == [MutantStatus.SURVIVED]
+    assert [m.status for m in report.mutants] == [MutantStatus.SURVIVED, MutantStatus.KILLED]
     assert len(calls) == 2
     assert calls[1] == tmp_path / "scratch" / "worker-0"
 
@@ -258,13 +360,26 @@ def test_a_mutant_that_runs_out_of_time_alone_too_is_a_timeout(
 ) -> None:
     calls: list[Path] = []
     runner = _slow_beside_the_others([TestVerdict.TIMED_OUT, TestVerdict.TIMED_OUT], calls)
+    mutants = [mutant(b"x > 0", b"x >= 0"), mutant(b"x > 0", b"x < 0")]
+
+    report = run(project, tmp_path, mutants, runner, workers=2)
+
+    assert [m.status for m in report.mutants] == [MutantStatus.TIMEOUT, MutantStatus.KILLED]
+    assert len(calls) == 2
+    for copy in (tmp_path / "scratch").iterdir():
+        assert (copy / "calc.py").read_bytes() == CALC
+
+
+def test_a_single_mutant_ran_alone_whatever_the_workers_asked_and_is_not_judged_again(
+    project: Path, tmp_path: Path
+) -> None:
+    calls: list[Path] = []
+    runner = _slow_beside_the_others([TestVerdict.TIMED_OUT], calls)
 
     report = run(project, tmp_path, [mutant(b"x > 0", b"x >= 0")], runner, workers=2)
 
     assert [m.status for m in report.mutants] == [MutantStatus.TIMEOUT]
-    assert len(calls) == 2
-    for copy in (tmp_path / "scratch").iterdir():
-        assert (copy / "calc.py").read_bytes() == CALC
+    assert len(calls) == 1
 
 
 def test_with_one_worker_a_timeout_is_not_judged_again(project: Path, tmp_path: Path) -> None:

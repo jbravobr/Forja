@@ -7,6 +7,7 @@ the mutant, and the timeout is ten times the baseline, never below two seconds.
 """
 
 import asyncio
+import contextlib
 import os
 import shutil
 from collections.abc import Sequence
@@ -18,7 +19,29 @@ from typing import ClassVar, Protocol
 from forja.core.dependencies import link_dependencies
 from forja.core.reports.models import MutantResult, MutantStatus, MutationReport
 
-LEFT_OUT = (".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache", ".ruff_cache")
+# What a worker never needs, wherever it is: the history, the installed packages (linked back in
+# by ``link_dependencies``) and what the tools remember between runs.
+LEFT_OUT = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".idea",
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".gradle",
+    }
+)
+# At the root only, as the mutator leaves them out of a worker: the reports and the build output
+# a run writes there. A coverage report alone can weigh gigabytes, and no test reads it. ``dist``,
+# ``build`` and ``out`` stay, unlike in the mutator: the test command the Forja is given may run
+# what was built there.
+ROOT_LEFT_OUT = frozenset({"target", "coverage", ".metrics", ".forja-coverage", ".forja-cover.out"})
 MIN_TIMEOUT = 2.0
 TIMEOUT_FACTOR = 10.0
 
@@ -58,13 +81,21 @@ class BaselineFailed(Exception):
 
 
 def _fresh_copy(source: Path, target: Path) -> None:
-    shutil.copytree(source, target, ignore=shutil.ignore_patterns(*LEFT_OUT))
+    def left_out(directory: str, names: list[str]) -> set[str]:
+        at_root = Path(directory) == source
+        return {name for name in names if name in LEFT_OUT or (at_root and name in ROOT_LEFT_OUT)}
+
+    shutil.copytree(source, target, ignore=left_out)
     link_dependencies(source, target)
 
 
-def _clean_bytecode(root: Path) -> None:
-    for cache in root.rglob("__pycache__"):
-        shutil.rmtree(cache, ignore_errors=True)
+def _drop_bytecode(path: Path) -> None:
+    """Remove what Python compiled of ``path``, as the mutator does: a bytecode file of the same
+    size and second as the mutant would run the original code. No other file changes, so no other
+    bytecode is stale."""
+    for compiled in (path.parent / "__pycache__").glob(f"{path.stem}.*.pyc"):
+        with contextlib.suppress(OSError):
+            compiled.unlink()
 
 
 async def _judge(
@@ -74,12 +105,11 @@ async def _judge(
         return MutantStatus.UNCOVERED
     try:
         path.write_bytes(mutant.mutated)
-        # a stale bytecode file of the same size and time could run the original code
-        _clean_bytecode(root)
+        _drop_bytecode(path)
         verdict = await runner(root, timeout)
     finally:
         path.write_bytes(original)
-        _clean_bytecode(root)
+        _drop_bytecode(path)
     return {
         TestVerdict.PASSED: MutantStatus.SURVIVED,
         TestVerdict.FAILED: MutantStatus.KILLED,
@@ -134,17 +164,26 @@ async def run_mutants(
 
     The baseline run (the whole test command on the unchanged copy) must pass; its duration sets
     the timeout of each mutant at ten times that, but never below two seconds. With more than
-    one worker, a mutant that timed out is judged once more with nothing else running.
+    one worker, a mutant that timed out is judged once more with nothing else running. As in the
+    mutator there are never more workers than mutants to run, and with none to run nothing is
+    copied.
     """
-    count = max(1, workers) if workers is not None else min(4, os.cpu_count() or 1)
+    to_run = sum(1 for mutant in mutants if mutant.covered)
+    if to_run == 0:
+        return MutationReport(
+            tuple(
+                MutantResult(m.file, m.line, m.change, MutantStatus.UNCOVERED, m.function)
+                for m in mutants
+            )
+        )
+    asked = max(1, workers) if workers is not None else min(4, os.cpu_count() or 1)
+    count = min(asked, to_run)
     roots = [scratch / f"worker-{n}" for n in range(count)]
     for root in roots:
         await asyncio.to_thread(_fresh_copy, worktree, root)
     loop = asyncio.get_running_loop()
     started = loop.time()
-    if any(m.covered for m in mutants) and await runner(roots[0], baseline_timeout) is not (
-        TestVerdict.PASSED
-    ):
+    if await runner(roots[0], baseline_timeout) is not TestVerdict.PASSED:
         raise BaselineFailed("the tests do not pass on the unchanged copy")
     timeout = max(MIN_TIMEOUT, TIMEOUT_FACTOR * (loop.time() - started))
     queue: asyncio.Queue[tuple[int, Mutant]] = asyncio.Queue()
