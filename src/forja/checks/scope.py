@@ -11,7 +11,7 @@ from forja.checks.changes import Change, Changes, added_lines
 from forja.core.adapters import FileClass
 from forja.core.artifacts.models import Producer
 from forja.core.gates import Approved, Finding, GateInput, GateResult
-from forja.orchestrator.ports import TaskInfo
+from forja.core.task import TaskInfo
 
 _ANY_LANGUAGE = (
     r"noqa|fmt:\s*(?:off|on|skip)|yapf:\s*(?:disable|enable)|gitleaks:allow"

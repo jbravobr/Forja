@@ -5,12 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from forja.core.adapters import CommandPlan, ToolOutput, build_spec, read_output_lines
-from forja.core.events import EventLog
+from forja.core.events import EventLog, SinkFactory
 from forja.core.gates import Inconclusive, InconclusiveReason
 from forja.core.idempotency import OperationName
 from forja.core.process import Outcome, ProcessResult, ProcessRunner
 from forja.core.states import Level
-from forja.orchestrator.ports import SinkFactory
 
 DEFAULT_TIMEOUT = 300.0
 OPERATION = OperationName.RUN_TOOL

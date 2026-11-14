@@ -1,12 +1,15 @@
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 from pydantic import JsonValue
 
 from forja.core.events.log import EventLog
-from forja.core.process import ProcessIdentity
+from forja.core.process import EventSink, ProcessIdentity
 from forja.core.states import Level
 
 MAX_OUTPUT_LINE_BYTES = 1024
+
+# (level, target id, operation) -> where a process reports to; the orchestrator builds these.
+SinkFactory = Callable[[Level, str, str], EventSink]
 
 
 class LogEventSink:

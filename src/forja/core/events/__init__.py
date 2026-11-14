@@ -17,7 +17,7 @@ from forja.core.events.models import (
     RefKind,
     TransitionEvent,
 )
-from forja.core.events.sink import LogEventSink
+from forja.core.events.sink import LogEventSink, SinkFactory
 from forja.core.events.state import OpenOperation, RunState
 
 __all__ = [
@@ -37,6 +37,7 @@ __all__ = [
     "Ref",
     "RefKind",
     "RunState",
+    "SinkFactory",
     "TransitionEvent",
     "UnsupportedSchemaVersion",
 ]

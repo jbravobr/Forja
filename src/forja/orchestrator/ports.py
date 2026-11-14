@@ -18,12 +18,14 @@ from forja.core.artifacts.elements import Element
 from forja.core.artifacts.llm_output import Claim, Criterion, DeclaredTest, LeftOut, LlmOutput
 from forja.core.artifacts.models import Executor, Producer
 from forja.core.events import LogEventSink, OpenOperation
+from forja.core.events import SinkFactory as SinkFactory
 from forja.core.gates import PipelineOutcome
 from forja.core.gitguard.snapshot import Difference
 from forja.core.idempotency import Reconciliation
 from forja.core.locking import IndexLockReport
 from forja.core.process import EventSink
 from forja.core.states import Level
+from forja.core.task import TaskInfo as TaskInfo
 from forja.orchestrator.budget import Meter
 from forja.orchestrator.config import Budget, RunConfig
 from forja.orchestrator.facts import Fact
@@ -58,10 +60,6 @@ def role_of_stage(task_id: str, stage_id: str) -> Producer | None:
     return None
 
 
-# (level, target id, operation) -> where a process reports to; the orchestrator builds these.
-SinkFactory = Callable[[Level, str, str], EventSink]
-
-
 @dataclass(frozen=True)
 class PlannedTask:
     """One unit of work the planner found: an intention, the files it may touch and its limits."""
@@ -81,25 +79,6 @@ class Baseline:
     ok: bool
     problems: tuple[str, ...] = ()
     metrics: Mapping[str, float] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class TaskInfo:
-    """A task seen through one of its stages: ``stage_id`` and ``role`` are that stage's."""
-
-    task_id: str
-    stage_id: str
-    intent: str
-    scope: tuple[str, ...]
-    max_files: int
-    max_lines: int
-    role: Producer = Producer.IMPLEMENTER
-    test_root: str = ""
-    attempt_prefix: str = ""  # attempts are ``<prefix><n>``; empty means ``<task>-a``
-    frozen_digest: str = ""  # of the files under ``test_root`` the test author committed
-    reviews: str = ""  # an extra test stage: the implementer stage whose committed code it tests
-    # a refactoring whose test author goes first: its tests say what the code does today and pass
-    characterizes: bool = False
 
 
 @dataclass(frozen=True)
