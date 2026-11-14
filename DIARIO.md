@@ -527,7 +527,7 @@ Adotar o executor do mutator, mantendo da Forja a função dona do sítio, a rec
 
 ## 13/11/2026 — o resto do realinhamento da mutação com o `unclebob/mutator`
 
-Continuação da entrada anterior, na mesma sessão. As duas entradas anteriores estavam datadas de 14/11; os commits são todos de 13/11 e os títulos foram corrigidos (`621524b`).
+Continuação da entrada anterior, na mesma sessão. As duas entradas anteriores estavam datadas de 14/11; os commits são todos de 13/11 e os títulos foram corrigidos (`95f79db`, que era `621524b` antes da reescrita registrada na última entrada).
 
 ### O que foi feito
 
@@ -572,7 +572,7 @@ Continuação da entrada anterior, na mesma sessão. As duas entradas anteriores
 
 ### Pontos de atenção a endereçar
 
-O dono pediu, em 13/11, que estes três pontos sejam tratados. Nenhum foi tratado ainda.
+O dono pediu, em 13/11, que estes três pontos sejam tratados. Os três foram tratados depois; veja a última entrada de 13/11. Os hashes `621524b` e `b50146e` citados abaixo e na entrada seguinte são os de antes da reescrita.
 
 1. **O modo diferencial não vê os testes.**
    - O que acontece: o histórico guarda o hash do texto de cada função e o destino de cada mutante. Se um teste for enfraquecido ou apagado e a função não mudar, o mutante continua dado como morto e não roda.
@@ -686,3 +686,68 @@ Por esses três, `--mutate-all` antes de cada release continua valendo.
 
 - **Ordens do dono que esta entrada espera:** ponto 1, aceitar a divergência do mutator e implementar; ponto 2, confirmar que o JSON fica até a decisão do `crapper`; ponto 3, autorizar a reescrita.
 - As demais pendências da entrada anterior continuam.
+
+## 13/11/2026 — os três pontos de atenção tratados
+
+### Decisões do dono
+
+O dono concordou com as três sugestões da entrada anterior:
+
+- **Ponto 1:** aceitar a divergência do mutator e implementar.
+- **Ponto 2:** o histórico fica em JSON até a decisão sobre o `crapper`. Nenhuma mudança de código.
+- **Ponto 3:** reescrever a mensagem do commit.
+
+### Ponto 3: a mensagem reescrita
+
+Feito primeiro, com a árvore limpa, pelos passos da entrada anterior.
+
+| Antes | Depois | Mensagem |
+| --- | --- | --- |
+| `621524b` | `95f79db` | passou a ser `docs: the two logbook entries dated 14/11 are dated 13/11, the day of their commits` |
+| `b50146e` | `9314f28` | a mesma |
+| `e6f1229` | `436a973` | a mesma |
+
+- A entrada das sugestões foi commitada antes da reescrita e ficou em `d6a152a`.
+- Conferido: a árvore da ponta é idêntica à de antes da reescrita (`git diff` vazio), e nenhuma mensagem aparece duas vezes em `main..correcoes-p0`.
+- No diário, a citação na entrada do resto do realinhamento passou a `95f79db`. A lista dos pontos de atenção e a entrada das sugestões continuam com os hashes antigos, com um aviso: são o registro do que se via na hora.
+
+### Ponto 1: o que foi feito
+
+Commit `f579255`. Só `scripts/mutate.py` e os testes dele mudaram.
+
+| Mudança | Onde |
+| --- | --- |
+| O histórico guarda, para cada mutante morto, os arquivos de teste que o mataram (`judges`) e o hash de cada um (`tests`). Versão 2. | `write_history`, `load_history`, `History` |
+| O hash de um arquivo de teste cobre o conteúdo dele, todo `conftest.py` sob `tests/` e a lista de `deselected()`. Arquivo que sumiu tem um hash que nenhum arquivo tem. | `test_digests` (nova) |
+| Quem matou: os testes da linha do mutante, ou todos os testes do arquivo-fonte quando ele foi julgado pela segunda vez. | `judges_of` (nova); `judge_file` devolve os lugares dos reconferidos, não mais a contagem |
+| O veredito só é aproveitado se todo arquivo que matou o mutante tem hoje o hash que tinha. | `carried` |
+| A linha de andamento diz `killed before, the function and its tests left as they were`. | `main` |
+
+Testes: dez casos novos em `tests/mutation/test_mutate_script.py`, que ficou com 48. Cobrem: teste enfraquecido, arquivo de teste apagado, `conftest.py` alterado numa pasta que não está acima do teste, mutante morto só na reconferência, histórico da versão 1, e o hash em si.
+
+### Conclusões
+
+- **Os nomes dos arquivos são guardados, não só um hash do conjunto.** Para comparar na rodada seguinte é preciso saber qual conjunto julgou o mutante na rodada anterior: o da linha ou o inteiro. Só com o hash não dá para refazer a conta. De quebra, o JSON mostra qual teste matou o quê.
+- **Histórico da versão 1 não aproveita nada.** Ele não diz quem matou. A primeira rodada de cada arquivo depois desta mudança roda todos os mutantes, uma vez.
+- **O próprio arquivo de teste do script aparece entre os que julgam.** Na rodada real abaixo, `tests/mutation/test_mutate_script.py` está entre os três arquivos que mataram os mutantes de `model.py`. Mexer nele faz esses mutantes rodarem de novo. É o comportamento pedido.
+- **Arquivo sumido antes e sumido agora conta como igual.** Na prática não acontece: com cobertura nova, um arquivo apagado deixa de aparecer entre os testes do arquivo-fonte.
+- **O guia não mudou.** `docs/guia/gates/mutacao.md` não fala do modo diferencial do script; a entrada anterior supôs que falava. O texto de ajuda do script foi atualizado.
+- **`--mutate-all` antes de release continua valendo,** pelos três limites da entrada anterior: código de apoio fora de `tests/`, arquivos de dados, e mudança em outra função.
+
+### Verificação
+
+- `ruff check .`, `ruff format --check src tests scripts/mutate.py` e `mypy` strict: limpos, 624 arquivos.
+- `pytest tests/mutation`: 435 aprovados.
+- Rodada real do script na árvore principal, sobre `src/forja/mutation/model.py` (4 mutantes, 3 arquivos de teste), com cobertura nova (358 s):
+  1. Primeira rodada: 4 julgados, saída 0, histórico na versão 2 com os três arquivos em cada mutante.
+  2. Sem mudar nada, com `--reuse-coverage`: 4 aproveitados.
+  3. Uma linha de comentário acrescentada a `tests/mutation/test_sites.py`: nenhum aproveitado, 4 julgados.
+  4. Arquivo restaurado: 4 julgados de novo (o hash guardado era o do arquivo alterado).
+  5. Mais uma vez, sem mudar nada: 4 aproveitados.
+- Não rodou: a suíte rápida inteira à parte (ela rodou sob `coverage` na rodada real, sem falha que impedisse a medição; só `scripts/mutate.py` e o teste dele mudaram); suíte completa com `slow`; E2E com agente real. `scripts/mutate.py` não é mutado: o script só muta `src`.
+
+### Pendências
+
+- **Ponto 2 fica ligado ao CRAP pelo `crapper`,** que depende de ordem do dono. Se o EDN for adotado, conferir o que fazer com `judges` e `tests`, que o histórico do mutator não tem.
+- **O checkout `%LOCALAPPDATA%\forja-verif` tem históricos da versão 1** em `.metrics/mutate`. A próxima rodada lá roda todos os mutantes de cada arquivo.
+- As demais pendências continuam: itens 31 a 40, restos dos itens 2 e 6, suíte com `slow`, mutações antigas, ADRs 0021 e 0034, e as decisões abertas do dono (overlay de links, ADR 0041, item 29, as três do item 5, a etapa de caracterização).
