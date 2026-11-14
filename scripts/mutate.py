@@ -19,6 +19,12 @@ pass, is run over several processes. A mutant is judged first by the test files 
 line; one that survives them is judged again by every test of the file before it counts as a
 survivor, so the answer is always the one all of them give.
 
+As in the mutator, a run leaves under ``.metrics/mutate`` what became of each mutant and a hash
+of each function, and the next run is differential: a mutant killed then, in a function whose
+text is the same now, is not run again. Survivors and the mutants of a changed function are.
+``--mutate-all`` ignores what was left and runs every one: the run to make after a test was
+weakened or removed, which the hash of a function does not see.
+
 Nothing in the source can switch the gate off: a comment that does is rejected by the scope gate.
 
 Exit: 0 every mutant was killed or suppressed; 2 the tests fail before any mutation; 3 a mutant
@@ -31,6 +37,7 @@ import asyncio
 import functools
 import hashlib
 import io
+import json
 import os
 import signal
 import subprocess
@@ -42,10 +49,11 @@ from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import NamedTuple
 
 from coverage import CoverageData
 
-from forja.core.reports.models import MutantStatus, MutationReport
+from forja.core.reports.models import MutantResult, MutantStatus, MutationReport
 from forja.mutation import apply_site, discover
 from forja.mutation.executor import (
     TIMEOUT_FACTOR,
@@ -55,6 +63,7 @@ from forja.mutation.executor import (
     TestVerdict,
     run_mutants,
 )
+from forja.mutation.sites import function_spans
 
 ROOT = Path(__file__).resolve().parent.parent
 SUPPRESSIONS = ROOT / "mutation-suppressions.toml"
@@ -335,6 +344,116 @@ def mutants_of(file: str, root: Path, covered: frozenset[int]) -> list[Mutant]:
     ]  # fmt: skip
 
 
+SNAPSHOTS = ROOT / ".metrics" / "mutate"  # where the mutator keeps what a run found
+KILLED, SURVIVED = "killed", "survived"
+
+
+class History(NamedTuple):
+    """What the last run left about one source file."""
+
+    forms: Mapping[str, str]  # function -> the hash of its text
+    outcomes: Mapping[str, str]  # mutation id -> killed or survived
+
+
+def form_digests(source: str, file: str) -> dict[str, str]:
+    """A hash of the text of each function, whatever white space ends its lines. Functions of
+    the same name are hashed together, in the order of the file (as in the mutator)."""
+    lines = source.splitlines()
+    spans: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    for name, first, last in function_spans(source, file):
+        spans[name].append((first, last))
+
+    def one(first: int, last: int) -> str:
+        chunk = NL.join(line.rstrip() for line in lines[first - 1 : last])
+        return hashlib.sha256(chunk.encode("utf-8")).hexdigest()
+
+    return {
+        name: hashlib.sha256("".join(one(*span) for span in sorted(found)).encode()).hexdigest()
+        for name, found in spans.items()
+    }
+
+
+def mutation_ids(source: str, file: str) -> list[str]:
+    """What names each mutant from one run to the next, in the order of ``mutants_of``: the
+    file, the function, where the token is and the change (the mutator's id)."""
+    return [
+        json.dumps(
+            [file, site.function, site.start, site.end, site.original, site.mutant],
+            separators=(",", ":"),
+        )
+        for site in discover(source, file)
+    ]
+
+
+def snapshot_path(file: str) -> Path:
+    return SNAPSHOTS / f"{file}.json"
+
+
+def load_history(file: str) -> History:
+    """What the last run of ``file`` left; nothing if it left nothing that can be read."""
+    try:
+        data = json.loads(snapshot_path(file).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return History({}, {})
+    forms = data.get("forms") if isinstance(data, dict) else None
+    outcomes = data.get("outcomes") if isinstance(data, dict) else None
+    if not isinstance(forms, dict) or not isinstance(outcomes, dict):
+        return History({}, {})
+    return History(
+        {name: digest for name, digest in forms.items() if isinstance(digest, str)},
+        {key: status for key, status in outcomes.items() if status in (KILLED, SURVIVED)},
+    )
+
+
+def carried(
+    mutants: list[Mutant], ids: list[str], digests: Mapping[str, str], history: History
+) -> set[int]:
+    """The places in ``mutants`` of those that are not run again, as in the mutator's
+    differential run: a test runs the line, the last run killed the mutant, and the text of its
+    function is the same as then. A survivor runs again, and so does every mutant of a function
+    that changed or is new. What the tests became in between is not looked at: after weakening
+    or removing a test, ``--mutate-all`` is the run to trust."""
+    kept = set()
+    for place, (mutant, key) in enumerate(zip(mutants, ids, strict=True)):
+        before = history.forms.get(mutant.function or "")
+        unchanged = before is not None and before == digests.get(mutant.function or "")
+        if mutant.covered and unchanged and history.outcomes.get(key) == KILLED:
+            kept.add(place)
+    return kept
+
+
+def with_carried(mutants: list[Mutant], kept: set[int], ran: MutationReport) -> MutationReport:
+    """The report of every mutant of the file, in the order of ``mutants``: those of ``kept``
+    killed as the last run found them, the others as ``ran`` (the run of the others) says."""
+    fresh = iter(ran.mutants)
+    return MutationReport(
+        tuple(
+            MutantResult(m.file, m.line, m.change, MutantStatus.KILLED, m.function)
+            if place in kept
+            else next(fresh)
+            for place, m in enumerate(mutants)
+        )
+    )
+
+
+def write_history(
+    file: str, digests: Mapping[str, str], ids: list[str], report: MutationReport
+) -> Path:
+    """Leave for the next run the hash of each function and what became of each mutant that
+    ran or was carried. A timeout is a kill here as it is in the score."""
+    outcomes = {}
+    for key, result in zip(ids, report.mutants, strict=True):
+        if result.status in (MutantStatus.KILLED, MutantStatus.TIMEOUT):
+            outcomes[key] = KILLED
+        elif result.status is MutantStatus.SURVIVED:
+            outcomes[key] = SURVIVED
+    path = snapshot_path(file)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"version": 1, "source": file, "forms": dict(digests), "outcomes": outcomes}
+    path.write_text(json.dumps(payload, indent=1, sort_keys=True) + NL, encoding="utf-8")
+    return path
+
+
 def stop_tree(pid: int) -> None:
     """End a process and what it started: a mutant that loops must not leave workers behind."""
     if sys.platform == "win32":
@@ -501,7 +620,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-workers", type=int, default=min(8, os.cpu_count() or 1))
     parser.add_argument("--reuse-coverage", action="store_true")
     parser.add_argument("--skip-canary", action="store_true")
-    return parser.parse_args(argv)
+    # the two names the mutator has for which mutants run; the second is what runs without either
+    parser.add_argument("--mutate-all", action="store_true")
+    parser.add_argument("--since-last-run", action="store_true")
+    args = parser.parse_args(argv)
+    if args.mutate_all and args.since_last_run:
+        parser.error("--mutate-all cannot be combined with --since-last-run")
+    return args
 
 
 def report_survivors(report: MutationReport, allowed: list[dict[str, str]]) -> int:
@@ -550,13 +675,21 @@ def main() -> int:
             continue
         started = time.monotonic()
         mutants = mutants_of(file, ROOT, covered.get(file, frozenset()))
+        source = (ROOT / file).read_text(encoding="utf-8")
+        ids, digests = mutation_ids(source, file), form_digests(source, file)
+        history = History({}, {}) if args.mutate_all else load_history(file)
+        kept = carried(mutants, ids, digests, history)
         place = f"[{number}/{len(files)}] {file}"
-        print(f"{place}: {len(mutants)} mutant(s), {len(tests)} test file(s)...")
+        before = f", {len(kept)} killed before in a function left as it was" if kept else ""
+        print(f"{place}: {len(mutants)} mutant(s){before}, {len(tests)} test file(s)...")
+        to_run = [mutant for at, mutant in enumerate(mutants) if at not in kept]
         try:
-            report, twice = judge_file(file, mutants, tests, by_line, args.max_workers)
+            ran, twice = judge_file(file, to_run, tests, by_line, args.max_workers)
         except (BaselineFailed, TestsDidNotRun) as error:
             print(f"{file}: the tests fail before any mutation ({error})")
             return 2
+        report = with_carried(mutants, kept, ran)
+        write_history(file, digests, ids, report)
         took = time.monotonic() - started
         again = f", {twice} judged again by every test" if twice else ""
         print(f"{place}: {len(tests)} test file(s), {took:.0f}s{again}", flush=True)

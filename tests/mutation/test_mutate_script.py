@@ -390,3 +390,235 @@ def test_the_narrow_run_and_the_whole_run_agree_on_a_real_project(
     by_status = {m.line: m.status for m in report.mutants}
     assert by_status == {2: MutantStatus.KILLED, 6: MutantStatus.SURVIVED}
     assert twice == sum(1 for m in mutants if m.line == 6)
+
+
+# -- the differential run: what the last one killed in a function left alone is not run again ------
+
+CALC = "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n"
+
+
+def test_the_hash_of_a_function_follows_its_text_and_not_the_space_that_ends_a_line(
+    mutate: Any,
+) -> None:
+    before = mutate.form_digests(CALC, "calc.py")
+    spaced = mutate.form_digests(CALC.replace("a + b\n", "a + b   \n"), "calc.py")
+    changed = mutate.form_digests(CALC.replace("a + b", "b + a"), "calc.py")
+    moved = mutate.form_digests("\n\n" + CALC, "calc.py")
+
+    assert set(before) == {"add", "sub"}
+    assert before["add"] != before["sub"]
+    assert spaced == before == moved
+    assert changed["add"] != before["add"]
+    assert changed["sub"] == before["sub"]
+
+
+def test_functions_of_one_name_are_hashed_together_in_the_order_of_the_file(mutate: Any) -> None:
+    one, other = "def f(a):\n    return a + 1\n", "def f(a):\n    return a - 1\n"
+
+    both = mutate.form_digests(one + other, "m.py")
+
+    assert set(both) == {"f"}
+    assert both["f"] != mutate.form_digests(other + one, "m.py")["f"]
+    assert both["f"] not in (
+        mutate.form_digests(one, "m.py")["f"],
+        mutate.form_digests(other, "m.py")["f"],
+    )
+
+
+def calc_mutants(mutate: Any, tmp_path: Path, covered: frozenset[int]) -> list[Mutant]:
+    (tmp_path / "calc.py").write_text(CALC, encoding="utf-8")
+    found: list[Mutant] = mutate.mutants_of("calc.py", tmp_path, covered)
+    return found
+
+
+def test_a_mutant_is_named_by_its_file_function_place_and_change(
+    mutate: Any, tmp_path: Path
+) -> None:
+    ids = mutate.mutation_ids(CALC, "calc.py")
+    mutants = calc_mutants(mutate, tmp_path, frozenset({2, 6}))
+
+    plus, minus = CALC.index("+"), CALC.index("-")
+    assert ids == [
+        f'["calc.py","add",{plus},{plus + 1},"+","-"]',
+        f'["calc.py","sub",{minus},{minus + 1},"-","+"]',
+    ]
+    assert [(m.function, m.change) for m in mutants] == [("add", "+ -> -"), ("sub", "- -> +")]
+
+
+def test_only_a_mutant_killed_before_in_a_function_left_as_it_was_is_not_run_again(
+    mutate: Any, tmp_path: Path
+) -> None:
+    mutants = calc_mutants(mutate, tmp_path, frozenset({2, 6}))
+    ids, digests = mutate.mutation_ids(CALC, "calc.py"), mutate.form_digests(CALC, "calc.py")
+    killed = dict.fromkeys(ids, "killed")
+
+    def kept(forms: dict[str, str], outcomes: dict[str, str], some: list[Mutant]) -> set[int]:
+        found: set[int] = mutate.carried(some, ids, digests, mutate.History(forms, outcomes))
+        return found
+
+    assert kept(digests, killed, mutants) == {0, 1}
+    assert kept(digests, {ids[0]: "killed", ids[1]: "survived"}, mutants) == {0}
+    assert kept(digests, {ids[1]: "killed"}, mutants) == {1}  # the first was never judged
+    assert kept({**digests, "add": "another text"}, killed, mutants) == {1}
+    assert kept({"sub": digests["sub"]}, killed, mutants) == {1}  # add is new
+    assert kept({}, killed, mutants) == set()
+    assert kept(digests, {}, mutants) == set()
+    # a line no test runs any more: the old verdict says nothing about it
+    assert kept(digests, killed, calc_mutants(mutate, tmp_path, frozenset({6}))) == {1}
+
+
+def result(mutant: Mutant, status: MutantStatus) -> MutantResult:
+    return MutantResult(mutant.file, mutant.line, mutant.change, status, mutant.function)
+
+
+def test_the_report_puts_the_carried_mutants_back_in_their_places_as_killed(
+    mutate: Any, tmp_path: Path
+) -> None:
+    mutants = calc_mutants(mutate, tmp_path, frozenset({2, 6})) * 2
+    ran = MutationReport(
+        (result(mutants[1], MutantStatus.SURVIVED), result(mutants[2], MutantStatus.UNCOVERED))
+    )
+
+    whole = mutate.with_carried(mutants, {0, 3}, ran)
+
+    assert [(m.function, m.status) for m in whole.mutants] == [
+        ("add", MutantStatus.KILLED),
+        ("sub", MutantStatus.SURVIVED),
+        ("add", MutantStatus.UNCOVERED),
+        ("sub", MutantStatus.KILLED),
+    ]
+    assert whole.mutants[0] == result(mutants[0], MutantStatus.KILLED)
+    assert mutate.with_carried(mutants[1:3], set(), ran).mutants == ran.mutants
+
+
+def test_what_a_run_leaves_is_what_the_next_one_reads(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(mutate, "SNAPSHOTS", tmp_path / ".metrics" / "mutate")
+    mutants = calc_mutants(mutate, tmp_path, frozenset({2, 6})) * 2
+    ids = ["one", "two", "three", "four"]
+    statuses = (
+        MutantStatus.KILLED,
+        MutantStatus.SURVIVED,
+        MutantStatus.TIMEOUT,
+        MutantStatus.UNCOVERED,
+    )
+    report = MutationReport(tuple(map(result, mutants, statuses)))
+    assert mutate.load_history("src/calc.py") == mutate.History({}, {})
+
+    path = mutate.write_history("src/calc.py", {"add": "x", "sub": "y"}, ids, report)
+
+    assert path == tmp_path / ".metrics" / "mutate" / "src" / "calc.py.json"
+    assert path.read_text(encoding="utf-8").endswith("}\n")
+    assert mutate.load_history("src/calc.py") == mutate.History(
+        {"add": "x", "sub": "y"}, {"one": "killed", "two": "survived", "three": "killed"}
+    )
+    assert mutate.load_history("src/other.py") == mutate.History({}, {})
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        "",
+        "{",
+        "[]",
+        '{"forms": {}}',
+        '{"outcomes": {}}',
+        '{"forms": [], "outcomes": {}}',
+        '{"forms": {}, "outcomes": []}',
+    ],
+)
+def test_a_history_that_cannot_be_read_is_no_history(
+    mutate: Any, monkeypatch: Any, tmp_path: Path, written: str
+) -> None:
+    monkeypatch.setattr(mutate, "SNAPSHOTS", tmp_path)
+    (tmp_path / "calc.py.json").write_text(written, encoding="utf-8")
+
+    assert mutate.load_history("calc.py") == mutate.History({}, {})
+
+
+def test_a_history_keeps_only_the_hashes_and_verdicts_it_understands(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(mutate, "SNAPSHOTS", tmp_path)
+    (tmp_path / "calc.py.json").write_text(
+        '{"forms": {"add": "x", "sub": 3}, "outcomes": {"a": "killed", "b": "uncovered", "c": 1,'
+        ' "d": "survived"}}',
+        encoding="utf-8",
+    )
+
+    assert mutate.load_history("calc.py") == mutate.History(
+        {"add": "x"}, {"a": "killed", "d": "survived"}
+    )
+
+
+def test_every_mutant_or_only_those_since_the_last_run_and_not_both(mutate: Any) -> None:
+    assert not mutate.parse_args([]).mutate_all
+    assert not mutate.parse_args([]).since_last_run
+    assert mutate.parse_args(["--mutate-all"]).mutate_all
+    assert mutate.parse_args(["--since-last-run"]).since_last_run
+    with pytest.raises(SystemExit):
+        mutate.parse_args(["--mutate-all", "--since-last-run"])
+
+
+def run_main(
+    mutate: Any, monkeypatch: Any, root: Path, verdict: MutantStatus, *options: str
+) -> tuple[int, list[str]]:
+    """``main`` over ``src/calc.py`` of ``root`` with every mutant given ``verdict``: the exit
+    code, and the functions of the mutants that were handed to the tests."""
+    handed: list[str] = []
+
+    def judge_file(
+        file: str, mutants: list[Mutant], tests: list[str], by_line: Any, workers: int
+    ) -> tuple[MutationReport, int]:
+        handed.extend(str(m.function) for m in mutants)
+        return MutationReport(tuple(result(m, verdict) for m in mutants)), 0
+
+    monkeypatch.setattr(mutate, "ROOT", root)
+    monkeypatch.setattr(mutate, "SNAPSHOTS", root / ".metrics" / "mutate")
+    monkeypatch.setattr(mutate, "canary", lambda: True)
+    monkeypatch.setattr(mutate, "suppressions", lambda: [])
+    monkeypatch.setattr(mutate, "record_coverage", lambda *_: ({"src/calc.py": ["tests/t.py"]}, {}))
+    monkeypatch.setattr(mutate, "covered_lines", lambda: {"src/calc.py": frozenset({2, 6})})
+    monkeypatch.setattr(mutate, "judge_file", judge_file)
+    monkeypatch.setattr(sys, "argv", ["mutate.py", *options, "src/calc.py"])
+    return mutate.main(), handed
+
+
+def test_the_second_run_judges_only_the_survivors_and_the_function_that_changed(
+    mutate: Any, monkeypatch: Any, tmp_path: Path, capsys: Any
+) -> None:
+    (tmp_path / "src").mkdir()
+    source = tmp_path / "src" / "calc.py"
+    source.write_text(CALC, encoding="utf-8")
+
+    assert run_main(mutate, monkeypatch, tmp_path, MutantStatus.KILLED) == (0, ["add", "sub"])
+    assert run_main(mutate, monkeypatch, tmp_path, MutantStatus.KILLED) == (0, [])
+    assert "2 killed before in a function left as it was" in capsys.readouterr().out
+
+    source.write_text(CALC.replace("a - b", "b - a"), encoding="utf-8")
+    assert run_main(mutate, monkeypatch, tmp_path, MutantStatus.SURVIVED) == (3, ["sub"])
+    # a survivor is judged again, and is still one in what is left for the next run
+    assert run_main(mutate, monkeypatch, tmp_path, MutantStatus.SURVIVED) == (3, ["sub"])
+    every = run_main(mutate, monkeypatch, tmp_path, MutantStatus.KILLED, "--mutate-all")
+    assert every == (0, ["add", "sub"])
+    assert run_main(mutate, monkeypatch, tmp_path, MutantStatus.KILLED) == (0, [])
+
+
+def test_tests_that_fail_before_any_mutation_leave_the_history_as_it_was(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    (tmp_path / "src").mkdir()
+    source = tmp_path / "src" / "calc.py"
+    source.write_text(CALC, encoding="utf-8")
+    assert run_main(mutate, monkeypatch, tmp_path, MutantStatus.KILLED)[0] == 0
+    left = mutate.snapshot_path("src/calc.py").read_text(encoding="utf-8")
+    source.write_text(CALC.replace("a - b", "b - a"), encoding="utf-8")
+
+    def failing(*_: object) -> None:
+        raise mutate.BaselineFailed("red")
+
+    monkeypatch.setattr(mutate, "judge_file", failing)
+
+    assert mutate.main() == 2
+    assert mutate.snapshot_path("src/calc.py").read_text(encoding="utf-8") == left
