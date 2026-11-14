@@ -30,6 +30,23 @@ def mutate() -> Iterator[ModuleType]:
         sys.modules.pop(spec.name, None)
 
 
+# -- the command line ------------------------------------------------------------------------------
+
+
+def test_the_ceiling_of_runs_at_once_is_asked_for_by_the_name_the_mutator_gives_it(
+    mutate: Any, monkeypatch: Any
+) -> None:
+    assert mutate.parse_args(["--max-workers", "3", "a.py"]).max_workers == 3
+    monkeypatch.setattr(mutate.os, "cpu_count", lambda: 32)
+    assert mutate.parse_args([]).max_workers == 8
+    monkeypatch.setattr(mutate.os, "cpu_count", lambda: 2)
+    assert mutate.parse_args([]).max_workers == 2
+    monkeypatch.setattr(mutate.os, "cpu_count", lambda: None)
+    assert mutate.parse_args([]).max_workers == 1
+    with pytest.raises(SystemExit):
+        mutate.parse_args(["--workers", "3"])
+
+
 # -- the test files dealt into runs that go at the same time ---------------------------------------
 
 

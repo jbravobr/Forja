@@ -3,6 +3,7 @@
     scripts/mutate.py              # the source files changed since HEAD (and new ones)
     scripts/mutate.py --all        # every source file
     scripts/mutate.py src/forja/checks/changes.py
+    scripts/mutate.py --max-workers 4   # at most four runs at once (default: 8, or the cores)
 
 It runs the Forja's own mutator (``forja.mutation``, the rules of unclebob/mutator on tree-sitter,
 ADR 0021) on the Forja's own source, the way the mutator runs on any project: the coverage report
@@ -475,16 +476,17 @@ def canary() -> bool:
     return bool(mutants) and survivors["loose"] >= 1 and survivors["tight"] == 0
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument("files", nargs="*")
     parser.add_argument("--all", action="store_true")
-    parser.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 1))
+    # the name the mutator gives it: a ceiling, never more runs than there is work for
+    parser.add_argument("--max-workers", type=int, default=min(8, os.cpu_count() or 1))
     parser.add_argument("--reuse-coverage", action="store_true")
     parser.add_argument("--skip-canary", action="store_true")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def report_survivors(report: MutationReport, allowed: list[dict[str, str]]) -> int:
@@ -519,8 +521,8 @@ def main() -> int:
     print(f"canary: {time.monotonic() - started:.0f}s")
     started = time.monotonic()
     if not args.reuse_coverage:
-        print(f"coverage by test: the fast tests, in {args.workers} run(s) at once...")
-    tests_of, by_line = record_coverage(args.reuse_coverage, args.workers)
+        print(f"coverage by test: the fast tests, in {args.max_workers} run(s) at once...")
+    tests_of, by_line = record_coverage(args.reuse_coverage, args.max_workers)
     covered = covered_lines()
     print(f"coverage by test: {time.monotonic() - started:.0f}s")
     allowed = suppressions()
@@ -536,7 +538,7 @@ def main() -> int:
         place = f"[{number}/{len(files)}] {file}"
         print(f"{place}: {len(mutants)} mutant(s), {len(tests)} test file(s)...")
         try:
-            report, twice = judge_file(file, mutants, tests, by_line, args.workers)
+            report, twice = judge_file(file, mutants, tests, by_line, args.max_workers)
         except (BaselineFailed, TestsDidNotRun) as error:
             print(f"{file}: the tests fail before any mutation ({error})")
             return 2
