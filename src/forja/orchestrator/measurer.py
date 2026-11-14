@@ -70,6 +70,7 @@ from forja.checks.layout import (
 from forja.checks.module_depth import ModuleDepthCheck
 from forja.checks.mutation import MutationCheck
 from forja.checks.new_dependency import (
+    Manifests,
     NewDependencyCheck,
     added_dependencies,
     dependency_edit_of,
@@ -112,6 +113,7 @@ from forja.core.events import EventLog, LogEventSink, OpenOperation
 from forja.core.gates import (
     Check,
     CheckSettings,
+    Finding,
     GateInput,
     GatePipeline,
     Inconclusive,
@@ -164,6 +166,31 @@ class BaseE2E:
     failing: tuple[str, ...] = ()
     destinations: tuple[str, ...] = ()
     ran: bool = False
+
+
+@dataclass(frozen=True)
+class _Read:
+    """What an attempt left in its worktree, read once for every check that judges it."""
+
+    ctx: AttemptContext
+    git: GitAt
+    tools: Tools
+    head: str
+    changes: Changes  # what the attempt wrote
+    before: dict[str, str]  # the files the adapters own, as they were
+    base: str  # what the code is read against: HEAD, or where the code an extra stage tests began
+    code: Changes
+    code_before: dict[str, str]
+    before_shapes: dict[str, str]
+    manifests: Manifests
+    everything: dict[str, str]
+    test_texts: dict[str, str]
+    artifacts: dict[str, str]
+    declared: dict[str, str]
+    # known only after the dependencies are installed
+    production: tuple[str, ...] = ()
+    active: tuple[ScopedAdapter, ...] = ()
+    tracked_tests: tuple[str, ...] = ()
 
 
 class PipelineMeasurer:
@@ -732,6 +759,29 @@ class PipelineMeasurer:
     ) -> PipelineOutcome:
         if ctx.task.role in NO_COMMIT:
             return await self._judge_answer(ctx, expectations)
+        read = await self._read_attempt(ctx, sinks)
+        data = GateInput(
+            ctx.worktree, read.head, ctx.task.task_id, ctx.task.stage_id, ctx.attempt_id
+        )
+        # before the checks, which run in the environment it makes
+        stopped = await self._install_findings(read)
+        if stopped:
+            return await self._pipeline([DependencyInstallCheck(tuple(stopped))]).run(data, set())
+        read = await self._with_projects(read)
+        checks: list[Check] = [
+            *await self._scope_and_secrets(read),
+            *self._lint_build_and_tests(read, expectations),
+            *self._mutation_and_metrics(read),
+            *await self._architecture(
+                read.git, ctx.worktree, read.changes, read.everything, read.active
+            ),
+            *self._security(read),
+            *self._behaviour_and_voice(read),
+            *await self._documentation(read, expectations),
+        ]
+        return await self._pipeline(checks).run(data, _capabilities(read.active))
+
+    async def _read_attempt(self, ctx: AttemptContext, sinks: SinkFactory) -> _Read:
         git = self._git.at(ctx.worktree)
         tools = self._tools(sinks, Level.ATTEMPT, ctx.attempt_id)
         changes = await self._normalized(tools, ctx.worktree, git, await read_changes(git))
@@ -748,28 +798,82 @@ class PipelineMeasurer:
         artifacts = await read_before(git, changes, is_artifact)
         declared = await read_before(git, changes, lambda path: is_manifest(manifests, path))
         head = (await git.lines("rev-parse", "HEAD"))[0]
-        if self._installer is not None:  # before the checks, which run in the environment it makes
-            stopped = await install_findings(
-                ctx.worktree,
+        return _Read(
+            ctx=ctx,
+            git=git,
+            tools=tools,
+            head=head,
+            changes=changes,
+            before=before,
+            base=base,
+            code=code,
+            code_before=code_before,
+            before_shapes=before_shapes,
+            manifests=manifests,
+            everything=everything,
+            test_texts=test_texts,
+            artifacts=artifacts,
+            declared=declared,
+        )
+
+    async def _install_findings(self, read: _Read) -> list[Finding]:
+        if self._installer is None:
+            return []
+        return await install_findings(
+            read.ctx.worktree,
+            read.changes,
+            read.declared,
+            read.manifests,
+            requirements_of(self._adapters.languages()),
+            self._installer,
+            self._registry_get,
+        )
+
+    async def _with_projects(self, read: _Read) -> _Read:
+        """The read, with the production files of the code and the projects that own the changes."""
+        production = tuple(
+            p for p in read.code.current() if self._classify(p) is FileClass.PRODUCTION
+        )
+        own = own_files(self._adapters)
+        active = self._active(read.ctx.worktree, (*production, *read.changes.current(own)))
+        tracked_tests = await self.test_files(read.ctx.worktree)
+        return replace(read, production=production, active=active, tracked_tests=tracked_tests)
+
+    async def _scope_and_secrets(self, read: _Read) -> list[Check]:
+        ctx, changes, worktree = read.ctx, read.changes, read.ctx.worktree
+        languages = self._adapters.languages()
+        return [
+            ScopeCheck(
                 changes,
-                declared,
-                manifests,
-                requirements_of(self._adapters.languages()),
-                self._installer,
-                self._registry_get,
-            )
-            if stopped:
-                data = GateInput(
-                    ctx.worktree, head, ctx.task.task_id, ctx.task.stage_id, ctx.attempt_id
-                )
-                return await self._pipeline([DependencyInstallCheck(tuple(stopped))]).run(
-                    data, set()
-                )
-        production = tuple(p for p in code.current() if self._classify(p) is FileClass.PRODUCTION)
+                ctx.task,
+                self._classify,
+                dependency_edit=dependency_edit_of(languages, worktree, read.declared),
+                silencers=silencers(self._adapters.for_file),
+            ),
+            *await self._frozen(ctx, changes),
+            SecretsCheck(
+                read.tools,
+                worktree,
+                changes,
+                self._workdir / "secrets" / ctx.attempt_id,
+                self._gitleaks,
+            ),
+        ]
+
+    def _lint_build_and_tests(self, read: _Read, expectations: Expectations | None) -> list[Check]:
+        tools, active, worktree = read.tools, read.active, read.ctx.worktree
         unstable, passing = self._read_base()
-        e2e_unstable, e2e_passing = self._read_e2e_base()
-        worktree = ctx.worktree
-        active = self._active(worktree, (*production, *changes.current(own)))
+        return [
+            FormatCheck(tools, active, worktree, read.changes),
+            LintCheck(tools, active, worktree, read.changes, read.before),
+            TypesCheck(tools, active, worktree, read.changes, read.before),
+            BuildCheck(tools, active, worktree),
+            self._tests_check(read.ctx, tools, active, expectations, unstable, passing),
+        ]
+
+    def _mutation_and_metrics(self, read: _Read) -> list[Check]:
+        tools, active, worktree = read.tools, read.active, read.ctx.worktree
+        code, production = read.code, read.production
         shares = {id(a): CoverageShare() for a in active}
         mutation = self._each(
             active,
@@ -791,7 +895,7 @@ class PipelineMeasurer:
                 worktree,
                 code,
                 self._files_of(active, a, production),
-                self._texts_of(active, a, code_before),
+                self._texts_of(active, a, read.code_before),
                 self._lizard,
                 a.language,
             ),
@@ -804,51 +908,40 @@ class PipelineMeasurer:
                 worktree,
                 code,
                 self._files_of(active, a, production),
-                self._texts_of(active, a, code_before),
+                self._texts_of(active, a, read.code_before),
                 self._lizard,
                 a.language,
                 share=shares[id(a)],
             ),
         )
-        tracked_tests = await self.test_files(worktree)
-        checks: list[Check] = [
-            ScopeCheck(
-                changes,
-                ctx.task,
-                self._classify,
-                dependency_edit=dependency_edit_of(self._adapters.languages(), worktree, declared),
-                silencers=silencers(self._adapters.for_file),
-            ),
-            *await self._frozen(ctx, changes),
-            SecretsCheck(
-                tools, worktree, changes, self._workdir / "secrets" / ctx.attempt_id, self._gitleaks
-            ),
-            FormatCheck(tools, active, worktree, changes),
-            LintCheck(tools, active, worktree, changes, before),
-            TypesCheck(tools, active, worktree, changes, before),
-            BuildCheck(tools, active, worktree),
-            self._tests_check(ctx, tools, active, expectations, unstable, passing),
+        changed_tests = read.changes.current(self.is_test)
+        return [
             mutation,
             complexity,
             crap,
-            PassThroughCheck(worktree, code, production, before_shapes),
-            ModuleDepthCheck(worktree, code, production, before_shapes),
+            PassThroughCheck(worktree, code, production, read.before_shapes),
+            ModuleDepthCheck(worktree, code, production, read.before_shapes),
             DuplicationCheck(
                 tools,
                 worktree,
                 production,
-                self._workdir / "duplication" / ctx.attempt_id,
+                self._workdir / "duplication" / read.ctx.attempt_id,
                 self._jscpd,
-                ignore=tuple(dict.fromkeys((*tracked_tests, *changes.current(self.is_test)))),
-                base=base,
+                ignore=tuple(dict.fromkeys((*read.tracked_tests, *changed_tests))),
+                base=read.base,
             ),
-            *await self._architecture(git, worktree, changes, everything, active),
+        ]
+
+    def _security(self, read: _Read) -> list[Check]:
+        tools, changes, worktree = read.tools, read.changes, read.ctx.worktree
+        attempt = read.ctx.attempt_id
+        return [
             SastCheck(
                 tools,
                 worktree,
                 changes,
-                everything,
-                self._workdir / "sast" / ctx.attempt_id,
+                read.everything,
+                self._workdir / "sast" / attempt,
                 self._semgrep_config,
                 self._semgrep,
             ),
@@ -856,12 +949,21 @@ class PipelineMeasurer:
                 tools,
                 worktree,
                 changes,
-                artifacts,
-                self._workdir / "audit" / ctx.attempt_id,
+                read.artifacts,
+                self._workdir / "audit" / attempt,
                 self._forbidden,
                 self._osv_scanner,
             ),
-            NewDependencyCheck(worktree, changes, declared, manifests, self._registry_get),
+            NewDependencyCheck(
+                worktree, changes, read.declared, read.manifests, self._registry_get
+            ),
+        ]
+
+    def _behaviour_and_voice(self, read: _Read) -> list[Check]:
+        tools, active, changes = read.tools, read.active, read.changes
+        worktree = read.ctx.worktree
+        e2e_unstable, e2e_passing = self._read_e2e_base()
+        return [
             DifferentialCheck(
                 tools,
                 self._differential_cases,
@@ -879,41 +981,45 @@ class PipelineMeasurer:
                 quarantine=e2e_unstable,
                 passing=e2e_passing,
             ),
-            PersonalDataCheck(worktree, changes, test_texts, self.is_test),
-            PropertiesCheck(worktree, changes, production, self.is_test),
-            VoiceCheck(worktree, changes, self._classify, self._markers, ctx.message),
-            CommentsCheck(worktree, changes, everything, self._classify),
+            PersonalDataCheck(worktree, changes, read.test_texts, self.is_test),
+            PropertiesCheck(worktree, changes, read.production, self.is_test),
+            VoiceCheck(worktree, changes, self._classify, self._markers, read.ctx.message),
+            CommentsCheck(worktree, changes, read.everything, self._classify),
         ]
+
+    async def _documentation(self, read: _Read, expectations: Expectations | None) -> list[Check]:
+        """Whoever states something cites it; the documenter's stage answers for the documents."""
+        ctx, git, worktree = read.ctx, read.git, read.ctx.worktree
+        documenter = ctx.task.role is Producer.DOCUMENTER
         claims = expectations.claims if expectations is not None else ()
         evidence = frozenset({*self._settings, *self._read_base_metrics(), *STATIC_METRICS})
-        if claims or ctx.task.role is Producer.DOCUMENTER:  # whoever states something cites it
+        checks: list[Check] = []
+        if claims or documenter:
             checks.append(CitationCheck(worktree, claims, evidence, self._fact_ids))
-        if ctx.task.role is Producer.DOCUMENTER:
-            files, found, unreadable = await self._task_changes(ctx)
-            name = readme_path(worktree)
-            tracked = await git.lines("ls-tree", "--name-only", "HEAD", "--", name) if name else []
-            old = "\n".join(await git.lines("show", f"HEAD:{name}")) + "\n" if tracked else None
-            build, test = self._readme_commands(worktree)
-            checks.append(ReadmeCheck(worktree, old, build, test))
-            records = frozenset(
-                await git.lines("ls-tree", "-r", "--name-only", HEAD, "--", ADR_DIR)
-            )
-            checks.append(AdrCheck(worktree, tuple(await self._adr_triggers(ctx)), records))
-            documents, facts = await read_repository(
-                git,
-                worktree,
-                lambda path: self._classify(path) is FileClass.DOCUMENTATION,
-                CHANGES_DIR,
-            )
-            since = Base(git, await self._task_base(git, ctx.task.task_id))
-            checks.append(DocDriftCheck(documents, facts, since))
-            checks.append(
-                ChangeRecordCheck(
-                    worktree, ctx.task.task_id, render_changed(files, found, unreadable)
-                )
-            )
-        data = GateInput(worktree, head, ctx.task.task_id, ctx.task.stage_id, ctx.attempt_id)
-        return await self._pipeline(checks).run(data, _capabilities(active))
+        if not documenter:
+            return checks
+        files, found, unreadable = await self._task_changes(ctx)
+        name = readme_path(worktree)
+        tracked = await git.lines("ls-tree", "--name-only", "HEAD", "--", name) if name else []
+        old = "\n".join(await git.lines("show", f"HEAD:{name}")) + "\n" if tracked else None
+        build, test = self._readme_commands(worktree)
+        records = frozenset(await git.lines("ls-tree", "-r", "--name-only", HEAD, "--", ADR_DIR))
+        triggers = tuple(await self._adr_triggers(ctx))
+        documents, facts = await read_repository(
+            git,
+            worktree,
+            lambda path: self._classify(path) is FileClass.DOCUMENTATION,
+            CHANGES_DIR,
+        )
+        since = Base(git, await self._task_base(git, ctx.task.task_id))
+        changed = render_changed(files, found, unreadable)
+        return [
+            *checks,
+            ReadmeCheck(worktree, old, build, test),
+            AdrCheck(worktree, triggers, records),
+            DocDriftCheck(documents, facts, since),
+            ChangeRecordCheck(worktree, ctx.task.task_id, changed),
+        ]
 
     async def _judge_answer(
         self, ctx: AttemptContext, expectations: Expectations | None
