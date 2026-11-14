@@ -804,3 +804,67 @@ Sessão nova, a partir de `23aa6cd`. O item 32 não foi iniciado; o 36 ficou pel
 - **Item 34:** 21 funções continuam com CCN acima de 15 (`prepare` 48, `read_facts` 27, `parse_tests` 22).
 - **Item 40:** a versão `0.0.0` e a pasta `dist/` ficam com o dono.
 - As demais pendências continuam: o item 30 adiado, restos dos itens 2 e 6, suíte com `slow`, mutações antigas, ADRs 0021 e 0034, o ponto 2 (JSON ou EDN, ligado ao CRAP pelo `crapper`), os históricos da versão 1 em `%LOCALAPPDATA%\forja-verif`, e as decisões abertas do dono (overlay de links, ADR 0041, item 29, as três do item 5, a etapa de caracterização).
+
+## 14/11/2026 — as decisões abertas do dono, o item 32 e o conflito de integração do item 33
+
+Sessão nova, a partir de `ff39846`. O dono decidiu tudo o que estava aberto e pediu, por ora, só o que não gera a necessidade de um teste de mutação. Por isso nada em `src` mudou nesta entrada.
+
+### Decisões do dono
+
+| Assunto | Decisão | Estado |
+| --- | --- | --- |
+| Item 5, `authorize()` | Ligar. O Contrato 3 da Especificação diz que a autorização é uma política separada do fluxo da tarefa. | A fazer; muda `src`. |
+| Item 5, `SentPackageStore` | Ligar: gravar o pacote enviado ao agente (ADR 0009). | A fazer; muda `src`. |
+| Item 5, artefato inválido | Refazer a etapa sozinho, como a Especificação diz ("é invalidada e refeita como nova tentativa"). | A fazer; muda `src`. |
+| Item 24 | ADR 0041 confirmado. | Feito. |
+| Item 29 | Manter: dependência nova só em Python. | Encerrado. |
+| Item 36, segunda metade | Encerrar. `checks` não importa `orchestrator`, e `test_layering.py` guarda isso. `measurer.py` importar `checks` é a direção certa. | Encerrado. |
+| Item 12, etapa de caracterização | Exigir a nota de mutação da função para aprovar a etapa. | A fazer; muda `src`. |
+| Overlay de links | Não fazer. | Encerrado; registrado no ADR 0021. |
+| CRAP pelo `crapper` | Não trocar. O `lizard` e a fração de linhas ficam. Com isso o histórico da mutação fica em JSON. | Encerrado; registrado no ADR 0021. |
+| Item 40 | A versão fica `0.0.0` até a primeira execução com agente real. `dist/` apagada. | Feito. |
+| Item 34, as 21 funções acima do limite | Não estender o item à mão. Rodar a própria Forja sobre elas (`prepare`, CCN 48, primeiro), o que entrega também o E2E com agente real. | A fazer; muda `src`. |
+| Item 30 (CI) | Continua adiado. Até haver GitHub, a suíte completa com `slow` na ponta fecha cada leva. | Adiado. |
+
+### O que foi feito
+
+| Item | Mudança | Arquivos | Commit |
+| --- | --- | --- | --- |
+| 24 | O ADR 0041 passou de "proposto" a "aceito". | `docs/adr/0041-*.md`, `docs/adr/README.md` | `1a6c498` |
+| ADRs | Os ADRs 0021 e 0034 ganharam uma seção de revisão: o que o realinhamento com o mutator mudou, o que a Forja mantém de diferente e as duas decisões de hoje (overlay e CRAP). O texto antigo ficou como estava. | `docs/adr/0021-*.md`, `docs/adr/0034-*.md` | `5ba7844` |
+| 32, `sleep` | 17 esperas por tempo fixo passaram a esperar pelo que o teste precisa. As teclas dos testes de execução são dadas quando o agente entra na chamada (`Waiting.began`), não depois de 0,2 s. A última tecla da tela cheia é dada quando a tela mostra o relatório. Nas tarefas em paralelo, uma tarefa espera o evento da outra (a chamada começou, a tarefa foi integrada). A armadilha de rede é lida quando registrou a conexão. | `tests/cli/test_run.py`, `tests/cli/test_full_run.py`, `tests/orchestrator/test_together_resume.py`, `tests/checks/test_network_trap.py` | `4b45973` |
+| 32, asserção | 13 testes que só conferiam "não levanta erro" passaram a afirmar o resultado. | `tests/cli/test_keys.py`, `test_output_encoding.py`, `test_session_open.py` (2), `test_run.py`, `tests/core/artifacts/test_llm_output.py`, `tests/core/gitguard/test_guarded.py`, `tests/core/locking/test_mutex.py`, `tests/core/policy/test_problems.py` (2), `tests/core/test_report_readers.py`, `tests/executors/test_registry.py`, `tests/orchestrator/test_workspace_git.py` | `4b45973` |
+| 33 | Cenário de retomada em que o merge da segunda tarefa não aplica, com git de verdade: duas tarefas saem do mesmo commit e escrevem o mesmo arquivo. Corte em cada linha a partir do `integrate_task` que conflita (8 cortes limpos, 4 com linha rasgada). | `tests/orchestrator/test_resume_conflict.py` (novo, `slow`), 14 casos | `c4ff3ab` |
+| 40 | A pasta `dist/` foi apagada. Estava fora do git. | nenhum | nenhum |
+
+### Conclusões
+
+- **Item 32, os números da avaliação e os de agora.** A avaliação contou 60 `sleep` e 63 testes sem asserção. A busca de hoje achou 64 linhas com `sleep(` e 27 funções de teste sem `assert`, sem `pytest.raises` e sem chamar um auxiliar com nome de conferência. Não sei como os 63 foram contados.
+- **Item 32, os `sleep` que ficaram (56 linhas) e por quê.**
+  - Processo filho que precisa estar vivo para ser morto ou estourar o tempo (`time.sleep(60)` dentro do código do filho).
+  - Chamada que nunca volta até ser cancelada (`asyncio.sleep(3600)`).
+  - Ceder a vez (`asyncio.sleep(0)`) e os `sleep` falsos dos testes, que só anotam o pedido.
+  - Laço que espera uma condição, com prazo: `test_resume_end_to_end.py`, `core/locking/support.py`, `core/process/support.py`, `test_runner.py`, `test_install_command.py`, `test_install_full.py`, e os dois que esta entrada escreveu (`recorded` e `leave_soon`).
+  - Testes em que o tempo é o que se mede: quem espera o mutex enquanto outro o segura (`test_mutex.py`), os workers da mutação rodando ao mesmo tempo (`test_executor.py`), o pico de memória (`test_peak_memory.py`), a tela que continua esperando a tecla (`test_install_full.py`), o agente de `test_together.py` e o corte de `tests/acceptance/test_resume.py`.
+- **Item 32, os 14 sem `assert` que ficaram.** Onze afirmam por um auxiliar: `invalid` em `test_schemas.py` (4), `run` em `test_templates.py` (5, confere o código de saída) e `drive` nos dois testes de tela (confere o layout). Três chamam uma função que não devolve nada, e o resultado é a recusa não acontecer: `test_agent_runner.py::test_a_path_that_only_looks_like_a_hidden_one_is_not_refused` e os dois de `test_agent_runner_gaps.py` sobre o manifesto.
+- **Item 32, a segunda tecla não precisa de intervalo.** O teste da segunda pressão durante a gravação dava 0,1 s entre as duas. Sem intervalo o resultado é o mesmo: a primeira já deixou a execução parando.
+- **Item 33, nenhum defeito achado.** Nos 12 cortes a retomada chega aos mesmos fatos da execução sem corte: a primeira tarefa integrada, a segunda bloqueada com `integration_conflict` e o mesmo detalhe, a árvore da branch da execução, as refs, o resumo. A retomada não chama o agente de novo; o teste falha se chamar.
+- **Item 33, como o cenário fica determinístico com duas tarefas ao mesmo tempo.** A chamada da primeira espera a da segunda começar, e a da segunda espera o merge da primeira. As linhas antes do primeiro merge podem trocar de ordem entre rodadas, mas a contagem é a mesma (75, três rodadas), e do `integrate_task` da segunda tarefa em diante só uma tarefa escreve.
+- **`test_keys.py`, corrigido depois do primeiro commit.** A primeira asserção de `test_closing_a_reader_that_never_started_does_nothing` afirmava que o terminal é restaurado, e o nome do teste diz "não faz nada". Ficou só o que o nome diz: nenhuma thread foi criada (`41882a6`).
+
+### Verificação
+
+- `ruff check .`, `ruff format --check src tests` e `mypy` strict: limpos, 629 arquivos.
+- `pytest -m "not slow" -n 6` em `4b45973`: 9855 aprovados, 41 pulados, nenhuma falha, 366 s.
+- Os arquivos de teste alterados pelo item 32 rodaram três vezes seguidas cada um, sem falha.
+- `tests/orchestrator/test_resume_conflict.py`: 14 aprovados, duas vezes.
+- Suíte completa com `slow`, `pytest -n auto`, `JAVA_HOME` no JDK 21, em `c4ff3ab`: 10096 aprovados, 41 pulados, nenhuma falha, 38 min 42 s. É a primeira rodada inteira desde `9797991`; fecha a pendência "suíte com `slow`" das entradas anteriores. A correção de `test_keys.py` veio depois, e só o arquivo dela rodou de novo (13 aprovados).
+- Mutação: não rodou. Nada em `src` mudou.
+- Não rodou: E2E com agente real.
+
+### Pendências
+
+- **Com mudança em `src`, e por isso com mutação, para depois:** as três do item 5; a nota de mutação na etapa de caracterização (item 12); o resto do item 6 (lista de permissão de opções e `protocol.ext.allow=never`); o resto do item 2 (`--require-hashes`); a Forja rodando sobre as 21 funções acima do limite (item 34).
+- **Mutações antigas que nunca rodaram:** `core/adapters/common.py`, os `parsers.py` de C# e Java, `cli/session.py`, `cli/detect.py`, `testing/workspace.py`, `testing/repo.py`, e `checks/mutation.py` e `languages/java/adapter.py` depois de `17d06c6`.
+- **Fora dos 40:** o teste de painéis em Python 3.13; pular teste em TypeScript, Java, C# e Python não é procurado pelo gate de escopo; os históricos da versão 1 em `%LOCALAPPDATA%\forja-verif`; as dez pastas `forja-captura-*` no `%TEMP%`.
+- **Item 30:** adiado.
