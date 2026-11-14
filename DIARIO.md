@@ -908,4 +908,4 @@ Fora da avaliação: o dono pediu para avaliar o que estava aberto no GitHub. N�
 
 - Mutação sobre o que o pull request mudou em `src`, junto com a próxima leva que mexe em `src`.
 - Prova de vida com o Cursor 2026.11 de verdade, para conferir as partes 2 e 3.
-- O pull request 1 segue aberto no GitHub; nada foi comentado nem enviado ao remoto.
+- O pull request 1 segue aberto no GitHub até `correcoes-p0` chegar a `main`. A branch foi enviada ao remoto e o pull request recebeu um comentário com o que foi feito.
