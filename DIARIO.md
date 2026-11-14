@@ -751,3 +751,56 @@ Testes: dez casos novos em `tests/mutation/test_mutate_script.py`, que ficou com
 - **Ponto 2 fica ligado ao CRAP pelo `crapper`,** que depende de ordem do dono. Se o EDN for adotado, conferir o que fazer com `judges` e `tests`, que o histórico do mutator não tem.
 - **O checkout `%LOCALAPPDATA%\forja-verif` tem históricos da versão 1** em `.metrics/mutate`. A próxima rodada lá roda todos os mutantes de cada arquivo.
 - As demais pendências continuam: itens 31 a 40, restos dos itens 2 e 6, suíte com `slow`, mutações antigas, ADRs 0021 e 0034, e as decisões abertas do dono (overlay de links, ADR 0041, item 29, as três do item 5, a etapa de caracterização).
+
+## 13/11/2026 — itens 31 e 33 a 40
+
+Sessão nova, a partir de `23aa6cd`. O item 32 não foi iniciado; o 36 ficou pela metade.
+
+### O que foi feito
+
+| Item | Mudança | Arquivos | Teste novo | Commit |
+| --- | --- | --- | --- | --- |
+| 31 | O teste do código de saída do gate diferencial usa os limiares folgados dos vizinhos (`LOOSE`). | `tests/checks/test_differential_check.py` | nenhum | `e84ac1e` |
+| 33 | Cenário de retomada em que o gate de integração reprova a tarefa, com corte em cada linha a partir da integração (10 cortes limpos, 6 com linha rasgada). | `tests/orchestrator/test_resume_rollback.py` (novo, `slow`) | 18 casos | `ee3bd81` |
+| 33 (defeito achado) | A retomada depois de um corte em volta do `rollback_integration` bloqueava a tarefa sem o motivo da reprovação. O motivo agora vai na intenção do rollback, e a retomada o lê de lá. `RunState` passou a guardar o que cada intenção disse (`intent_of`), também depois de fechada. | `core/events/state.py`, `orchestrator/operations.py`, `orchestrator/task_cycle.py` | um em `test_state.py`, um em `test_operations.py`; um ajustado em `test_details.py` | `ee3bd81` |
+| 34 | `judge` (186 linhas) lê a worktree uma vez (`_Read`) e monta os checks um grupo de gates por vez, em oito métodos. `build_package` (CCN 67) virou uma função por seção do pacote. Nenhuma das duas passa mais do limite de 15. | `orchestrator/measurer.py`, `orchestrator/agent_runner.py` | nenhum | `cec13d5`, `fee5657`, `6eb9e2a` |
+| 35 | `Journal.operate`, `done` e `operation_id` recebem `OperationName`, não texto livre. Os chamadores, `HANDLED_OPERATIONS`, `AGENT_OPERATIONS` e as duas constantes `OPERATION` usam o enum. | `orchestrator/operations.py`, `phases.py`, `task_cycle.py`, `workspace_git.py`, `agent_runner.py`, `checks/tooling.py` | nenhum; o `mypy` é quem cobra | `9b6f005` |
+| 36 (parte) | `TaskInfo` foi para `core/task.py` e `SinkFactory` para `core/events/sink.py`. `orchestrator/ports.py` continua exportando os dois. Nenhum módulo de `checks` importa `orchestrator`. | `core/task.py` (novo), `core/events`, `checks/scope.py`, `checks/tooling.py`, `orchestrator/ports.py` | `tests/checks/test_layering.py` | `2c3d71c` |
+| 37 | O README cita testes `slow` que existem (`tests/acceptance/test_resume.py`, `tests/orchestrator/test_resume_end_to_end.py`). | `README.md` | o de links, abaixo | `6ff092b` |
+| 38 | README: plataforma "Windows"; Linux x64 recebe as ferramentas do `forja instalar`, mas não é testado. O guia de instalação diz o mesmo na tabela de plataformas. | `README.md`, `docs/guia/instalacao.md` | nenhum | `6ff092b` |
+| 39 | Os três links quebrados saíram (`docs/adr/README.md`, ADR 0019). Nove ADRs deixaram de apontar para arquivos `docs/plano-*.md` que não existem. O índice das ADRs avisa que os planos citados não estão mais no repositório. | `docs/adr` (11 arquivos) | `tests/cli/test_links_da_documentacao.py`: todo link de `README.md` e de `docs` para um arquivo leva a um arquivo que existe | `6ff092b` |
+| 39 | A tabela de gates do guia é comparada com `checks/specs.py`: gate e modo padrão de cada verificação. | `tests/cli/test_guia_cobre_codigo.py` | um | `6ff092b` |
+| 40 | Saíram o grupo `mutation` (`mutmut`), o bloco `[tool.mutmut]`, a linha `mutants/` do `.gitignore` e `OUTSIDE` de `claude_code.py`. `ruff` ganhou piso (`>=0.17.0`, a versão do `uv.lock`). | `pyproject.toml`, `uv.lock`, `.gitignore`, `executors/claude_code.py` | nenhum | `6f149ec` |
+
+### Conclusões
+
+- **Item 33, a avaliação estava errada num ponto e certa no outro.** `normalize_style` já era cortado em toda linha pelo cenário de `test_resume_end_to_end`: o medidor falso formata `base.txt`, então a normalização faz commit de verdade ali. `rollback_integration` tinha um teste rápido com git em memória e um corte só (`test_details.py`); faltava o corte em cada linha com git real.
+- **Item 33, o teste rápido que existia fixava o defeito.** `test_a_cut_after_the_rollback_blocks_the_task_without_judging_the_integration_again` afirmava o bloqueio sem `detail`. O cenário novo compara o resumo inteiro com o da execução sem corte, e o resumo saía diferente em 3 dos 16 cortes (linhas 60 e 61). A afirmação do teste rápido foi trocada: com corte ou sem, o bloqueio leva o mesmo motivo.
+- **Item 33, por que na intenção.** O veredito do gate só existe em memória. Depois do corte, a integração já foi desfeita e não dá para julgar de novo. A intenção é escrita antes do rollback, então sobrevive a qualquer corte depois dele. Log gravado antes desta mudança não tem o motivo na intenção; retomado, bloqueia sem ele, como antes.
+- **Item 33, conflito de integração ficou de fora.** O plano falava em "conflito de integração"; o conflito não passa por `rollback_integration` (a workspace desfaz o merge sozinha). Um cenário de conflito com cortes pede duas tarefas que mexem no mesmo arquivo; não foi feito.
+- **Item 34, o pacote é o mesmo.** O `build_package` novo foi comparado com o de `cec13d5` em 221.184 combinações de papel, escopo, relatórios e textos fixos: nenhum caractere de diferença.
+- **Item 34, a supressão de mutação mandou no desenho.** `mutation-suppressions.toml` nomeia `build_package` e `True -> False` (a marca de item essencial). A primeira divisão levou os `True` para as funções auxiliares e `tests/mutation/test_sites.py` falhou. A marca voltou para dentro de `build_package` (`6eb9e2a`); a supressão aprovada não foi tocada.
+- **Item 34, `judge` mantém a ordem.** As leituras de git, a instalação de dependências e a lista de checks seguem a ordem de antes.
+- **Item 34, `read_facts` (CCN 27) e outras 20 funções continuam acima de 15.** O plano do item pedia `build_package` e `judge`. As maiores que ficaram: `cli/prepare.py::prepare` (48), `summary.py::read_facts` (27), `languages/go/parsers.py::parse_tests` (22).
+- **Item 36, a segunda metade não foi feita.** "Registrar os checks por lista, sem import direto" pede tirar de `measurer.py` a montagem de cada check. Cada um recebe coisas diferentes do medidor (ferramentas, ambiente, pastas, leituras de git). Isso é um desenho novo, que o plano não descreve; fica para decisão do dono.
+- **Item 38, o código não mudou.** `forja instalar` continua instalando no Linux x64. O que mudou é o que a documentação promete.
+- **Item 39, as ADRs continuam citando "questão N do plano" e `plano-3.md`.** São o registro do que se via na hora; só saíram os ponteiros para arquivos que não existem.
+- **Item 40, `OUTSIDE` era resto mesmo.** O commit `219dc76` trocou a negação de `../**` pela permissão só sob `./**` e deixou a constante.
+- **Item 40, o que ficou.** A versão `0.0.0` (o número é do dono). A pasta `dist/` (um `.whl` e um `.tar.gz` de 10/11, fora do git): a remoção foi negada pela política de permissões da sessão.
+
+### Verificação
+
+- `ruff check .`, `ruff format --check src tests` e `mypy` strict: limpos, 628 arquivos.
+- `pytest -m "not slow" -n 6` em `ee3bd81`: 9855 aprovados, 41 pulados, nenhuma falha, 360 s.
+- `tests/orchestrator/test_resume_end_to_end.py` e `tests/orchestrator/test_resume_rollback.py` (os dois `slow`): 120 aprovados, 196 s.
+- `scripts/mutate.py` sobre os sete arquivos de `src` alterados, com cobertura nova: saída 0. Mutantes: `core/events/state.py` 27, `orchestrator/operations.py` 17, `task_cycle.py` 78, `agent_runner.py` 101, `measurer.py` 94, `core/events/sink.py` 1. Os únicos sobreviventes são as marcas `True -> False` de `build_package`, que `mutation-suppressions.toml` já nomeia. `core/task.py` não teve mutante julgado: o arquivo só declara `TaskInfo`, e nenhuma linha dele roda dentro de um teste.
+- Não rodou: a suíte completa com `slow` (só os dois arquivos de retomada acima); E2E com agente real.
+
+### Pendências
+
+- **Item 32 não foi iniciado:** os 64 `sleep(` dos testes e os testes sem asserção.
+- **Item 36, segunda metade:** registrar os checks por lista. Pede um desenho que o plano não descreve; fica para o dono.
+- **Item 33:** o conflito de integração (o outro caminho que desfaz a integração) não tem cenário com corte em cada linha.
+- **Item 34:** 21 funções continuam com CCN acima de 15 (`prepare` 48, `read_facts` 27, `parse_tests` 22).
+- **Item 40:** a versão `0.0.0` e a pasta `dist/` ficam com o dono.
+- As demais pendências continuam: o item 30 adiado, restos dos itens 2 e 6, suíte com `slow`, mutações antigas, ADRs 0021 e 0034, o ponto 2 (JSON ou EDN, ligado ao CRAP pelo `crapper`), os históricos da versão 1 em `%LOCALAPPDATA%\forja-verif`, e as decisões abertas do dono (overlay de links, ADR 0041, item 29, as três do item 5, a etapa de caracterização).
