@@ -7,7 +7,7 @@ import pytest
 
 from forja.core.events import Event, EventLog, Ref, RefKind
 from forja.core.events.versioning import parse_line
-from forja.core.idempotency import Decision
+from forja.core.idempotency import Decision, OperationName
 from forja.core.states import ExecutionState, Level, TaskState
 from forja.orchestrator.operations import Journal, Step, StillOpen
 from tests.core.events.support import RUN, create_run, open_log
@@ -36,15 +36,17 @@ def step(done: list[str], label: str = "x") -> Step:
 
 
 def operate(journal: Journal, to_run: Step, subject: str = "t1") -> bool:
-    return asyncio.run(journal.operate("create_task_branch", Level.EXECUTION, RUN, subject, to_run))
+    return asyncio.run(
+        journal.operate(OperationName.CREATE_TASK_BRANCH, Level.EXECUTION, RUN, subject, to_run)
+    )
 
 
 def settle(log: EventLog, op_id: str, decision: Decision) -> None:
-    log.append_intent(Level.EXECUTION, RUN, "create_task_branch", op_id)
+    log.append_intent(Level.EXECUTION, RUN, OperationName.CREATE_TASK_BRANCH, op_id)
     log.append_effect(
         Level.EXECUTION,
         RUN,
-        "create_task_branch",
+        OperationName.CREATE_TASK_BRANCH,
         op_id,
         payload={"reconciled": decision.value},
     )
@@ -141,10 +143,12 @@ def test_different_subjects_are_different_operations(log: EventLog) -> None:
 
 def test_an_open_operation_must_be_settled_before_anything_else(log: EventLog) -> None:
     journal = Journal(log)
-    log.append_intent(Level.EXECUTION, RUN, "create_task_branch", "create_task_branch:t1")
+    log.append_intent(
+        Level.EXECUTION, RUN, OperationName.CREATE_TASK_BRANCH, "create_task_branch:t1"
+    )
 
     with pytest.raises(StillOpen, match="create_task_branch:t1 is still open"):
-        journal.operation_id("create_task_branch", "t1")
+        journal.operation_id(OperationName.CREATE_TASK_BRANCH, "t1")
 
 
 def test_an_operation_the_resume_decided_to_redo_runs_again_under_a_new_id(
@@ -154,12 +158,12 @@ def test_an_operation_the_resume_decided_to_redo_runs_again_under_a_new_id(
     settle(log, "create_task_branch:t1", Decision.REDO)
     done: list[str] = []
 
-    assert journal.done("create_task_branch", "t1") is False
+    assert journal.done(OperationName.CREATE_TASK_BRANCH, "t1") is False
     assert operate(journal, step(done)) is True
 
     assert done == ["x"]
     assert log.state.effect_of("create_task_branch:t1:1") == {}
-    assert journal.done("create_task_branch", "t1") is True
+    assert journal.done(OperationName.CREATE_TASK_BRANCH, "t1") is True
 
 
 def test_an_operation_the_resume_found_already_done_is_not_repeated(log: EventLog) -> None:
@@ -176,7 +180,7 @@ def test_two_redos_in_a_row_count_up(log: EventLog) -> None:
     settle(log, "create_task_branch:t1", Decision.REDO)
     settle(log, "create_task_branch:t1:1", Decision.REDO)
 
-    assert journal.operation_id("create_task_branch", "t1") == "create_task_branch:t1:2"
+    assert journal.operation_id(OperationName.CREATE_TASK_BRANCH, "t1") == "create_task_branch:t1:2"
 
 
 def test_the_hook_sees_the_two_points_where_a_process_can_die(log: EventLog) -> None:

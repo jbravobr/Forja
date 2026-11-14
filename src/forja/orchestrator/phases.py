@@ -18,7 +18,7 @@ from forja.core.atomic import atomic_write_bytes
 from forja.core.confirmation import Confirmation
 from forja.core.events import EventLog
 from forja.core.events.state import OpenOperation
-from forja.core.idempotency import reconcile_call_agent_cli
+from forja.core.idempotency import OperationName, reconcile_call_agent_cli
 from forja.core.resume import resume
 from forja.core.states import (
     EXECUTION_MACHINE,
@@ -40,7 +40,7 @@ from forja.orchestrator.summary import (
 from forja.orchestrator.task_cycle import TaskCycle
 from forja.orchestrator.workspace_git import HANDLED_OPERATIONS
 
-AGENT_OPERATIONS = frozenset({"prepare_workcopy", "apply_diff"})
+AGENT_OPERATIONS = frozenset({OperationName.PREPARE_WORKCOPY, OperationName.APPLY_DIFF})
 SUMMARY_NAME = "resumo.md"
 FAILURE_NAME = "falha.log"  # the trace of an error nobody expected, beside the summary
 FAILURE_REASON_LIMIT = 500  # characters of the error kept in the log
@@ -147,11 +147,11 @@ class Orchestrator:
         name = operation.operation
         if name in HANDLED_OPERATIONS:
             return await ctx.workspace.reconcile(operation)
-        if name == "call_agent_cli":
+        if name == OperationName.CALL_AGENT_CLI:
             return reconcile_call_agent_cli()
         if name in AGENT_OPERATIONS:
             return await ctx.agent.reconcile(operation)
-        if name == "run_tool":
+        if name == OperationName.RUN_TOOL:
             return await ctx.measurer.reconcile(operation)
         raise KeyError(f"no reconciler for {name}")
 
@@ -231,17 +231,21 @@ class Orchestrator:
         ctx, journal, run_id = self._ctx, self._journal, self._run_id
         ws = ctx.workspace
         await journal.operate(
-            "create_run_branch",
+            OperationName.CREATE_RUN_BRANCH,
             Level.EXECUTION,
             run_id,
             run_id,
             ws.create_run_branch(ctx.config.base_commit),
         )
         await journal.operate(
-            "create_attempt_worktree", Level.EXECUTION, run_id, "run", ws.create_run_worktree()
+            OperationName.CREATE_ATTEMPT_WORKTREE,
+            Level.EXECUTION,
+            run_id,
+            "run",
+            ws.create_run_worktree(),
         )
         await journal.operate(
-            "normalize_style",
+            OperationName.NORMALIZE_STYLE,
             Level.EXECUTION,
             run_id,
             run_id,
@@ -356,7 +360,7 @@ class Orchestrator:
         )
         path = self._write_summary(ctx.run_dir / SUMMARY_NAME)
         await journal.operate(
-            "remove_worktree",
+            OperationName.REMOVE_WORKTREE,
             Level.EXECUTION,
             self._run_id,
             "run",

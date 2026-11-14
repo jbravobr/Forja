@@ -29,6 +29,7 @@ from forja.core.events import OpenOperation
 from forja.core.gitguard import GitWatch
 from forja.core.gitguard.snapshot import Difference, DifferenceKind
 from forja.core.idempotency import (
+    OperationName,
     Reconciliation,
     normalize_stage_id,
     reconcile_commit_stage,
@@ -66,14 +67,14 @@ _NOT_IN_A_TRAILER_NAME = re.compile(r"[^A-Za-z0-9]+")
 NOTES_REF = "refs/notes/commits"
 HANDLED_OPERATIONS = frozenset(
     {
-        "create_run_branch",
-        "create_attempt_worktree",
-        "normalize_style",
-        "create_task_branch",
-        "commit_stage",
-        "integrate_task",
-        "rollback_integration",
-        "remove_worktree",
+        OperationName.CREATE_RUN_BRANCH,
+        OperationName.CREATE_ATTEMPT_WORKTREE,
+        OperationName.NORMALIZE_STYLE,
+        OperationName.CREATE_TASK_BRANCH,
+        OperationName.COMMIT_STAGE,
+        OperationName.INTEGRATE_TASK,
+        OperationName.ROLLBACK_INTEGRATION,
+        OperationName.REMOVE_WORKTREE,
     }
 )
 

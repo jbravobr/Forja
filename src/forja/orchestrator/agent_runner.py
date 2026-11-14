@@ -51,6 +51,7 @@ from forja.core.artifacts.models import Producer
 from forja.core.artifacts.schemas import CriteriaBody
 from forja.core.events import EventLog, OpenOperation
 from forja.core.idempotency import (
+    OperationName,
     Reconciliation,
     reconcile_apply_diff,
     reconcile_prepare_workcopy,
@@ -90,7 +91,7 @@ DIARY_ORDER = (
 )
 OUTPUT = "saida.json"
 IDLE_LIMIT = 300.0  # seconds without a single line of output: the CLI is stuck, not working
-OPERATION = "call_agent_cli"
+OPERATION = OperationName.CALL_AGENT_CLI
 NO_COMMANDS = "You cannot run commands. "
 FACADE_COMMANDS = (
     "You cannot run commands except exactly `forja agente lint`, `forja agente medir` and "
@@ -780,7 +781,7 @@ class ExecutorAgentRunner:
 
     async def reconcile(self, operation: OpenOperation) -> Reconciliation:
         p: Any = operation.payload
-        if operation.operation == "prepare_workcopy":
+        if operation.operation == OperationName.PREPARE_WORKCOPY:
             return reconcile_prepare_workcopy(
                 Path(p["workcopy"]), p["expected_digest"], exclude={AGENT_DIR}
             )

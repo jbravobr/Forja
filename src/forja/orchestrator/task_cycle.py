@@ -27,6 +27,7 @@ from forja.core.artifacts.schemas import CriteriaBody
 from forja.core.events.models import MAX_PAYLOAD_BYTES, canonical_json
 from forja.core.events.state import RunState
 from forja.core.gates import Approved, CheckRun, FindingKind, Inconclusive, Rejected, Verdict
+from forja.core.idempotency import OperationName
 from forja.core.states import AttemptState, Level, StageState, TaskState
 from forja.orchestrator.budget import consecutive_infra_failures, quality_attempts
 from forja.orchestrator.config import Objective
@@ -174,7 +175,7 @@ class TaskCycle:
         ctx, journal = self._ctx, self._journal
         journal.enter(Level.TASK, task_id, TaskState.IN_PROGRESS)
         await journal.operate(
-            "create_task_branch",
+            OperationName.CREATE_TASK_BRANCH,
             Level.TASK,
             task_id,
             task_id,
@@ -212,7 +213,7 @@ class TaskCycle:
         state, journal = self._state, self._journal
         children = state.children_of(Level.ATTEMPT, info.stage_id)
         for attempt in children:
-            if not journal.done("remove_worktree", attempt):
+            if not journal.done(OperationName.REMOVE_WORKTREE, attempt):
                 return attempt
         if state.state_of(Level.STAGE, info.stage_id) is not StageState.IN_PROGRESS:
             return None
@@ -322,7 +323,7 @@ class TaskCycle:
         elif self._untested_by(attempt):
             await self._commit_attempt(info, attempt)
         await journal.operate(
-            "remove_worktree",
+            OperationName.REMOVE_WORKTREE,
             Level.ATTEMPT,
             attempt,
             attempt,
@@ -350,7 +351,7 @@ class TaskCycle:
         run, journal = self._ctx, self._journal
         attempt, task = ctx.attempt_id, ctx.task.task_id
         await journal.operate(
-            "create_attempt_worktree",
+            OperationName.CREATE_ATTEMPT_WORKTREE,
             Level.ATTEMPT,
             attempt,
             attempt,
@@ -364,7 +365,7 @@ class TaskCycle:
                 findings=self._findings(ctx.task.task_id),
             )
         await journal.operate(
-            "prepare_workcopy",
+            OperationName.PREPARE_WORKCOPY,
             Level.ATTEMPT,
             attempt,
             attempt,
@@ -403,7 +404,7 @@ class TaskCycle:
     async def _call_agent(self, ctx: AttemptContext) -> tuple[AgentResult, list[str]] | None:
         """The call and what git looked like around it; ``None`` if the call ended earlier."""
         run = self._ctx
-        op_id = self._journal.operation_id("call_agent_cli", ctx.attempt_id)
+        op_id = self._journal.operation_id(OperationName.CALL_AGENT_CLI, ctx.attempt_id)
         if op_id is None:
             return None
         together = (
@@ -415,7 +416,7 @@ class TaskCycle:
             lambda: self._state.children_of(Level.TASK, self._journal.run_id),
         ) as watch:
             result = await run.runner(ctx.task.role).call(
-                ctx, op_id, run.sinks(Level.ATTEMPT, ctx.attempt_id, "call_agent_cli")
+                ctx, op_id, run.sinks(Level.ATTEMPT, ctx.attempt_id, OperationName.CALL_AGENT_CLI)
             )
         return result, [difference.describe() for difference in watch.differences]
 
@@ -438,7 +439,7 @@ class TaskCycle:
         ctx = replace(ctx, message=str(validating.get("reason", "")) if validating else "")
         try:
             await journal.operate(
-                "apply_diff",
+                OperationName.APPLY_DIFF,
                 Level.ATTEMPT,
                 attempt,
                 attempt,
@@ -720,7 +721,7 @@ class TaskCycle:
             worktree = self._ctx.workspace.attempt_worktree(attempt)
             apart = [name for name in README_NAMES if (worktree / name).is_file()]
         await self._journal.operate(
-            "commit_stage",
+            OperationName.COMMIT_STAGE,
             Level.ATTEMPT,
             attempt,
             attempt,
@@ -835,10 +836,10 @@ class TaskCycle:
     async def _integrate_alone(self, info: TaskInfo) -> None:
         run, journal = self._ctx, self._journal
         task = info.task_id
-        merge_id = journal.operation_id("integrate_task", task)
+        merge_id = journal.operation_id(OperationName.INTEGRATE_TASK, task)
         try:
             await journal.operate(
-                "integrate_task",
+                OperationName.INTEGRATE_TASK,
                 Level.TASK,
                 task,
                 task,
@@ -857,12 +858,12 @@ class TaskCycle:
                 self._log.append_effect(
                     Level.TASK,
                     task,
-                    "integrate_task",
+                    OperationName.INTEGRATE_TASK,
                     merge_id,
                     payload={"conflict": str(conflict)},
                 )
             return
-        if journal.done("rollback_integration", task):
+        if journal.done(OperationName.ROLLBACK_INTEGRATION, task):
             journal.enter(
                 Level.TASK, task, TaskState.BLOCKED, payload={"reason": "integration_gate"}
             )
@@ -873,7 +874,11 @@ class TaskCycle:
             journal.enter(Level.TASK, task, TaskState.INTEGRATED)
             return
         await journal.operate(
-            "rollback_integration", Level.TASK, task, task, run.workspace.rollback_integration(task)
+            OperationName.ROLLBACK_INTEGRATION,
+            Level.TASK,
+            task,
+            task,
+            run.workspace.rollback_integration(task),
         )
         journal.enter(
             Level.TASK,

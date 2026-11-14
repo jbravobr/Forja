@@ -14,7 +14,7 @@ from typing import Any
 from pydantic import JsonValue
 
 from forja.core.events import EventLog, Ref
-from forja.core.idempotency import Decision
+from forja.core.idempotency import Decision, OperationName
 from forja.core.states import Level
 from forja.orchestrator.budget import SESSION_ENDED, SESSION_STARTED
 
@@ -102,7 +102,7 @@ class Journal:
 
     # -- operations -----------------------------------------------------------------------------
 
-    def operation_id(self, name: str, subject: str) -> str | None:
+    def operation_id(self, name: OperationName, subject: str) -> str | None:
         """The id to run ``name`` on ``subject`` under, or ``None`` if it already happened."""
         retry = 0
         while True:
@@ -116,10 +116,12 @@ class Journal:
                 return None
             retry += 1
 
-    def done(self, name: str, subject: str) -> bool:
+    def done(self, name: OperationName, subject: str) -> bool:
         return self.operation_id(name, subject) is None
 
-    async def operate(self, name: str, level: Level, target: str, subject: str, step: Step) -> bool:
+    async def operate(
+        self, name: OperationName, level: Level, target: str, subject: str, step: Step
+    ) -> bool:
         """Intent, work, effect. Returns False, doing nothing, if the log says it happened."""
         op_id = self.operation_id(name, subject)
         if op_id is None:
