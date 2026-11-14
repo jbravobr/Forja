@@ -38,12 +38,9 @@ SETTINGS_FILE = "claude-settings.json"
 INSTRUCTIONS_FILE = "instructions.md"
 # Hooks of the user's profile would otherwise run inside every agent call and add their output to
 # what the agent reads.
-# Best effort, and the CLI's own rules: the file tools may not reach above the working copy. The
-# home directory cannot be denied as a whole, since the copy lives under it. What keeps the CLI
-# inside the copy for good is the isolation level (1e).
-OUTSIDE = tuple(f"{tool}(../**)" for tool in ("Read", "Edit", "Write"))
-# ... and not its own instructions and permissions, which sit inside the copy. Changing them
-# is also checked for when the work comes back.
+# Best effort, and the CLI's own rules: the agent may not write its own instructions and
+# permissions, which sit inside the copy. Changing them is also checked for when the work comes
+# back. What keeps the file tools under the working copy is the scope each one is allowed with.
 OWN = tuple(
     f"{tool}(./{AGENT_DIR}/{name})"
     for tool in ("Edit", "Write")

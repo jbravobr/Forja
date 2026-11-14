@@ -12,7 +12,7 @@ license-files = ["LICENSE"]
 dependencies = [
     "pydantic>=2.7",
     "rich>=15.0.0",
-    "ruff",
+    "ruff>=0.17.0",
     "lizard>=1.24.1",
     "textual>=8.2.8",
     "tree-sitter>=0.26.0",
@@ -34,9 +34,6 @@ dev = [
     "pytest-xdist>=3.8.0",
     "coverage>=7.6",
     "pytest-timeout>=2.3",
-]
-mutation = [
-    "mutmut>=3.8.0",
 ]
 capturas = [
     "pywinpty",
@@ -84,24 +81,4 @@ deselect = [
     "tests/core/locking/test_index_locks.py::test_the_real_process_list_includes_this_process_and_no_invented_names",
     "tests/core/redaction/test_secrets.py::test_forjas_own_source_is_clean",
     "tests/core/locking/test_repository.py::test_the_repository_id_is_short_stable_and_shared_by_every_worktree",
-]
-
-[tool.mutmut]
-source_paths = [
-    "src/forja/core/",
-    "src/forja/orchestrator/",
-    "src/forja/checks/",
-    "src/forja/languages/",
-    "src/forja/testing/",
-]
-pytest_add_cli_args_test_selection = ["tests/"]
-timeout_multiplier = 4
-# The three deselected tests fail on Linux today and are outside the
-# modules under mutation; the self-scan reads source that mutmut rewrites; mutmut needs a green baseline run.
-pytest_add_cli_args = [
-    "-m", "not slow", "-p", "no:cacheprovider",
-    "--deselect", "tests/core/gitguard/test_snapshot.py::test_a_fetch_that_moves_remote_tracking_refs_is_a_change",
-    "--deselect", "tests/core/locking/test_index_locks.py::test_the_real_process_list_includes_this_process_and_no_invented_names",
-    "--deselect", "tests/core/redaction/test_secrets.py::test_forjas_own_source_is_clean",
-    "--deselect", "tests/core/locking/test_repository.py::test_the_repository_id_is_short_stable_and_shared_by_every_worktree",
 ]
