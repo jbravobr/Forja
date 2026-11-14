@@ -388,7 +388,10 @@ GENERIC_ENVIRONMENT = frozenset(
 )  # fmt: skip
 
 GENERIC_PROBE = ProbeTask(
-    prompt="Create a file named probe.txt here, containing exactly: forja-ok",
+    prompt=(
+        "Create a file named probe.txt in the working directory root"
+        " (not inside .forja-agent), containing exactly: forja-ok"
+    ),
     expected_file="probe.txt",
     expected_content="forja-ok",
     expected_event_kinds=frozenset(),  # a CLI described by a template may print nothing readable

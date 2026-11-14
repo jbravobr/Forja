@@ -74,7 +74,10 @@ class CursorAdapter:
         version_args=("--version",),
     )
     probe = ProbeTask(
-        prompt="Create a file named probe.txt here, containing exactly: forja-ok",
+        prompt=(
+            "Create a file named probe.txt in the working directory root"
+            " (not inside .forja-agent), containing exactly: forja-ok"
+        ),
         expected_file="probe.txt",
         expected_content="forja-ok",
         expected_event_kinds=frozenset({"FileEditActivity", "UsageActivity"}),
@@ -161,10 +164,14 @@ def _tool(call: object) -> AgentActivity | None:
     path = _path(read.get("args", {}).get("path")) if isinstance(read, dict) else None
     if path:
         return FileReadActivity(path)
-    write = call.get("writeToolCall")
-    args = write.get("args") if isinstance(write, dict) else None
-    path = _path(args.get("path")) if isinstance(args, dict) else None
-    if path and isinstance(args, dict):
-        text = args.get("fileText")
-        return FileEditActivity(path, len(text.splitlines()) if isinstance(text, str) else 0, 0)
+    # older versions report writeToolCall with fileText; 2026.11 reports editToolCall with
+    # streamContent
+    for kind, key in (("writeToolCall", "fileText"), ("editToolCall", "streamContent")):
+        write = call.get(kind)
+        args = write.get("args") if isinstance(write, dict) else None
+        path = _path(args.get("path")) if isinstance(args, dict) else None
+        if path and isinstance(args, dict):
+            text = args.get(key)
+            lines = len(text.splitlines()) if isinstance(text, str) else 0
+            return FileEditActivity(path, lines, 0)
     return None

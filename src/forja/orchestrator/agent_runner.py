@@ -688,6 +688,7 @@ class ExecutorAgentRunner:
                 (agent_dir / DIARY_FILE).write_text(diary, encoding="utf-8", newline="\n")
             setup = self._setup()
             for name, data in setup.files.items():
+                (agent_dir / name).parent.mkdir(parents=True, exist_ok=True)
                 (agent_dir / name).write_bytes(data)
 
         return Step(payload, run)

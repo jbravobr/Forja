@@ -87,6 +87,7 @@ async def run_probe(
         setup = adapter.permission_setup(Producer.IMPLEMENTER, permissions)
         (workdir / AGENT_DIR).mkdir()
         for relative, data in setup.files.items():
+            (workdir / AGENT_DIR / relative).parent.mkdir(parents=True, exist_ok=True)
             (workdir / AGENT_DIR / relative).write_bytes(data)
         package = workdir / AGENT_DIR / "package.md"
         package.write_text(adapter.probe.prompt, encoding="utf-8")
