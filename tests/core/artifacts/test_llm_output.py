@@ -205,7 +205,10 @@ def test_no_declaration_and_no_diff_agree() -> None:
 def test_a_citation_of_a_single_line_is_valid() -> None:
     citation = {"kind": "file", "path": "a.py", "line_start": 5, "line_end": 5}
 
-    parse_llm_output(json.dumps({"claims": [{"statement": "s", "citations": [citation]}]}))
+    parsed = parse_llm_output(json.dumps({"claims": [{"statement": "s", "citations": [citation]}]}))
+
+    (read,) = parsed.claims[0].citations
+    assert (read.line_start, read.line_end) == (5, 5)  # type: ignore[union-attr]
 
 
 def test_a_citation_cannot_be_changed_after_it_was_read() -> None:

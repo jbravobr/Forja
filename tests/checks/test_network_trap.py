@@ -10,6 +10,14 @@ import pytest
 from forja.checks.network_trap import UNKNOWN, NetworkTrap, destination_of
 
 
+async def recorded(trap: NetworkTrap) -> tuple[str, ...]:
+    """What the trap recorded, as soon as it has recorded the connection."""
+    async with asyncio.timeout(10):
+        while not trap.destinations:
+            await asyncio.sleep(0.01)
+    return trap.destinations
+
+
 @pytest.mark.parametrize(
     ("line", "expected"),
     [
@@ -100,9 +108,9 @@ def test_a_connection_that_sends_nothing_is_recorded_as_unknown(
     async def scenario() -> tuple[str, ...]:
         async with NetworkTrap() as trap:
             _, writer = await asyncio.open_connection("127.0.0.1", int(trap.url.rsplit(":", 1)[1]))
-            await asyncio.sleep(0.6)
+            seen = await recorded(trap)
             writer.close()
-            return trap.destinations
+            return seen
 
     assert asyncio.run(scenario()) == (UNKNOWN,)
 
@@ -114,9 +122,9 @@ def test_a_huge_request_line_is_cut_before_it_is_read_in_full() -> None:
             _, writer = await asyncio.open_connection("127.0.0.1", port)
             writer.write(b"GET http://big.test/" + b"a" * 100_000 + b" HTTP/1.1\r\n")
             await writer.drain()
-            await asyncio.sleep(0.3)
+            seen = await recorded(trap)
             writer.close()
-            return trap.destinations
+            return seen
 
     assert asyncio.run(scenario()) == ("big.test:80",)
 
@@ -138,9 +146,9 @@ def test_only_the_first_line_of_the_request_is_read() -> None:
             _, writer = await asyncio.open_connection("127.0.0.1", port)
             writer.write(b"GET\nhttp://second-line.test/ HTTP/1.1\r\n")
             await writer.drain()
-            await asyncio.sleep(0.3)
+            seen = await recorded(trap)
             writer.close()
-            return trap.destinations
+            return seen
 
     assert asyncio.run(scenario()) == (UNKNOWN,)
 

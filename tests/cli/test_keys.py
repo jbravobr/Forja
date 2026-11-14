@@ -140,7 +140,14 @@ def test_the_reader_runs_in_a_thread_hands_the_keys_over_and_stops_on_close(
 
 
 def test_closing_a_reader_that_never_started_does_nothing() -> None:
-    TerminalKeys().close()
+    restored: list[str] = []
+    reader = TerminalKeys()
+    reader._restore = lambda: restored.append("terminal")  # noqa: SLF001
+
+    reader.close()
+
+    assert restored == ["terminal"]  # the terminal is put back, and there is no thread to wait for
+    assert reader._thread is None  # noqa: SLF001
 
 
 def test_there_are_no_keys_when_the_input_is_not_a_terminal(

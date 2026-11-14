@@ -26,8 +26,10 @@ def renderer(out: io.StringIO) -> FullRenderer:
     return FullRenderer(THEMES["escuro"], CAPS, out=out, headless=True)
 
 
-async def leave_soon(screen: FullRenderer, after: float = 0.6) -> None:
-    await asyncio.sleep(after)
+async def leave_soon(screen: FullRenderer) -> None:
+    """Press the last key once the screen shows the report and waits for it."""
+    while not screen.keys_source.finished:
+        await asyncio.sleep(0.01)
     screen.keys_source.exit()
 
 
@@ -55,12 +57,13 @@ def test_a_run_is_shown_and_the_report_waits_for_a_key(tmp_path: Path) -> None:
 
 def test_ctrl_k_on_the_screen_stops_the_run_and_leaves_it_resumable(tmp_path: Path) -> None:
     world = MemoryWorld(tmp_path)
-    session, _ = make_session(world, Waiting())
+    began = asyncio.Event()
+    session, _ = make_session(world, Waiting(began=began))
     screen = renderer(io.StringIO())
 
     async def go() -> Ended:
         async def press() -> None:
-            await asyncio.sleep(0.8)
+            await began.wait()
             await screen.keys_source.run_action("stop")
 
         asyncio.get_running_loop().create_task(press())
@@ -76,14 +79,14 @@ def test_ctrl_k_on_the_screen_stops_the_run_and_leaves_it_resumable(tmp_path: Pa
 
 def test_a_second_press_while_saving_leaves_at_once(tmp_path: Path) -> None:
     world = MemoryWorld(tmp_path)
-    session, _ = make_session(world, Waiting(slow_exit=True))
+    began = asyncio.Event()
+    session, _ = make_session(world, Waiting(slow_exit=True, began=began))
     screen = renderer(io.StringIO())
 
     async def go() -> None:
         async def press() -> None:
-            await asyncio.sleep(0.8)
+            await began.wait()
             await screen.keys_source.run_action("stop")
-            await asyncio.sleep(0.1)
             await screen.keys_source.run_action("stop")
 
         asyncio.get_running_loop().create_task(press())

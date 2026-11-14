@@ -2,11 +2,12 @@
 order of the log, not the order in which they finished."""
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 
+from forja.core.events import Event
 from forja.core.states import ExecutionState, Level, TaskState
 from forja.orchestrator.config import RunConfig
 from forja.orchestrator.ports import AgentResult, AttemptContext
@@ -17,23 +18,38 @@ from tests.orchestrator.test_together import APART, Watched
 
 @dataclass
 class Slow(ScriptedAgent):
-    """The first task takes longer than the second, so the second finishes first."""
+    """The first task is held in its call until the second has joined the run."""
+
+    second_joined: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def watch(self, event: Event) -> None:
+        if (
+            event.type == "transition"
+            and event.level is Level.TASK
+            and event.target_id == "t2"
+            and event.to_state == "integrated"
+        ):
+            self.second_joined.set()
 
     async def call(self, ctx: AttemptContext, operation_id: str, sink: object) -> AgentResult:
-        await asyncio.sleep(0.3 if ctx.task.task_id == "t1" else 0.01)
+        if ctx.task.task_id == "t1":
+            await asyncio.wait_for(self.second_joined.wait(), timeout=30)
         return await super().call(ctx, operation_id, sink)  # type: ignore[arg-type]
 
 
 @dataclass
 class Cut(ScriptedAgent):
-    """The first task fails while the second still works: the run is cut with both open."""
+    """The first task fails while the second is in its call: the run is cut with both open."""
+
+    second_began: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def call(self, ctx: AttemptContext, operation_id: str, sink: object) -> AgentResult:
         if ctx.task.task_id == "t1":
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(self.second_began.wait(), timeout=30)
             raise RuntimeError("the service fell over")
-        await asyncio.sleep(30)
-        return await super().call(ctx, operation_id, sink)  # type: ignore[arg-type]
+        self.second_began.set()
+        await asyncio.sleep(3600)  # until the run is cut
+        raise AssertionError("unreachable")
 
 
 @pytest.fixture
@@ -65,7 +81,12 @@ def test_a_run_cut_with_two_tasks_in_progress_puts_both_back_on_the_resume(
 def test_the_summary_lists_the_tasks_in_the_order_of_the_log_not_of_their_end(
     world: MemoryWorld,
 ) -> None:
-    outcome, log = world.run(agent=Slow(), planner=ScriptedPlanner(APART), config=config(world))
+    agent, log = Slow(), world.open()
+    log.subscribe(agent.watch)
+
+    outcome, log = world.run(
+        agent=agent, planner=ScriptedPlanner(APART), config=config(world), log=log
+    )
 
     assert outcome.state is ExecutionState.DELIVERED
     integrations = [

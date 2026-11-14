@@ -50,7 +50,7 @@ def test_a_cli_plans_an_invocation_for_every_agent_role(
 @pytest.mark.parametrize("key", sorted(KNOWN_CLIS))
 @pytest.mark.parametrize("text", ["", "not json", "{", "[]", '{"type": 1}'])
 def test_a_cli_never_raises_on_a_line_it_does_not_understand(key: str, text: str) -> None:
-    KNOWN_CLIS[key]().parse_event(text)
+    assert KNOWN_CLIS[key]().parse_event(text) is None
 
 
 @pytest.mark.parametrize("name", list(KNOWN_CLIS))

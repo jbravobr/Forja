@@ -8,6 +8,7 @@ import pytest
 
 from forja.core.gitguard import GitCommandRefused, GuardedGit
 from forja.core.idempotency import (
+    Decision,
     reconcile_commit_stage,
     reconcile_create_attempt_worktree,
     reconcile_create_task_branch,
@@ -148,11 +149,20 @@ def test_every_reconciliation_of_the_idempotency_table_runs_through_the_guard(
     repo.sh("remote", "add", "origin", str(remote))
     repo.sh("push", "origin", "main")
 
-    async def all_of_them() -> None:
-        await reconcile_create_task_branch(guard, "forja/r/t1")
-        await reconcile_create_attempt_worktree(guard, worktree, head)
-        await reconcile_commit_stage(guard, "forja/r/t1", "s1")
-        await reconcile_integrate_task(guard, "forja/r/t1", "main")
-        await reconcile_remove_worktree(guard, worktree)
+    async def all_of_them() -> list[Decision]:
+        verdicts = [
+            await reconcile_create_task_branch(guard, "forja/r/t1"),
+            await reconcile_create_attempt_worktree(guard, worktree, head),
+            await reconcile_commit_stage(guard, "forja/r/t1", "s1"),
+            await reconcile_integrate_task(guard, "forja/r/t1", "main"),
+            await reconcile_remove_worktree(guard, worktree),
+        ]
+        return [verdict.decision for verdict in verdicts]
 
-    asyncio.run(all_of_them())
+    assert asyncio.run(all_of_them()) == [
+        Decision.ALREADY_DONE,  # the branch is there
+        Decision.ALREADY_DONE,  # the worktree is on the commit
+        Decision.REDO,  # no commit carries the stage
+        Decision.ALREADY_DONE,  # the branch is already in main
+        Decision.REDO,  # the worktree is still there
+    ]

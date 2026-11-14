@@ -186,7 +186,10 @@ def test_a_run_is_resumed_while_the_policy_is_the_one_it_was_confirmed_with(
 
     again = asyncio.run(_open(None, first.run_id, home))
 
-    close(again)
+    try:
+        assert again.resumed is True
+    finally:
+        close(again)
 
 
 def test_a_run_is_not_resumed_when_the_policy_changed(repo: Path, tmp_path: Path) -> None:
@@ -218,7 +221,12 @@ def test_a_run_whose_version_is_not_a_digest_is_resumed_whatever_the_policy(
         encoding="utf-8",
     )
 
-    close(asyncio.run(_open(None, first.run_id, home)))
+    again = asyncio.run(_open(None, first.run_id, home))
+
+    try:
+        assert again.resumed is True
+    finally:
+        close(again)
 
 
 def plan_intents(session: Session, repo: Path) -> str:

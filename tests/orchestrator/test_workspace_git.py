@@ -612,7 +612,10 @@ def test_the_run_worktree_is_removed_by_the_name_run(workspace: GitWorkspace, re
 
 
 def test_removing_a_worktree_that_is_already_gone_is_fine(workspace: GitWorkspace) -> None:
-    do(workspace.remove_worktree(ATTEMPT))
+    payload = do(workspace.remove_worktree(ATTEMPT))
+
+    assert payload == {"worktree": str(workspace.layout.attempt_worktree(ATTEMPT))}
+    assert not workspace.layout.attempt_worktree(ATTEMPT).exists()
 
 
 def test_a_worktree_still_there_is_redone(workspace: GitWorkspace, repo: Repo) -> None:

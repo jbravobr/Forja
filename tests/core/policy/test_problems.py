@@ -378,7 +378,10 @@ def test_the_voice_checks_cannot_be_made_blocking(check: str) -> None:
 def test_the_voice_checks_can_still_be_set_to_observation() -> None:
     layer = parse_layer("layer 0", '[checks.voice]\nmode = "observation"\n[checks.comments]')
 
-    build_policy(_with_voice(), [layer])
+    built = build_policy(_with_voice(), [layer])
+
+    assert built.checks["voice"].settings.mode is Mode.OBSERVATION
+    assert built.checks["comments"].settings.mode is Mode.OBSERVATION
 
 
 def test_other_checks_are_still_promotable_to_blocking() -> None:
@@ -387,4 +390,6 @@ def test_other_checks_are_still_promotable_to_blocking() -> None:
         'promotion = { date = 2026-10-10, reason = "r" }'
     )
 
-    build_policy(_with_voice(), [parse_layer("layer 0", toml)])
+    built = build_policy(_with_voice(), [parse_layer("layer 0", toml)])
+
+    assert built.checks["complexity"].settings.mode is Mode.BLOCKING

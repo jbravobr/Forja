@@ -36,7 +36,11 @@ def test_an_output_that_cannot_be_reconfigured_is_left_alone(
         def write(self, text: str) -> int:
             return len(text)
 
-    monkeypatch.setattr(sys, "stdout", Plain())
-    monkeypatch.setattr(sys, "stderr", Plain())
+    out, err = Plain(), Plain()
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
 
     lenient_output()
+
+    assert sys.stdout is out
+    assert sys.stderr is err

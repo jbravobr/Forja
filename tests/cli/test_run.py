@@ -2,7 +2,7 @@
 
 import asyncio
 import dataclasses
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -50,14 +50,15 @@ class Recorder:
 
 
 class Scripted:
-    """Keys given at chosen moments, the way a person would press them."""
+    """Keys pressed one after the other, from the moment ``ready`` says the run is under way."""
 
-    def __init__(self, *presses: tuple[float, str]) -> None:
+    def __init__(self, *presses: str, ready: Callable[[], Awaitable[object]]) -> None:
         self._presses = presses
+        self._ready = ready
 
     async def keys(self) -> AsyncIterator[str]:
-        for delay, key in self._presses:
-            await asyncio.sleep(delay)
+        await self._ready()
+        for key in self._presses:
             yield key
         await asyncio.sleep(3600)
 
@@ -116,11 +117,20 @@ def test_a_run_that_ends_is_shown_from_start_to_stop_and_reports_the_delivery(
 
 
 def run_with_keys(
-    tmp_path: Path, keys: Scripted, *, slow_exit: bool = False
+    tmp_path: Path, *presses: str, slow_exit: bool = False, refreshes: int = 0
 ) -> tuple[Ended, FakeSession, Any, Recorder]:
+    """The keys are pressed once the agent is in its call and the screen was refreshed enough."""
     world = MemoryWorld(tmp_path)
-    session, log = make_session(world, Waiting(slow_exit=slow_exit))
+    began = asyncio.Event()
+    session, log = make_session(world, Waiting(slow_exit=slow_exit, began=began))
     screen = Recorder()
+
+    async def ready() -> None:
+        await began.wait()
+        while len(screen.updates) < refreshes:
+            await asyncio.sleep(0)
+
+    keys = Scripted(*presses, ready=ready)
     ended = asyncio.run(execute(cast(Session, session), screen, keys, refresh=0.01))
     return ended, session, log, screen
 
@@ -129,7 +139,7 @@ def run_with_keys(
 def test_one_press_stops_the_run_and_leaves_it_paused_and_resumable(
     tmp_path: Path, key: str
 ) -> None:
-    ended, session, log, screen = run_with_keys(tmp_path, Scripted((0.2, key)))
+    ended, session, log, screen = run_with_keys(tmp_path, key)
 
     assert ended == Ended(None, True)
     assert log.state.state_of(Level.EXECUTION, RUN) is ExecutionState.PAUSED
@@ -141,7 +151,7 @@ def test_one_press_stops_the_run_and_leaves_it_paused_and_resumable(
 
 def test_a_second_press_while_it_is_still_saving_leaves_at_once(tmp_path: Path) -> None:
     with pytest.raises(ForcedExit):
-        run_with_keys(tmp_path, Scripted((0.2, "ctrl+k"), (0.1, "ctrl+k")), slow_exit=True)
+        run_with_keys(tmp_path, "ctrl+k", "ctrl+k", slow_exit=True)
 
 
 def test_a_signal_that_cancels_the_process_is_the_same_as_the_key(tmp_path: Path) -> None:
@@ -164,11 +174,12 @@ def test_a_signal_that_cancels_the_process_is_the_same_as_the_key(tmp_path: Path
 
 def test_the_key_t_changes_the_theme_and_other_keys_do_nothing(tmp_path: Path) -> None:
     world = MemoryWorld(tmp_path)
-    session, _ = make_session(world, Waiting())
+    began = asyncio.Event()
+    session, _ = make_session(world, Waiting(began=began))
     screen = Recorder()
 
     async def scenario() -> None:
-        keys = Scripted((0.1, "t"), (0.1, "x"), (0.1, "t"), (0.1, "ctrl+k"))
+        keys = Scripted("t", "x", "t", "ctrl+k", ready=began.wait)
         await execute(cast(Session, session), screen, keys, refresh=0.01)
 
     asyncio.run(scenario())
@@ -177,7 +188,7 @@ def test_the_key_t_changes_the_theme_and_other_keys_do_nothing(tmp_path: Path) -
 
 
 def test_the_screen_is_refreshed_while_the_run_goes_on(tmp_path: Path) -> None:
-    ended, _, _, screen = run_with_keys(tmp_path, Scripted((0.3, "ctrl+k")))
+    ended, _, _, screen = run_with_keys(tmp_path, "ctrl+k", refreshes=3)
 
     assert ended.interrupted
     assert len(screen.updates) >= 3
@@ -343,17 +354,17 @@ class Swallowing(ScriptedAgent):
 
 def test_a_press_counts_as_a_stop_even_when_the_run_still_ends_on_its_own(tmp_path: Path) -> None:
     world = MemoryWorld(tmp_path)
-    session, _ = make_session(world, Swallowing())
+    began = asyncio.Event()
+    session, _ = make_session(world, Swallowing(began=began))
+    keys = Scripted("q", ready=began.wait)
 
-    ended = asyncio.run(
-        execute(cast(Session, session), Recorder(), Scripted((0.2, "q")), refresh=0.01)
-    )
+    ended = asyncio.run(execute(cast(Session, session), Recorder(), keys, refresh=0.01))
 
     assert ended == Ended(None, True)
 
 
 def test_a_second_press_after_the_run_is_over_does_not_force_the_exit() -> None:
-    async def scenario() -> None:
+    async def scenario() -> Any:
         async def done() -> Any:
             return "outcome"
 
@@ -362,5 +373,6 @@ def test_a_second_press_after_the_run_is_over_does_not_force_the_exit() -> None:
         forced = asyncio.Event()
         forced.set()
         await _wait(run, forced)
+        return run.result()
 
-    asyncio.run(scenario())
+    assert asyncio.run(scenario()) == "outcome"

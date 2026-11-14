@@ -2,7 +2,6 @@
 ``tests/fixtures/reports``: coverage.py's is a real recording; the others are written by hand
 from the tools' documented formats and must be re-recorded when their toolchains come in."""
 
-import contextlib
 import random
 from pathlib import Path
 
@@ -120,10 +119,15 @@ def test_no_reader_fails_with_anything_but_a_report_error(tmp_path: Path) -> Non
         for _ in range(30):
             cut = rng.randrange(len(seed))
             samples.append(seed[:cut] + seed[cut + rng.randrange(1, 9) :])
+    refused = 0
     for sample in samples:
         for report_format in COVERAGE_FORMATS:
-            with contextlib.suppress(ReportError):
+            try:
                 read_coverage(report_format, sample, tmp_path)
+            except ReportError:
+                refused += 1
+
+    assert refused >= len(samples)  # no sample is a report in every format
 
 
 # -- paths ---------------------------------------------------------------------------------------

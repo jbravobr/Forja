@@ -146,10 +146,14 @@ async def _hold_briefly(shared: GitMutex) -> None:
 
 def test_one_mutex_object_can_be_used_from_successive_event_loops(tmp_path: Path) -> None:
     shared = mutex(tmp_path)
+    held: list[bool] = []
 
     async def use() -> None:
         async with shared.hold(timeout=5):
-            await asyncio.sleep(0)
+            held.append((tmp_path / "git.mutex").is_dir())
 
     asyncio.run(use())
     asyncio.run(use())
+
+    assert held == [True, True]
+    assert not (tmp_path / "git.mutex").exists()
