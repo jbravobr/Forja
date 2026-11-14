@@ -868,3 +868,44 @@ Sessão nova, a partir de `ff39846`. O dono decidiu tudo o que estava aberto e p
 - **Mutações antigas que nunca rodaram:** `core/adapters/common.py`, os `parsers.py` de C# e Java, `cli/session.py`, `cli/detect.py`, `testing/workspace.py`, `testing/repo.py`, e `checks/mutation.py` e `languages/java/adapter.py` depois de `17d06c6`.
 - **Fora dos 40:** o teste de painéis em Python 3.13; pular teste em TypeScript, Java, C# e Python não é procurado pelo gate de escopo; os históricos da versão 1 em `%LOCALAPPDATA%\forja-verif`; as dez pastas `forja-captura-*` no `%TEMP%`.
 - **Item 30:** adiado.
+
+## 14/11/2026 — o pull request 1: a prova de vida da CLI do Cursor 2026.11
+
+Fora da avaliação: o dono pediu para avaliar o que estava aberto no GitHub. Não havia issue. Havia um pull request, o 1, de André Amorim, aberto contra `main` (`699d936`), com três commits.
+
+### O que o pull request diz e o que foi conferido
+
+| Parte | O que diz | Conferência |
+| --- | --- | --- |
+| 1 | Arquivo de permissão numa subpasta de `.forja-agent` derruba a prova de vida com `FileNotFoundError` (Cursor, `cursor/cli-config.json`; Grok, `grok/config.toml`). | Confirmado em `correcoes-p0`: `executors/probe.py` e `orchestrator/agent_runner.py` criavam só `.forja-agent`. Com os dois arquivos de `561809e`, os testes novos falham com esse erro, nas duas CLIs. O defeito não era só da prova: a cópia de trabalho de uma execução real falhava do mesmo jeito. |
+| 2 | O Cursor lia "here" como a pasta do pacote e gravava `probe.txt` dentro de `.forja-agent`. O pedido passa a dizer "in the working directory root (not inside .forja-agent)". | Não conferido: não há CLI do Cursor nesta máquina. O texto novo é mais preciso para as cinco CLIs e nenhum teste dependia do antigo. |
+| 3 | O Cursor 2026.11.10 informa a escrita como `editToolCall` com `streamContent`, não mais `writeToolCall` com `fileText`. O leitor aceita os dois. | Não conferido contra a CLI nem contra a documentação: o formato vem da saída que o autor colou no pull request. A forma antiga continua lida, com o teste que já existia. |
+
+### Crítica
+
+- **O teste do pull request não servia aqui.** `test_probe_setup_files.py` usava um script `#!/bin/sh` como CLI falsa, que não roda no Windows, e afirmava só `isinstance(problems, list)`. É o tipo de teste que o item 32 tirou.
+- **A correção em `agent_runner.py` veio sem teste.** Só a prova de vida era exercitada.
+- **O texto do pedido continua repetido em seis lugares** (`GENERIC_PROBE` e os cinco adaptadores), com `.forja-agent` escrito à mão em vez de `AGENT_DIR`. Já era repetido antes; o pull request não piorou. Não mexi.
+- **A contagem de linhas do `editToolCall` é aproximada.** `streamContent` é contado inteiro como linhas adicionadas, zero removidas, também quando o arquivo já existia. O `writeToolCall` já fazia o mesmo.
+- **Os quatro testes que o autor viu falhar no Linux em `main`** (`test_snapshot.py`, `test_repository.py`, `test_adapter.py` de Python, `test_e2e.py`) não foram investigados. A Forja só foi rodada no Windows.
+
+### O que foi feito
+
+| Mudança | Arquivos | Commit |
+| --- | --- | --- |
+| O pull request entrou em `correcoes-p0` por merge, sem conflito, com os três commits do autor como estão. Quando a branch chegar a `main`, o GitHub dá o pull request por incorporado. | os 10 arquivos do pull request | `288da06` |
+| O teste da prova de vida roda em qualquer sistema: o adaptador real, com o programa trocado por um Python que não faz nada. Afirma que cada arquivo declarado está em `.forja-agent` com o conteúdo declarado na hora da chamada, e que a prova chegou a procurar o `probe.txt`. | `tests/executors/test_probe_setup_files.py` | `78bdf66` |
+| Teste novo para a cópia de trabalho: com o adaptador do Cursor e o do Grok, o arquivo de permissão em subpasta é gravado na cópia. | `tests/executors/test_agent_runner.py` | `78bdf66` |
+
+### Verificação
+
+- Os 4 casos novos de Cursor e Grok falham com `FileNotFoundError` sem as duas linhas de `mkdir` e passam com elas.
+- `ruff check .`, `ruff format --check src tests` e `mypy` strict: limpos, 630 arquivos.
+- `pytest -m "not slow" -n 6`: 9861 aprovados, 41 pulados, nenhuma falha, 325 s.
+- Não rodou: os testes `slow`, a mutação (`src` mudou em 8 arquivos) e a prova de vida com a CLI real do Cursor ou do Grok.
+
+### Pendências
+
+- Mutação sobre o que o pull request mudou em `src`, junto com a próxima leva que mexe em `src`.
+- Prova de vida com o Cursor 2026.11 de verdade, para conferir as partes 2 e 3.
+- O pull request 1 segue aberto no GitHub; nada foi comentado nem enviado ao remoto.
