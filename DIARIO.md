@@ -599,3 +599,90 @@ Pedida pelo dono em 13/11, depois de conferir o disco.
 - **Já não existia:** as cópias de worker de 15 GB no `%TEMP%`; o `contexts.json` do checkout de verificação, apagado pelo script novo; processos de mutação pendurados.
 - **Mantido:** `.coverage` e `lcov.info` (usados por `--reuse-coverage`); `.metrics/mutate/` do checkout de verificação (o histórico do modo diferencial); o checkout `%LOCALAPPDATA%\forja-verif`.
 - **Não tocado, a conferir:** dez pastas `forja-captura-*` no `%TEMP%`. Pelo nome vêm de `scripts/capturas/terminal.py`; o conteúdo não foi conferido.
+
+## 13/11/2026 — sugestão de implementação para os três pontos de atenção
+
+Pedido do dono: a melhor implementação para cada ponto, se fizer sentido. Nada foi implementado; esta entrada só propõe. Base: `scripts/mutate.py` e o histórico do git, lidos nesta sessão. O `unclebob/mutator` não foi relido; o que se diz dele aqui vem das duas entradas anteriores.
+
+### Resumo
+
+| Ponto | Faz sentido implementar? | Sugestão |
+| --- | --- | --- |
+| 1. O modo diferencial não vê os testes | Sim | Guardar, por mutante morto, o hash dos arquivos de teste que o julgaram; aproveitar o veredito só se esse hash for o mesmo. |
+| 2. Histórico em JSON, não em EDN | Não agora | Manter o JSON. Decidir junto com a adoção do `crapper`. |
+| 3. Mensagem errada em `621524b` | Sim | Reescrever a mensagem agora, antes do primeiro envio, e corrigir no diário os hashes que mudam. |
+
+### Ponto 1: o veredito aproveitado passa a depender dos testes que o deram
+
+**A sugestão é por mutante, não por função.** A entrada anterior propunha um hash, por função, dos arquivos de teste que executam as linhas dela. Lendo `judge_file`, isso deixa um furo: o mutante que sobrevive à rodada estreita é julgado de novo por todos os testes do arquivo-fonte, e pode ser morto por um teste que a cobertura não liga a nenhuma linha da função. Esse teste ficaria fora do hash da função. O conjunto certo é o que de fato julgou cada mutante.
+
+**O que guardar.** Para cada mutante dado como morto, o hash do conjunto de arquivos de teste que o julgou:
+
+- morto na rodada estreita: os arquivos de `tests_of_line` para a linha dele;
+- morto na reconferência: todos os testes do arquivo-fonte (`tests`).
+
+Entram no hash, além do nome e do conteúdo de cada arquivo do conjunto:
+
+- todo `conftest.py` sob `tests/`. Não só os das pastas de cima: `tests/core/locking/conftest.py` importa um fixture de `tests/core/idempotency/conftest.py`, como a entrada do item 41 registrou;
+- a lista de `deselected()`, porque um teste retirado da rodada vale por um teste apagado.
+
+Arquivo de teste que não existe mais entra como ausente, e o hash muda.
+
+**A regra.** `carried` ganha uma quarta condição: o hash guardado para o mutante é igual ao de agora. As três de hoje ficam (linha coberta, morto na última rodada, texto da função igual).
+
+**Mudanças em `scripts/mutate.py`.**
+
+- `judge_file` devolve também os índices dos mutantes reconferidos. Hoje devolve só a contagem.
+- Função nova que dá o hash de um conjunto de arquivos de teste, com o hash de cada arquivo calculado uma vez por rodada.
+- `write_history` grava `"judges": {id do mutante: hash}` e `"version": 2`. Mutante aproveitado leva adiante o hash que tinha.
+- `load_history` lê `judges`. Histórico da versão 1 não tem `judges`: nenhum mutante é aproveitado, e a primeira rodada depois da mudança roda todos, uma vez.
+- O texto de ajuda e o guia `gates/mutacao.md` deixam de dizer que `--mutate-all` é obrigatório depois de mexer num teste.
+
+**Testes a escrever,** em `tests/mutation/test_mutate_script.py`: teste enfraquecido faz o mutante rodar de novo; arquivo de teste apagado, também; `conftest.py` alterado, também; nada mudou, o mutante é aproveitado; histórico da versão 1 não aproveita nenhum; mutante morto na reconferência guarda o conjunto inteiro, e uma mudança num teste fora da rodada estreita o faz rodar.
+
+**Custo.** O SHA-256 dos arquivos de teste, uma vez por rodada. Editar um arquivo de teste faz rodar de novo os mutantes que ele julgou; mutante morto para no primeiro teste que falha (`-x`), então a rodada a mais é curta.
+
+**Por que a divergência do mutator é aceitável.** Ela só acrescenta rodadas. Todo mutante que o mutator rodaria continua rodando; alguns que ele aproveitaria passam a rodar. Nenhum veredito fica mais frouxo que o da referência. Mesmo assim é divergência, e a regra 1 pede a ordem do dono.
+
+**O que continua sem ser visto.**
+
+- Código de apoio dos testes fora de `tests/`, como `src/forja/testing`.
+- Arquivos de dados que um teste lê.
+- Mudança em outra função de que o teste dependia para matar o mutante. É o limite do próprio mutator, que só olha o texto da função dona do sítio.
+
+Por esses três, `--mutate-all` antes de cada release continua valendo.
+
+### Ponto 2: manter o JSON
+
+**Não faz sentido trocar agora.** Três motivos:
+
+- O único leitor do EDN é o `uml-viewer`, que ninguém pediu (regra 3).
+- O EDN do mutator é por namespace e identifica cada forma por `defn/nome` ou `defn-/nome`, que vêm do `crapper`. A Forja não tem o `crapper`. Escrever EDN hoje seria inventar esses nomes para Python, e um `uml-viewer` leria um arquivo que parece o do mutator e não é.
+- O histórico é local e refeito por uma rodada com `--mutate-all`. Trocar o formato depois não perde nada.
+
+**Sugestão.** Nenhuma mudança de código. O ponto fica ligado à decisão sobre o CRAP pelo `crapper`: se o `crapper` for adotado, a Forja passa a ter os nomes de forma da referência, e aí o histórico pode ser escrito no EDN do mutator, lendo o esquema inteiro antes (regra 2). Se o `crapper` não for adotado, o JSON fica e a divergência vai registrada no guia `gates/mutacao.md`.
+
+**Efeito do ponto 1 sobre este.** O campo `judges` não existe no histórico do mutator. Num EDN futuro ele seria uma chave a mais, que um leitor do formato original ignora ou não; a conferir quando o esquema for lido.
+
+### Ponto 3: reescrever a mensagem de `621524b`
+
+**Conferido nesta sessão.** `origin/main` está em `699d936` e a branch `correcoes-p0` não existe no remoto: nada do que seria reescrito foi enviado. `621524b` altera só duas linhas de título de `DIARIO.md`.
+
+**Reescrever, não juntar.** Juntar `621524b` a `b50146e` daria um commit com duas coisas, contra o costume da branch de um commit por coisa.
+
+**Passos,** com a árvore limpa:
+
+1. `git checkout --detach 621524b`
+2. `git commit --amend -m "docs: the two logbook entries dated 14/11 are dated 13/11, the day of their commits"`, com o rodapé de coautoria que o commit já tem.
+3. `git rebase --onto HEAD 621524b correcoes-p0`
+4. Conferir: `git diff e6f1229 correcoes-p0` não mostra nada além dos commits feitos depois de `e6f1229`, e nenhuma mensagem aparece duas vezes em `git log --format=%s main..correcoes-p0`.
+5. Um commit novo do diário, que troca pelos hashes novos as citações de `621524b` e `b50146e` (na entrada do resto do realinhamento e no ponto 3 da lista) e marca o ponto como tratado.
+
+**O que muda.** Os hashes de `621524b` e de todos os commits depois dele. Os commits anteriores, até `a74d680`, ficam como estão, e são eles que o resto do diário cita. O checkout `%LOCALAPPDATA%\forja-verif` e o histórico em `.metrics/mutate` não são afetados.
+
+**Quando.** Antes de qualquer envio, e de preferência já: cada entrada nova do diário que citar um desses hashes aumenta o passo 5.
+
+### Pendências
+
+- **Ordens do dono que esta entrada espera:** ponto 1, aceitar a divergência do mutator e implementar; ponto 2, confirmar que o JSON fica até a decisão do `crapper`; ponto 3, autorizar a reescrita.
+- As demais pendências da entrada anterior continuam.
