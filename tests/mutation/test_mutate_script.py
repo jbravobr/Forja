@@ -3,6 +3,7 @@ every test of the file would give."""
 
 import asyncio
 import importlib.util
+import json
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -289,7 +290,7 @@ def test_a_mutant_the_tests_of_its_line_kill_is_killed_and_judged_once(
     )
 
     assert [m.status for m in report.mutants] == [MutantStatus.KILLED, MutantStatus.KILLED]
-    assert twice == 0
+    assert twice == []
     assert calls == [[(1, ("tests/a.py",)), (2, ("tests/a.py",))]]
 
 
@@ -307,7 +308,7 @@ def test_a_mutant_that_survives_the_tests_of_its_line_is_judged_again_by_every_t
     report, twice, calls = judged(mutate, monkeypatch, mutants, verdicts)
 
     assert [m.status for m in report.mutants] == [MutantStatus.KILLED, MutantStatus.KILLED]
-    assert twice == 1
+    assert twice == [1]
     assert calls == [
         [(1, ("tests/a.py",)), (2, ("tests/a.py",))],
         [(2, ("tests/a.py", "tests/b.py"))],
@@ -325,7 +326,7 @@ def test_a_mutant_no_test_at_all_notices_survives_after_both_runs(
     report, twice, calls = judged(mutate, monkeypatch, mutants, verdicts)
 
     assert [m.status for m in report.mutants] == [MutantStatus.KILLED, MutantStatus.SURVIVED]
-    assert (twice, len(calls)) == (1, 2)
+    assert (twice, len(calls)) == ([1], 2)
 
 
 def test_a_survivor_already_judged_by_every_test_is_not_judged_again(
@@ -338,7 +339,7 @@ def test_a_survivor_already_judged_by_every_test_is_not_judged_again(
     )
 
     assert [m.status for m in report.mutants] == [MutantStatus.SURVIVED, MutantStatus.SURVIVED]
-    assert (twice, len(calls)) == (0, 1)
+    assert (twice, len(calls)) == ([], 1)
     assert calls[0] == [(3, ("tests/a.py", "tests/b.py")), (8, ("tests/a.py", "tests/b.py"))]
 
 
@@ -353,7 +354,20 @@ def test_a_mutant_on_a_line_no_test_runs_is_not_given_tests_and_keeps_its_place(
         (1, MutantStatus.UNCOVERED),
         (2, MutantStatus.KILLED),
     ]
-    assert twice == 0
+    assert twice == []
+
+
+def test_a_mutant_judged_twice_was_judged_by_every_test_and_the_others_by_those_of_their_line(
+    mutate: Any,
+) -> None:
+    mutants = [mutant(1, b"one"), mutant(3, b"three"), mutant(2, b"two"), mutant(8, b"eight")]
+    by_line = {"src/m.py": {1: {"tests/a.py"}, 2: {"tests/a.py"}, 3: {"tests/b.py"}}}
+
+    once = mutate.judges_of("src/m.py", mutants, TESTS, by_line, [])
+    with_one_twice = mutate.judges_of("src/m.py", mutants, TESTS, by_line, [2])
+
+    assert once == [["tests/a.py"], ["tests/b.py"], ["tests/a.py"], TESTS]  # line 8: no test named
+    assert with_one_twice == [["tests/a.py"], ["tests/b.py"], TESTS, TESTS]
 
 
 # -- the real thing, on a project of two files -----------------------------------------------------
@@ -389,7 +403,7 @@ def test_the_narrow_run_and_the_whole_run_agree_on_a_real_project(
     assert [m.status for m in report.mutants] == [m.status for m in whole.mutants]
     by_status = {m.line: m.status for m in report.mutants}
     assert by_status == {2: MutantStatus.KILLED, 6: MutantStatus.SURVIVED}
-    assert twice == sum(1 for m in mutants if m.line == 6)
+    assert twice == [place for place, m in enumerate(mutants) if m.line == 6]
 
 
 # -- the differential run: what the last one killed in a function left alone is not run again ------
@@ -451,9 +465,12 @@ def test_only_a_mutant_killed_before_in_a_function_left_as_it_was_is_not_run_aga
     mutants = calc_mutants(mutate, tmp_path, frozenset({2, 6}))
     ids, digests = mutate.mutation_ids(CALC, "calc.py"), mutate.form_digests(CALC, "calc.py")
     killed = dict.fromkeys(ids, "killed")
+    judges = dict.fromkeys(ids, ("tests/t.py",))
+    tests = {"tests/t.py": "as it was"}
 
     def kept(forms: dict[str, str], outcomes: dict[str, str], some: list[Mutant]) -> set[int]:
-        found: set[int] = mutate.carried(some, ids, digests, mutate.History(forms, outcomes))
+        history = mutate.History(forms, outcomes, judges, tests)
+        found: set[int] = mutate.carried(some, ids, digests, history, tests)
         return found
 
     assert kept(digests, killed, mutants) == {0, 1}
@@ -465,6 +482,82 @@ def test_only_a_mutant_killed_before_in_a_function_left_as_it_was_is_not_run_aga
     assert kept(digests, {}, mutants) == set()
     # a line no test runs any more: the old verdict says nothing about it
     assert kept(digests, killed, calc_mutants(mutate, tmp_path, frozenset({6}))) == {1}
+
+
+def test_a_mutant_whose_tests_are_not_what_they_were_is_run_again(
+    mutate: Any, tmp_path: Path
+) -> None:
+    mutants = calc_mutants(mutate, tmp_path, frozenset({2, 6}))
+    ids, digests = mutate.mutation_ids(CALC, "calc.py"), mutate.form_digests(CALC, "calc.py")
+    killed = dict.fromkeys(ids, "killed")
+    then = {"tests/a.py": "a", "tests/b.py": "b"}
+    only_a = {"tests/a.py": "a"}
+
+    def kept(
+        judges: dict[str, tuple[str, ...]], before: dict[str, str], now: dict[str, str]
+    ) -> set[int]:
+        history = mutate.History(digests, killed, judges, before)
+        found: set[int] = mutate.carried(mutants, ids, digests, history, now)
+        return found
+
+    both = {ids[0]: ("tests/a.py",), ids[1]: ("tests/a.py", "tests/b.py")}
+    assert kept(both, then, then) == {0, 1}
+    assert kept(both, then, {**then, "tests/b.py": "weaker"}) == {0}
+    assert kept(both, then, {**then, "tests/a.py": "weaker"}) == set()
+    assert kept(both, then, only_a) == {0}  # b has no hash now
+    assert kept(both, only_a, then) == {0}  # the hash b had was never left
+    assert kept(both, only_a, only_a) == {0}  # no hash then and none now is not the same hash
+    assert kept({ids[0]: ("tests/a.py",)}, then, then) == {0}  # what killed the other was not left
+    assert kept({ids[0]: (), ids[1]: ("tests/b.py",)}, then, then) == {1}
+    assert kept({}, then, then) == set()  # what a run from before the tests were kept left
+
+
+def test_the_hash_of_a_test_file_follows_its_content_every_conftest_and_the_tests_left_out(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    left_out: list[str] = []
+    monkeypatch.setattr(mutate, "ROOT", tmp_path)
+    monkeypatch.setattr(mutate, "deselected", lambda: left_out)
+    (tmp_path / "tests" / "deep").mkdir(parents=True)
+    (tmp_path / "tests" / "other").mkdir()
+    one, other = "tests/test_one.py", "tests/deep/test_other.py"
+    tight = "def test_one():\n    assert 1 + 1 == 2\n"
+    (tmp_path / one).write_text(tight, encoding="utf-8")
+    (tmp_path / other).write_text("def test_other():\n    assert True\n", encoding="utf-8")
+
+    before = mutate.test_digests([one, other, one])
+    assert list(before) == [other, one]
+    assert before[one] != before[other]
+    assert mutate.test_digests(iter([one, other])) == before
+
+    (tmp_path / one).write_text("def test_one():\n    1 + 1\n", encoding="utf-8")
+    weaker = mutate.test_digests([one, other])
+    assert weaker[one] != before[one]
+    assert weaker[other] == before[other]
+
+    (tmp_path / one).write_text("", encoding="utf-8")
+    empty = mutate.test_digests([one])[one]
+    (tmp_path / one).unlink()
+    gone = mutate.test_digests([one, other])
+    assert gone[one] not in (before[one], weaker[one], empty)
+    assert gone[other] == before[other]
+    (tmp_path / one).write_text(tight, encoding="utf-8")
+    assert mutate.test_digests([one, other]) == before
+
+    # a fixture file in a folder that is above neither of them
+    conftest = tmp_path / "tests" / "other" / "conftest.py"
+    conftest.write_text("", encoding="utf-8")
+    with_fixtures = mutate.test_digests([one, other])
+    assert with_fixtures[one] != before[one]
+    assert with_fixtures[other] != before[other]
+    conftest.write_text("import pytest\n", encoding="utf-8")
+    other_fixtures = mutate.test_digests([one, other])
+    assert other_fixtures[one] != with_fixtures[one]
+    conftest.unlink()
+    assert mutate.test_digests([one, other]) == before
+
+    left_out.extend(["--deselect", "tests/test_one.py::test_one"])
+    assert mutate.test_digests([one, other])[other] != before[other]
 
 
 def result(mutant: Mutant, status: MutantStatus) -> MutantResult:
@@ -504,16 +597,25 @@ def test_what_a_run_leaves_is_what_the_next_one_reads(
         MutantStatus.UNCOVERED,
     )
     report = MutationReport(tuple(map(result, mutants, statuses)))
-    assert mutate.load_history("src/calc.py") == mutate.History({}, {})
+    judged_by = [["tests/b.py", "tests/a.py"], ["tests/a.py"], ["tests/c.py"], ["tests/d.py"]]
+    hashes = {f"tests/{letter}.py": letter.upper() for letter in "abcde"}
+    assert mutate.load_history("src/calc.py") == mutate.NO_HISTORY
 
-    path = mutate.write_history("src/calc.py", {"add": "x", "sub": "y"}, ids, report)
+    path = mutate.write_history(
+        "src/calc.py", {"add": "x", "sub": "y"}, ids, report, judged_by, hashes
+    )
 
     assert path == tmp_path / ".metrics" / "mutate" / "src" / "calc.py.json"
     assert path.read_text(encoding="utf-8").endswith("}\n")
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
+    # only of a killed mutant are the tests left, and only the hashes of those tests
     assert mutate.load_history("src/calc.py") == mutate.History(
-        {"add": "x", "sub": "y"}, {"one": "killed", "two": "survived", "three": "killed"}
+        {"add": "x", "sub": "y"},
+        {"one": "killed", "two": "survived", "three": "killed"},
+        {"one": ("tests/a.py", "tests/b.py"), "three": ("tests/c.py",)},
+        {"tests/a.py": "A", "tests/b.py": "B", "tests/c.py": "C"},
     )
-    assert mutate.load_history("src/other.py") == mutate.History({}, {})
+    assert mutate.load_history("src/other.py") == mutate.NO_HISTORY
 
 
 @pytest.mark.parametrize(
@@ -534,7 +636,8 @@ def test_a_history_that_cannot_be_read_is_no_history(
     monkeypatch.setattr(mutate, "SNAPSHOTS", tmp_path)
     (tmp_path / "calc.py.json").write_text(written, encoding="utf-8")
 
-    assert mutate.load_history("calc.py") == mutate.History({}, {})
+    assert mutate.load_history("calc.py") == mutate.NO_HISTORY
+    assert tuple(mutate.NO_HISTORY) == ({}, {}, {}, {})
 
 
 def test_a_history_keeps_only_the_hashes_and_verdicts_it_understands(
@@ -543,13 +646,33 @@ def test_a_history_keeps_only_the_hashes_and_verdicts_it_understands(
     monkeypatch.setattr(mutate, "SNAPSHOTS", tmp_path)
     (tmp_path / "calc.py.json").write_text(
         '{"forms": {"add": "x", "sub": 3}, "outcomes": {"a": "killed", "b": "uncovered", "c": 1,'
-        ' "d": "survived"}}',
+        ' "d": "survived"}, "judges": {"a": ["tests/t.py", "tests/u.py"], "b": "tests/t.py",'
+        ' "c": ["tests/t.py", 3], "d": []}, "tests": {"tests/t.py": "h", "tests/u.py": 7}}',
         encoding="utf-8",
     )
 
     assert mutate.load_history("calc.py") == mutate.History(
-        {"add": "x"}, {"a": "killed", "d": "survived"}
+        {"add": "x"},
+        {"a": "killed", "d": "survived"},
+        {"a": ("tests/t.py", "tests/u.py"), "d": ()},
+        {"tests/t.py": "h"},
     )
+
+
+@pytest.mark.parametrize(
+    "tests_part",
+    ["", ', "judges": [], "tests": "x"', ', "judges": null, "tests": ["tests/t.py"]'],
+)
+def test_a_history_without_tests_it_can_read_keeps_its_verdicts_and_no_tests(
+    mutate: Any, monkeypatch: Any, tmp_path: Path, tests_part: str
+) -> None:
+    monkeypatch.setattr(mutate, "SNAPSHOTS", tmp_path)
+    (tmp_path / "calc.py.json").write_text(
+        '{"version": 1, "forms": {"add": "x"}, "outcomes": {"a": "killed"}' + tests_part + "}",
+        encoding="utf-8",
+    )
+
+    assert mutate.load_history("calc.py") == mutate.History({"add": "x"}, {"a": "killed"}, {}, {})
 
 
 def test_every_mutant_or_only_those_since_the_last_run_and_not_both(mutate: Any) -> None:
@@ -562,23 +685,35 @@ def test_every_mutant_or_only_those_since_the_last_run_and_not_both(mutate: Any)
 
 
 def run_main(
-    mutate: Any, monkeypatch: Any, root: Path, verdict: MutantStatus, *options: str
+    mutate: Any,
+    monkeypatch: Any,
+    root: Path,
+    verdict: MutantStatus,
+    *options: str,
+    tests: tuple[str, ...] = ("tests/t.py",),
+    lines: dict[int, set[str]] | None = None,
+    twice: str = "",
 ) -> tuple[int, list[str]]:
     """``main`` over ``src/calc.py`` of ``root`` with every mutant given ``verdict``: the exit
-    code, and the functions of the mutants that were handed to the tests."""
+    code, and the functions of the mutants that were handed to the tests. ``tests`` are the test
+    files that run the source file, ``lines`` those that run each line, and the mutants of the
+    function ``twice`` are said to have been judged a second time."""
     handed: list[str] = []
 
     def judge_file(
         file: str, mutants: list[Mutant], tests: list[str], by_line: Any, workers: int
-    ) -> tuple[MutationReport, int]:
+    ) -> tuple[MutationReport, list[int]]:
         handed.extend(str(m.function) for m in mutants)
-        return MutationReport(tuple(result(m, verdict) for m in mutants)), 0
+        again = [place for place, m in enumerate(mutants) if m.function == twice]
+        return MutationReport(tuple(result(m, verdict) for m in mutants)), again
 
+    coverage = ({"src/calc.py": list(tests)}, {"src/calc.py": lines or {}})
     monkeypatch.setattr(mutate, "ROOT", root)
     monkeypatch.setattr(mutate, "SNAPSHOTS", root / ".metrics" / "mutate")
     monkeypatch.setattr(mutate, "canary", lambda: True)
     monkeypatch.setattr(mutate, "suppressions", lambda: [])
-    monkeypatch.setattr(mutate, "record_coverage", lambda *_: ({"src/calc.py": ["tests/t.py"]}, {}))
+    monkeypatch.setattr(mutate, "deselected", lambda: [])
+    monkeypatch.setattr(mutate, "record_coverage", lambda *_: coverage)
     monkeypatch.setattr(mutate, "covered_lines", lambda: {"src/calc.py": frozenset({2, 6})})
     monkeypatch.setattr(mutate, "judge_file", judge_file)
     monkeypatch.setattr(sys, "argv", ["mutate.py", *options, "src/calc.py"])
@@ -594,7 +729,8 @@ def test_the_second_run_judges_only_the_survivors_and_the_function_that_changed(
 
     assert run_main(mutate, monkeypatch, tmp_path, MutantStatus.KILLED) == (0, ["add", "sub"])
     assert run_main(mutate, monkeypatch, tmp_path, MutantStatus.KILLED) == (0, [])
-    assert "2 killed before in a function left as it was" in capsys.readouterr().out
+    said = capsys.readouterr().out
+    assert "2 killed before, the function and its tests left as they were" in said
 
     source.write_text(CALC.replace("a - b", "b - a"), encoding="utf-8")
     assert run_main(mutate, monkeypatch, tmp_path, MutantStatus.SURVIVED) == (3, ["sub"])
@@ -603,6 +739,94 @@ def test_the_second_run_judges_only_the_survivors_and_the_function_that_changed(
     every = run_main(mutate, monkeypatch, tmp_path, MutantStatus.KILLED, "--mutate-all")
     assert every == (0, ["add", "sub"])
     assert run_main(mutate, monkeypatch, tmp_path, MutantStatus.KILLED) == (0, [])
+
+
+KILLED = MutantStatus.KILLED
+CHECKS = "from calc import add\n\n\ndef test_it():\n    assert add(1, 2) == 3\n"
+LOOKS_AWAY = "from calc import add\n\n\ndef test_it():\n    add(1, 2)\n"
+
+
+def calc_project(root: Path, *tests: str) -> None:
+    (root / "src").mkdir()
+    (root / "tests").mkdir()
+    (root / "src" / "calc.py").write_text(CALC, encoding="utf-8")
+    for name in tests:
+        (root / name).write_text(CHECKS, encoding="utf-8")
+
+
+def test_a_mutant_whose_test_file_was_weakened_or_removed_is_judged_again(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    calc_project(tmp_path, "tests/t.py")
+    assert run_main(mutate, monkeypatch, tmp_path, KILLED) == (0, ["add", "sub"])
+    assert run_main(mutate, monkeypatch, tmp_path, KILLED) == (0, [])
+
+    (tmp_path / "tests" / "t.py").write_text(LOOKS_AWAY, encoding="utf-8")
+    assert run_main(mutate, monkeypatch, tmp_path, KILLED) == (0, ["add", "sub"])
+    assert run_main(mutate, monkeypatch, tmp_path, KILLED) == (0, [])
+
+    (tmp_path / "tests" / "t.py").unlink()
+    assert run_main(mutate, monkeypatch, tmp_path, KILLED) == (0, ["add", "sub"])
+
+
+def test_a_fixture_file_that_changed_anywhere_under_tests_has_every_mutant_judged_again(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    calc_project(tmp_path, "tests/t.py")
+    (tmp_path / "tests" / "elsewhere").mkdir()
+    conftest = tmp_path / "tests" / "elsewhere" / "conftest.py"
+    conftest.write_text("", encoding="utf-8")
+    assert run_main(mutate, monkeypatch, tmp_path, KILLED) == (0, ["add", "sub"])
+    assert run_main(mutate, monkeypatch, tmp_path, KILLED) == (0, [])
+
+    conftest.write_text("import pytest\n", encoding="utf-8")
+
+    assert run_main(mutate, monkeypatch, tmp_path, KILLED) == (0, ["add", "sub"])
+    assert run_main(mutate, monkeypatch, tmp_path, KILLED) == (0, [])
+
+
+def test_a_mutant_killed_only_by_every_test_is_judged_again_when_any_of_them_changes(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    """Coverage names ``tests/a.py`` for both lines. The mutant of ``sub`` got through it and
+    was killed the second time, by every test of the file: ``tests/b.py`` is among what killed
+    it, and is not among what killed the mutant of ``add``."""
+    calc_project(tmp_path, "tests/a.py", "tests/b.py")
+
+    def run() -> tuple[int, list[str]]:
+        return run_main(
+            mutate,
+            monkeypatch,
+            tmp_path,
+            KILLED,
+            tests=("tests/a.py", "tests/b.py"),
+            lines={2: {"tests/a.py"}, 6: {"tests/a.py"}},
+            twice="sub",
+        )
+
+    assert run() == (0, ["add", "sub"])
+    assert run() == (0, [])  # and what killed each is left again for the run after this one
+
+    (tmp_path / "tests" / "b.py").write_text(LOOKS_AWAY, encoding="utf-8")
+    assert run() == (0, ["sub"])
+    assert run() == (0, [])
+
+    (tmp_path / "tests" / "a.py").write_text(LOOKS_AWAY, encoding="utf-8")
+    assert run() == (0, ["add", "sub"])
+
+
+def test_what_a_run_from_before_the_tests_were_kept_left_carries_no_verdict(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    calc_project(tmp_path, "tests/t.py")
+    assert run_main(mutate, monkeypatch, tmp_path, KILLED) == (0, ["add", "sub"])
+    path = mutate.snapshot_path("src/calc.py")
+    left = json.loads(path.read_text(encoding="utf-8"))
+    old = {key: left[key] for key in ("source", "forms", "outcomes")} | {"version": 1}
+    path.write_text(json.dumps(old), encoding="utf-8")
+
+    assert run_main(mutate, monkeypatch, tmp_path, KILLED) == (0, ["add", "sub"])
+    assert run_main(mutate, monkeypatch, tmp_path, KILLED) == (0, [])
 
 
 def test_tests_that_fail_before_any_mutation_leave_the_history_as_it_was(

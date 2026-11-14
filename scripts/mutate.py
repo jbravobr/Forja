@@ -22,8 +22,10 @@ survivor, so the answer is always the one all of them give.
 As in the mutator, a run leaves under ``.metrics/mutate`` what became of each mutant and a hash
 of each function, and the next run is differential: a mutant killed then, in a function whose
 text is the same now, is not run again. Survivors and the mutants of a changed function are.
-``--mutate-all`` ignores what was left and runs every one: the run to make after a test was
-weakened or removed, which the hash of a function does not see.
+Unlike the mutator, the run also keeps which test files killed each mutant and a hash of each:
+a mutant whose tests changed, or went away, is run again. ``--mutate-all`` ignores what was left
+and runs every one: the run to make before a release, because what the tests lean on outside
+``tests`` (helpers under ``src``, data files, another function) is not looked at.
 
 Nothing in the source can switch the gate off: a comment that does is rejected by the scope gate.
 
@@ -353,6 +355,11 @@ class History(NamedTuple):
 
     forms: Mapping[str, str]  # function -> the hash of its text
     outcomes: Mapping[str, str]  # mutation id -> killed or survived
+    judges: Mapping[str, tuple[str, ...]]  # mutation id -> the test files that killed it
+    tests: Mapping[str, str]  # test file -> the hash of what its verdict rested on
+
+
+NO_HISTORY = History({}, {}, {}, {})
 
 
 def form_digests(source: str, file: str) -> dict[str, str]:
@@ -385,39 +392,90 @@ def mutation_ids(source: str, file: str) -> list[str]:
     ]
 
 
+def test_digests(files: Iterable[str]) -> dict[str, str]:
+    """For each test file, a hash of what a verdict it gave rests on: its content, every
+    ``conftest.py`` under ``tests`` (a fixture may come from any of them, not only from the
+    folders above the file) and the tests left out of the run. A file that is gone has a hash
+    no file has."""
+    shared = hashlib.sha256(json.dumps(deselected()).encode("utf-8"))
+    for path in sorted((ROOT / "tests").rglob("conftest.py")):
+        shared.update(path.relative_to(ROOT).as_posix().encode("utf-8"))
+        shared.update(hashlib.sha256(path.read_bytes()).digest())
+
+    def one(name: str) -> str:
+        path = ROOT / name
+        own = hashlib.sha256(path.read_bytes()).digest() if path.is_file() else b"gone"
+        return hashlib.sha256(shared.digest() + own).hexdigest()
+
+    return {name: one(name) for name in sorted(set(files))}
+
+
+def judges_of(
+    file: str, mutants: list[Mutant], tests: list[str], by_line: LinesToTests, again: list[int]
+) -> list[list[str]]:
+    """The test files that gave each of ``mutants`` its verdict in ``judge_file``: those of its
+    line, or every one of ``tests`` for a mutant in ``again``, judged a second time."""
+    return [
+        tests if place in again else tests_of_line(by_line, file, mutant.line, tests)
+        for place, mutant in enumerate(mutants)
+    ]
+
+
 def snapshot_path(file: str) -> Path:
     return SNAPSHOTS / f"{file}.json"
 
 
 def load_history(file: str) -> History:
-    """What the last run of ``file`` left; nothing if it left nothing that can be read."""
+    """What the last run of ``file`` left; nothing if it left nothing that can be read. What a
+    run from before the tests were kept left has no tests in it, so none of its verdicts is
+    taken."""
     try:
         data = json.loads(snapshot_path(file).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return History({}, {})
+        return NO_HISTORY
     forms = data.get("forms") if isinstance(data, dict) else None
     outcomes = data.get("outcomes") if isinstance(data, dict) else None
     if not isinstance(forms, dict) or not isinstance(outcomes, dict):
-        return History({}, {})
+        return NO_HISTORY
+    judges, tests = data.get("judges"), data.get("tests")
     return History(
         {name: digest for name, digest in forms.items() if isinstance(digest, str)},
         {key: status for key, status in outcomes.items() if status in (KILLED, SURVIVED)},
+        {
+            key: tuple(names)
+            for key, names in (judges.items() if isinstance(judges, dict) else ())
+            if isinstance(names, list) and all(isinstance(name, str) for name in names)
+        },
+        {
+            name: digest
+            for name, digest in (tests.items() if isinstance(tests, dict) else ())
+            if isinstance(digest, str)
+        },
     )
 
 
 def carried(
-    mutants: list[Mutant], ids: list[str], digests: Mapping[str, str], history: History
+    mutants: list[Mutant],
+    ids: list[str],
+    digests: Mapping[str, str],
+    history: History,
+    tests: Mapping[str, str],
 ) -> set[int]:
     """The places in ``mutants`` of those that are not run again, as in the mutator's
     differential run: a test runs the line, the last run killed the mutant, and the text of its
     function is the same as then. A survivor runs again, and so does every mutant of a function
-    that changed or is new. What the tests became in between is not looked at: after weakening
-    or removing a test, ``--mutate-all`` is the run to trust."""
+    that changed or is new. One thing more than the mutator asks: every test file that killed
+    the mutant has in ``tests`` (the hashes of now) the hash it had then, so a mutant whose
+    tests were weakened or removed runs again."""
     kept = set()
     for place, (mutant, key) in enumerate(zip(mutants, ids, strict=True)):
         before = history.forms.get(mutant.function or "")
         unchanged = before is not None and before == digests.get(mutant.function or "")
-        if mutant.covered and unchanged and history.outcomes.get(key) == KILLED:
+        judges = history.judges.get(key, ())
+        same_tests = bool(judges) and all(
+            name in history.tests and history.tests[name] == tests.get(name) for name in judges
+        )
+        if mutant.covered and unchanged and same_tests and history.outcomes.get(key) == KILLED:
             kept.add(place)
     return kept
 
@@ -437,19 +495,35 @@ def with_carried(mutants: list[Mutant], kept: set[int], ran: MutationReport) -> 
 
 
 def write_history(
-    file: str, digests: Mapping[str, str], ids: list[str], report: MutationReport
+    file: str,
+    digests: Mapping[str, str],
+    ids: list[str],
+    report: MutationReport,
+    judged_by: list[list[str]],
+    tests: Mapping[str, str],
 ) -> Path:
     """Leave for the next run the hash of each function and what became of each mutant that
-    ran or was carried. A timeout is a kill here as it is in the score."""
-    outcomes = {}
-    for key, result in zip(ids, report.mutants, strict=True):
+    ran or was carried. A timeout is a kill here as it is in the score. Of a killed mutant the
+    test files that killed it are left too (``judged_by``, in the order of the report), with
+    the hash each has in ``tests``."""
+    outcomes, judges = {}, {}
+    for key, result, names in zip(ids, report.mutants, judged_by, strict=True):
         if result.status in (MutantStatus.KILLED, MutantStatus.TIMEOUT):
             outcomes[key] = KILLED
+            judges[key] = sorted(names)
         elif result.status is MutantStatus.SURVIVED:
             outcomes[key] = SURVIVED
+    used = {name for names in judges.values() for name in names}
     path = snapshot_path(file)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"version": 1, "source": file, "forms": dict(digests), "outcomes": outcomes}
+    payload = {
+        "version": 2,
+        "source": file,
+        "forms": dict(digests),
+        "outcomes": outcomes,
+        "judges": judges,
+        "tests": {name: tests[name] for name in used},
+    }
     path.write_text(json.dumps(payload, indent=1, sort_keys=True) + NL, encoding="utf-8")
     return path
 
@@ -552,8 +626,8 @@ def judge_file(
     tests: list[str],
     by_line: LinesToTests,
     workers: int,
-) -> tuple[MutationReport, int]:
-    """The verdict on every mutant of ``file``, and how many had to be judged twice.
+) -> tuple[MutationReport, list[int]]:
+    """The verdict on every mutant of ``file``, and the places of those judged twice.
 
     Each mutant is first judged by the test files that run its line: a test that never reaches
     the line cannot notice the change, and ``tests`` (every test file that touches the source
@@ -576,13 +650,13 @@ def judge_file(
         and narrowed.get(fingerprint(mutant.mutated), tests) != tests
     ]
     if not doubted:
-        return first, 0
+        return first, []
     whole = PytestRunner(tests, deselected(), base_workers=workers)
     again = judge([mutants[i] for i in doubted], whole, workers)
     results = list(first.mutants)
     for index, result in zip(doubted, again.mutants, strict=True):
         results[index] = result
-    return MutationReport(tuple(results)), len(doubted)
+    return MutationReport(tuple(results)), doubted
 
 
 def canary() -> bool:
@@ -677,10 +751,15 @@ def main() -> int:
         mutants = mutants_of(file, ROOT, covered.get(file, frozenset()))
         source = (ROOT / file).read_text(encoding="utf-8")
         ids, digests = mutation_ids(source, file), form_digests(source, file)
-        history = History({}, {}) if args.mutate_all else load_history(file)
-        kept = carried(mutants, ids, digests, history)
+        history = NO_HISTORY if args.mutate_all else load_history(file)
+        hashes = test_digests({*tests, *history.tests})
+        kept = carried(mutants, ids, digests, history, hashes)
         place = f"[{number}/{len(files)}] {file}"
-        before = f", {len(kept)} killed before in a function left as it was" if kept else ""
+        before = (
+            f", {len(kept)} killed before, the function and its tests left as they were"
+            if kept
+            else ""
+        )
         print(f"{place}: {len(mutants)} mutant(s){before}, {len(tests)} test file(s)...")
         to_run = [mutant for at, mutant in enumerate(mutants) if at not in kept]
         try:
@@ -689,9 +768,13 @@ def main() -> int:
             print(f"{file}: the tests fail before any mutation ({error})")
             return 2
         report = with_carried(mutants, kept, ran)
-        write_history(file, digests, ids, report)
+        fresh = iter(judges_of(file, to_run, tests, by_line, twice))
+        judged_by = [
+            list(history.judges[key]) if at in kept else next(fresh) for at, key in enumerate(ids)
+        ]
+        write_history(file, digests, ids, report, judged_by, hashes)
         took = time.monotonic() - started
-        again = f", {twice} judged again by every test" if twice else ""
+        again = f", {len(twice)} judged again by every test" if twice else ""
         print(f"{place}: {len(tests)} test file(s), {took:.0f}s{again}", flush=True)
         survivors += report_survivors(report, allowed)
         missed = len(report.with_status(MutantStatus.UNCOVERED))
