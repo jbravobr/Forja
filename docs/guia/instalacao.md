@@ -17,7 +17,7 @@ Esta página diz como instalar a Forja, como ela instala as ferramentas externas
 | Plataforma | `forja instalar` | O resto |
 | --- | --- | --- |
 | Windows x64 | instala as ferramentas | suportado |
-| Linux x64 | instala as ferramentas | suportado |
+| Linux x64 | instala as ferramentas | não suportado: a Forja não é testada no Linux |
 | macOS, ou Windows e Linux de outra arquitetura (por exemplo ARM) | não instala nada | `forja doctor` funciona; as ferramentas ficam por sua conta |
 
 O manifesto da Forja traz arquivos para `windows-x64` e `linux-x64`, e só para eles. Em qualquer outra plataforma, `forja instalar` imprime `Nesta plataforma a Forja não instala ferramentas (...)` e sai com código `2`. Quem roda só `forja` nessa plataforma não recebe a oferta de instalação: a Forja segue sem instalar. Nesse caso, instale gitleaks, osv-scanner, jscpd, Semgrep e as ferramentas das suas linguagens pelos meios de cada uma, de modo que fiquem no `PATH`; `forja doctor` diz o que falta e onde buscar.

@@ -1,6 +1,6 @@
 # Registros de decisão de arquitetura
 
-Cada arquivo registra uma decisão que mudou ou completou a especificação, ou que fecha uma porta. O formato é o de Nygard: contexto, decisão e consequências. Decisões de rotina (pydantic, hatchling, ruff) não têm registro. Decisões ainda abertas ficam em "Questões em aberto" do [plano](../Plano%20de%20execu%C3%A7%C3%A3o.md).
+Cada arquivo registra uma decisão que mudou ou completou a especificação, ou que fecha uma porta. O formato é o de Nygard: contexto, decisão e consequências. Decisões de rotina (pydantic, hatchling, ruff) não têm registro. Os planos e os documentos de medição que os registros citam (`plano-3.md`, `medicao-2.md`, "questão N do plano", "decisão N do plano") não estão mais no repositório; as citações ficam como registro do que se via na hora.
 
 Status: Aceito, Proposto (ainda sem revisão específica) ou Substituído.
 

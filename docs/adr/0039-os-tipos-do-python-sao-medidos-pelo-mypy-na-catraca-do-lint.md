@@ -33,4 +33,4 @@ A tabela de adaptadores da Especificação prevê "ruff, mypy" para o lint do Py
 - **Pontos para o E2E:** `--python-executable` com o ambiente virtual da execução e com instalação editável; JSON em execução limpa; código de saída no Windows.
 - **Testes.** `tests\languages\python\test_adapter.py`, `tests\checks\test_layout_adapters.py`, `test_measurer.py`, `test_pieces.py`, `tests\toolchain\test_manifest.py`, `tests\cli\test_install_languages.py`, `tests\cli\test_main.py`.
 
-O uso está em `docs/guia/gates/tipos.md`; o plano, em `docs/plano-analise-estatica.md`.
+O uso está em `docs/guia/gates/tipos.md`.

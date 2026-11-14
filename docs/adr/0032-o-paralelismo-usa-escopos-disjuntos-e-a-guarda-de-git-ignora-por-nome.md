@@ -30,4 +30,4 @@ Rodar tarefas juntas exigia três coisas. Primeira, decidir quem pode começar s
 - **Tela.** Mostra a primeira tarefa em andamento e declara as outras com `+N em andamento`.
 - **Testes.** `tests\orchestrator\test_schedule.py`, `test_together.py`, `test_together_git.py` e `test_together_resume.py`.
 
-O uso e o limite estão em `docs/guia/paralelismo.md`; o plano, em `docs/plano-paralelismo.md`.
+O uso e o limite estão em `docs/guia/paralelismo.md`.

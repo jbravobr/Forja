@@ -32,5 +32,4 @@ a configuração do repositório prevalece sobre qualquer perfil padrão.
 Não há conjunto de regras a manter nem licença de regras a conferir, e o Semgrep serve a qualquer
 política de segurança que o usuário tenha. O custo é de adoção: quem não fornece regras fica sem
 SAST, e a Forja só consegue deixar isso visível, não impedir. A documentação deve apontar para a
-documentação do Semgrep e trazer um exemplo mínimo que a Forja nunca usa sozinha. O plano de
-implementação está em `docs/plano-gate-10.md`.
+documentação do Semgrep e trazer um exemplo mínimo que a Forja nunca usa sozinha.

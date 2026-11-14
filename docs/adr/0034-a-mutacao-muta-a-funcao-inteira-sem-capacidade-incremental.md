@@ -28,4 +28,4 @@ Dois fatos mudaram a forma dessa decisão. O modo diferencial do `unclebob/mutat
 - **A capacidade fica sem uso.** `MUTATION_INCREMENTAL` e `OperationRequest.incremental` continuam como estão. Se um dia um mutator oferecer comando incremental real, a declaração volta a fazer sentido, e a conformidade passa a exigir o comando.
 - **Testes.** `tests\checks\test_mutation.py` cobre a mutação de função inteira.
 
-O uso está em `docs/guia/gates/mutacao.md`; o plano, em `docs/plano-endurecimento.md`.
+O uso está em `docs/guia/gates/mutacao.md`.

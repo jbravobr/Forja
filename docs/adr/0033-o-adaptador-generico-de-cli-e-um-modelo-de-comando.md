@@ -29,4 +29,4 @@ O contrato mínimo já existia: `core\adapters\executor.py::TemplateExecutorAdap
 - **Retomada independente do perfil.** O modelo gravado no log é o que a retomada usa.
 - **Testes.** `tests\cli\test_generic_cli.py`, além dos de `tests\core\adapters\` e `tests\executors\`.
 
-O uso está em `docs/guia/clis.md`; o plano, em `docs/plano-endurecimento.md`.
+O uso está em `docs/guia/clis.md`.

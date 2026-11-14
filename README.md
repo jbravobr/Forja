@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/static/v1?label=Python&message=3.12%2B&color=blue&style=for-the-badge&logo=python"/>
   <img src="https://img.shields.io/static/v1?label=uv&message=gerenciador&color=blue&style=for-the-badge"/>
-  <img src="https://img.shields.io/static/v1?label=Plataforma&message=Windows%20e%20Linux&color=lightgrey&style=for-the-badge"/>
+  <img src="https://img.shields.io/static/v1?label=Plataforma&message=Windows&color=lightgrey&style=for-the-badge"/>
   <img src="https://img.shields.io/static/v1?label=License&message=MIT&color=blue&style=for-the-badge"/>
   <img src="https://img.shields.io/static/v1?label=STATUS&message=EM%20DESENVOLVIMENTO&color=red&style=for-the-badge"/>
 </p>
@@ -56,7 +56,7 @@
 - [git](https://git-scm.com/downloads): a Forja não o instala; `forja doctor` o verifica.
 - A CLI do agente (por exemplo o Claude Code), com o seu login. A Forja não instala a CLI nem faz o login.
 - Rede, na instalação das ferramentas externas.
-- Windows x64 ou Linux x64. Em outras plataformas `forja instalar` não instala nada e as ferramentas ficam por sua conta.
+- Windows x64, a única plataforma suportada. `forja instalar` também instala as ferramentas no Linux x64, mas a Forja não é testada lá. Em outras plataformas `forja instalar` não instala nada e as ferramentas ficam por sua conta.
 
 ## Instalação
 
@@ -93,7 +93,7 @@ uv run mypy                              # modo strict
 uv run python scripts/mutate.py          # gate de mutação nos arquivos alterados desde o HEAD
 ```
 
-Os testes marcados com `slow` são os de `tests/e2e/test_resume.py` e `tests/e2e/test_resume_hard.py`. Os marcadores `tools`, `integration` e `live` estão declarados em `pyproject.toml`.
+Os testes marcados com `slow` são execuções de ponta a ponta que iniciam muitos processos, como os de `tests/acceptance/test_resume.py` e `tests/orchestrator/test_resume_end_to_end.py`. Os marcadores `tools`, `integration` e `live` estão declarados em `pyproject.toml`.
 
 ## Casos de uso
 

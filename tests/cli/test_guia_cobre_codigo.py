@@ -13,6 +13,7 @@ import pytest
 from forja.checks.specs import default_registry
 from forja.cli.args import parser
 from forja.cli.settings import Execucao, Interface, ModeloCli, Perfil
+from forja.core.gates import Mode
 from forja.core.policy.config import _CHECK_KEYS, ADAPTER_OPERATIONS, SECTION_KEYS
 from forja.core.policy.differential import _CASE_KEYS, _OUTPUT_KEYS
 
@@ -112,3 +113,38 @@ def test_every_forja_toml_key_is_in_the_guide(key: str) -> None:
 @pytest.mark.parametrize("check_id", sorted(spec.id for spec in default_registry()))
 def test_every_check_is_in_the_guide(check_id: str) -> None:
     assert _named(check_id), f"check {check_id} is not in docs/guia"
+
+
+_MODES = {mode.value for mode in Mode}
+_GATE_ROW = re.compile(r"^\| (\d+) \| [^|]+ \| ([^|]+) \| ([^|]+) \|", re.MULTILINE)
+
+
+def _modes_of_row(checks: list[str], cell: str) -> dict[str, str]:
+    """The mode the gate table gives each check of one row.
+
+    The table writes one mode per check, one mode for all of them, or names the checks that
+    differ and gives the rest with "as demais"."""
+    named = re.findall(r"`([^`]+)`", cell)
+    if all(name in _MODES for name in named):
+        if len(named) == 1:
+            return dict.fromkeys(checks, named[0])
+        return dict(zip(checks, named, strict=True))
+    modes = dict(re.findall(r"`(\w+)` em `(\w+)`", cell))
+    [rest] = re.findall(r"as demais em `(\w+)`", cell)
+    return {check: modes.get(check, rest) for check in checks}
+
+
+def _gate_table() -> dict[str, tuple[int, str]]:
+    text = (GUIDE / "gates" / "README.md").read_text(encoding="utf-8")
+    table: dict[str, tuple[int, str]] = {}
+    for gate, checks_cell, modes_cell in _GATE_ROW.findall(text):
+        checks = re.findall(r"`([^`]+)`", checks_cell)
+        for check, mode in _modes_of_row(checks, modes_cell).items():
+            table[check] = (int(gate), mode)
+    return table
+
+
+def test_the_gate_table_of_the_guide_is_the_one_of_the_code() -> None:
+    in_code = {spec.id: (spec.gate, spec.default_mode.value) for spec in default_registry()}
+
+    assert _gate_table() == in_code

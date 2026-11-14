@@ -27,4 +27,4 @@ A execução real 5 mostrou que o agente não conseguia adicionar dependência: 
 - **Só o Python tem ambiente.** Nas outras linguagens a dependência passa pelos gates 1 e 10 e a ferramenta da linguagem a resolve; não há E2E delas.
 - **Testes.** `tests\checks\test_dependency_install.py`, `test_scope.py`, `test_new_dependency.py`, `tests\languages\test_manifests.py`, `tests\languages\python\test_environment.py`, `tests\executors\test_package.py` e `tests\cli\test_session_install_environment.py`.
 
-O uso está em `docs/guia/gates/seguranca-e-dependencias.md`; o plano, em `docs/plano-dependencias.md`.
+O uso está em `docs/guia/gates/seguranca-e-dependencias.md`.

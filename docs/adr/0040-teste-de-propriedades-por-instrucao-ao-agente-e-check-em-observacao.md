@@ -30,4 +30,4 @@ Em 03/11/2026 o dono fixou que cada prática do arcabouço de qualidade vale par
 - **Custo de tempo** nos testes e na mutação, medido no gate de mutação (passo 6) e no E2E.
 - **Testes.** `tests\orchestrator\test_properties_brief.py`, `tests\checks\test_properties.py`, `tests\languages\python\test_adapter.py`, `tests\languages\go\test_adapter.py`, `tests\checks\test_changes.py`.
 
-O uso está em `docs/guia/gates/teste-de-propriedades.md`; o plano, em `docs/plano-teste-de-propriedades.md`.
+O uso está em `docs/guia/gates/teste-de-propriedades.md`.

@@ -2,7 +2,7 @@
 
 ## Contexto
 
-O incremento 2 mediu a Forja (portões, tentativas guiadas, integração por tarefa) contra o mesmo Claude Code com um único prompt, no objetivo "refatorar". A regra de decisão foi fixada antes de qualquer execução contada ([medicao-2.md](../medicao-2.md)). Relatório e números: [medicao-2-relatorio.md](../medicao-2-relatorio.md).
+O incremento 2 mediu a Forja (portões, tentativas guiadas, integração por tarefa) contra o mesmo Claude Code com um único prompt, no objetivo "refatorar". A regra de decisão foi fixada antes de qualquer execução contada (`medicao-2.md`). Relatório e números: `medicao-2-relatorio.md`.
 
 ## Decisão
 

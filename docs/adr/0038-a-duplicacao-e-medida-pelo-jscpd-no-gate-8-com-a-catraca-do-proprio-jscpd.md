@@ -31,4 +31,4 @@ A Especificação prevê o `jscpd` entre as camadas transversais (linha 400) e c
 - **Mudar o texto do agente exige novo `VERSION`** de `dry_brief.py`.
 - **Testes.** `tests\checks\test_duplication.py`, `test_duplication_report.py`, `test_pieces.py`, `tests\orchestrator\test_dry_brief.py` e `tests\executors\test_package.py`.
 
-O uso está em `docs/guia/gates/duplicacao.md`; o plano, em `docs/plano-gate-duplicacao.md`.
+O uso está em `docs/guia/gates/duplicacao.md`.

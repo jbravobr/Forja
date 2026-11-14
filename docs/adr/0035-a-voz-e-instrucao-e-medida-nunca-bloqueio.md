@@ -33,4 +33,4 @@ A Forja desliga de propósito as instruções do projeto e as skills nas CLIs (`
 - **Mudar o texto exige novo `VERSION`.**
 - **Testes.** `tests\orchestrator\test_voice_brief.py`, `tests\executors\test_package.py`, `test_agent_runner.py`, `test_claude_code.py`, `test_instruction_channel.py` e `tests\core\policy\test_problems.py`.
 
-O uso está em `docs/guia/documentacao-gerada.md`; o plano, em `docs/plano-voz.md`.
+O uso está em `docs/guia/documentacao-gerada.md`.
