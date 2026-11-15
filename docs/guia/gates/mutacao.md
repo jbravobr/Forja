@@ -74,9 +74,11 @@ A verificação só age se a tentativa acrescentou linhas em arquivo de produç�
 1. A Forja roda a cobertura de testes da linguagem, para saber quais linhas algum teste executa.
 2. Se alguma linha acrescentada com ponto de mutação não tem cobertura, o gate reprova nesse ponto, sem rodar mutantes (veja "Linha sem teste").
 3. A Forja confirma que os testes passam numa cópia do projeto sem alteração. Se falham, o resultado é inconclusivo.
-4. Cada mutante roda em cópia descartável: troca-se o arquivo, roda-se o comando de testes inteiro da linguagem, restaura-se o arquivo. O repositório e a cópia de trabalho da tentativa nunca são alterados.
+4. Cada mutante roda em cópia descartável: troca-se o arquivo, roda-se o comando de testes da linguagem, restaura-se o arquivo. O repositório e a cópia de trabalho da tentativa nunca são alterados.
 
-Limites de tempo: a verificação inicial dos testes pode levar até 600 segundos. Cada mutante tem como limite dez vezes a duração dessa verificação inicial, nunca menos de 2 segundos. Estourar o limite mata o mutante.
+Em Go, como no `unclebob/mutator`, o mutante é julgado primeiro pelos testes do pacote do seu arquivo (`go test` nesse pacote, no lugar de `./...`). Morto ali, está morto. O que sobrevive ali ainda não conta como sobrevivente: a cobertura é medida sobre todos os pacotes, e a linha pode ser exercitada só por teste de outro pacote. Por isso ele é julgado de novo pelo comando inteiro antes de entrar na nota. Nas demais linguagens o comando é um só, o inteiro.
+
+Limites de tempo: cada comando que julga um mutante tem a sua verificação inicial na cópia sem alteração, que pode levar até 600 segundos. Em Go há uma por pacote com mutante, e a do comando inteiro só roda se algum mutante sobreviver ao seu pacote. Cada mutante tem como limite dez vezes a duração da verificação inicial do comando que o julga, nunca menos de 2 segundos. Estourar o limite mata o mutante.
 
 Prioridade: a verificação inicial e os testes de cada mutante rodam na prioridade mais baixa do sistema (classe ociosa no Windows, `nice` 19 no Linux e no macOS), junto com tudo o que eles iniciam. A mutação usa todos os processadores, mas só o que o resto da máquina deixa livre: quem está no teclado vem primeiro. Com a máquina ocupada, a mutação demora mais.
 

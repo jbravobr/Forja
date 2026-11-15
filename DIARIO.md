@@ -1214,3 +1214,100 @@ Ficam sem rodar 15 sítios em linhas que nenhum teste rápido executa: 12 em `ch
 - **Para o dono decidir, se quiser:** o padrão de um worker por núcleo, dado o custo de memória medido; e se o script deve mostrar o teste que falhou na base.
 - O teste do Linux que falha desde `8b61fbe`.
 - Nada foi enviado ao GitHub: os commits estão em `correcoes-p0`, só na máquina.
+
+## 15/11/2026 — leva de desempenho, fase 2: Go pelo pacote primeiro, e a base uma vez por comando no script
+
+### O que foi lido
+
+Do mutator, em `830ec7e`, por inteiro: `runner.py`, `engine.py` e `workers.py`. Em `cli.py` só a busca por `baselines`. O que vale para esta fase:
+
+- A base roda uma vez por par (comando, pasta) e fica guardada pela invocação inteira; roda sem limite, na árvore real.
+- O limite de cada mutante é `max(2.0, segundos da base × fator)`, entregue pronto a quem roda os mutantes.
+- Em Go o comando é `go test -count=1` no pacote do arquivo mutado.
+- Sem sítio escolhido, não há base.
+
+`metrics.py` não foi relido: é das fases 4 e 5.
+
+### O que foi feito
+
+| Mudança | Arquivos | Teste novo | Commit |
+| --- | --- | --- | --- |
+| Executor: o mutante pode levar uma execução menor dos testes (`Mutant.first`), que o julga primeiro. Morto nela, está morto; quem sobrevive a ela é julgado pelo comando inteiro antes de contar. Cada execução tem a sua base, medida uma vez e só se algum mutante a usa, e o seu limite de dez vezes essa base. Quem chama pode entregar o limite já medido (`timeout`), e aí o executor não roda base nenhuma. `baseline()` mede a base numa cópia nova. `run_mutants` devolve o relatório e os lugares dos julgados duas vezes. | `mutation/executor.py` | dez em `tests/mutation/test_executor.py` | `15437a7` |
+| Gate, Go: o pedido ao adaptador leva o arquivo mutado (`OperationRequest.mutated`, um aviso, como o `rerun`), e o adaptador de Go planeja `go test -count=1 -json` no pacote desse arquivo. `judged_first` pergunta ao adaptador o comando de cada arquivo: quando é o comando inteiro, o mutante não ganha execução menor; mutantes do mesmo comando dividem a execução e a base. | `core/adapters/language.py`, `languages/go/adapter.py`, `checks/mutation.py` | quatro em `tests/checks/test_mutation.py`, um em `tests/languages/go/test_adapter.py`, três `slow` com Go de verdade em `tests/languages/go/test_mutation.py` | `15437a7` |
+| Script: a base roda uma vez, com a união dos testes dos arquivos que têm mutante coberto a rodar, e não roda quando o histórico resolve todos. O limite é de dez vezes essa base, vezes o número de processos em que ela foi espalhada. Os testes da linha passam a ser a execução menor do mutante; saíram a impressão digital do arquivo mutado e as duas chamadas ao executor. Base que falha: saída 2, antes de qualquer mutante, com o histórico intacto. | `scripts/mutate.py` | `tests/mutation/test_mutate_script.py`: onze funções de teste novas ou reescritas no lugar de treze, que conferiam o que foi removido | `15437a7` |
+| Guia: "Quando roda" e "Limites de tempo" dizem o pacote primeiro em Go e uma base por comando. | `docs/guia/gates/mutacao.md` | nenhum | com esta entrada |
+
+Os dois itens dividem `executor.py` e foram no mesmo commit: com o executor novo e o script antigo os testes do script não passam.
+
+O sobrevivente do pacote em Go é julgado por `./...` porque a cobertura do gate é medida com `-coverpkg=./...`: uma linha pode contar como executada só pelo teste de outro pacote. Os três testes `slow` provam os três casos: o teste de outro pacote mata, ninguém confere, e o pacote do arquivo mata sem esperar os outros. Nas outras cinco linguagens o adaptador devolve o mesmo comando com ou sem o aviso, como o mutator faz; o ganho equivalente nelas é a fase 4, como o plano já dizia.
+
+### Medições
+
+Todas com 24 workers e prioridade ociosa. Vereditos comparados mutante a mutante.
+
+**Gate, Go.** Módulo de 12 pacotes, 48 mutantes em dois deles, 12 que têm de sobreviver.
+
+| | Tempo | Vereditos |
+| --- | --- | --- |
+| antes (`f0549a0`) | 65,8 s e 53,0 s | 36 mortos, 12 sobreviventes, aprovado |
+| depois | 20,3 s e 20,6 s | os mesmos, um a um |
+
+**Script, quatro arquivos** (`core/process/model.py`, `core/process/group.py`, `core/adapters/common.py`, `checks/differential.py`), `--mutate-all`, cobertura nova.
+
+| Parte | antes | depois |
+| --- | --- | --- |
+| cobertura por teste | 351 s | 392 s |
+| base | dentro de cada arquivo | 268 s, uma vez, 93 arquivos de teste |
+| `model.py` (13 mutantes, 75 arquivos de teste) | 1772 s | 1669 s |
+| `group.py` (1, 68) | 323 s | 52 s |
+| `common.py` (16, 61) | 185 s | 36 s |
+| `differential.py` (16, 13) | 118 s | 36 s |
+| total | 2750 s | 2456 s |
+
+Os 46 mutantes morreram nas duas, com o mesmo veredito por mutante nos históricos dos dois checkouts.
+
+**Script, `orchestrator/measurer.py`**, `--mutate-all`, cobertura aproveitada, 94 mutantes. Duas rodadas seguidas, com um anotador por fora que registra cada execução dos testes:
+
+| | Total | Base | Mutantes |
+| --- | --- | --- | --- |
+| antes (`f0549a0`) | 2103 s | 97 s | 94 execuções, soma 37 464 s, mediana 72 s |
+| depois | 2214 s | 116 s | 94 execuções, soma 39 053 s, mediana 80 s |
+
+Mesmos conjuntos de teste por execução, nenhum estouro de tempo, 94 mortos nas duas. Uma rodada anterior do código novo, sem o anotador, levou 2022 s.
+
+**Mutação dos arquivos tocados**, 1134 s, saída 0: `mutation/executor.py` (21), `checks/mutation.py` (47), `languages/go/adapter.py` (16), `core/adapters/language.py` (17), nenhum sobrevivente. Continuam os 12 sítios de `checks/mutation.py` em linhas que nenhum teste rápido executa.
+
+Memória livre mínima nas quatro primeiras rodadas: 7,38 GB.
+
+### Conclusões
+
+- **No gate, Go ficou de 2,6 a 3,2 vezes mais rápido** nesse módulo, com os mesmos vereditos.
+- **No script, o ganho só existe com mais de um arquivo, e foi de 11% nessa rodada.** Os três arquivos pequenos foram de 626 s para 124 s; `model.py` sozinho é dois terços do total e não mudou. Com um arquivo só (`measurer.py`) o trabalho é o mesmo de antes: uma base e as mesmas 94 execuções. A diferença de 5% entre as duas rodadas não tem causa no código.
+- **Os 1477 s da fase 1 para `measurer.py` não se repetiram.** O mesmo script de `f0549a0` levou 2103 s hoje. A causa não foi investigada. Uma hipótese, não conferida: aquela rodada pode ter sido feita ainda com o limite de 30 s por teste, quando o teste que estourava contava como morte e encerrava a execução mais cedo.
+- **O que pesa em `measurer.py` são poucos mutantes.** Oito levam de 1200 a 1590 s cada, numa execução de 9 a 18 arquivos de teste em um processo só: o teste que mata está no fim da fila. A mediana é de 72 a 80 s. É o que a fase 5 ataca (quem matou roda primeiro, escolha por função de teste).
+- **O limite do script ficou maior.** Para `measurer.py` são 27 836 s (dez vezes a base de 116 s, vezes 24 processos). O laço dentro de um teste continua a parar nos 120 s do limite por teste. Um mutante que não termine fora de teste (na importação, por exemplo) esperaria o limite inteiro; já era assim antes, com 23 184 s.
+
+### Dificuldades
+
+- Um teste novo do executor media `asyncio.sleep(0.3)` e pedia limite de pelo menos 3,0 s; mediu 2,97. Passou a dormir 0,4 s e pedir 3,5 s.
+- `ruff format --check .` acusa dois arquivos em `scripts/capturas`. Conferido com `git stash`: já era assim antes desta fase; ficam para o item 40.
+- A primeira comparação de `measurer.py` foi contra o número da fase 1 e parecia regressão de 37%. A rodada pareada no mesmo dia mostrou que não era.
+
+### Verificação
+
+- `ruff check .`, `ruff format --check src tests scripts/mutate.py` e `mypy` strict: limpos, 632 arquivos.
+- `pytest -m "not slow" -n16`, Windows: 9908 aprovados, 41 pulados, 255 s.
+- `tests/languages/go/test_mutation.py`, com Go 1.27.4 de verdade: 6 aprovados.
+- Linux, pelo WSL: os quatro arquivos de teste rápidos tocados, 162 aprovados e 1 falha, a mesma `test_each_line_gets_the_test_files_that_ran_it` que falha desde `8b61fbe`.
+- Revisão independente do diff (agente de boas práticas da linguagem): nenhum defeito apontado.
+- Não rodou: a suíte completa com `slow`; a suíte inteira no Linux; os testes de Go de verdade no Linux (o WSL não tem Go); macOS; a mutação de `scripts/mutate.py` (o script só muta `src`).
+
+O checkout de verificação (`%LOCALAPPDATA%\forja-verif`) está em `f0549a0`.
+
+### Pendências
+
+- **Fases 3 a 5 do plano.** A fase 3 é levantamento, sem código de produção; a 4 espera a decisão do dono sobre ele; a 5 depende só desta. Antes das fases 4 e 5, reler `metrics.py` do mutator.
+- **Para o dono decidir, se quiser** (vêm da entrada anterior): o padrão de um worker por núcleo, dado o custo de memória; e se o script deve mostrar o teste que falhou na base.
+- A diferença entre os 1477 s da fase 1 e os 2103 s de hoje em `measurer.py`, sem causa conferida.
+- O teste do Linux que falha desde `8b61fbe`.
+- Nada foi enviado ao GitHub: os commits estão em `correcoes-p0`, só na máquina.
