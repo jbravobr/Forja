@@ -62,12 +62,23 @@ class CommandPlan:
 
 
 def build_spec(
-    plan: CommandPlan, host_env: Mapping[str, str], *, timeout: float | None, grace: float = 5.0
+    plan: CommandPlan,
+    host_env: Mapping[str, str],
+    *,
+    timeout: float | None,
+    grace: float = 5.0,
+    low_priority: bool = False,
 ) -> ProcessSpec:
     """The process spec for a plan: filtered environment, no implicit inheritance."""
     environment = filter_environment(host_env, adapter_allow=plan.env_allow, extra=plan.env_set)
     return ProcessSpec(
-        plan.argv, plan.cwd, environment.values, timeout, grace, stdin_file=plan.stdin_file
+        plan.argv,
+        plan.cwd,
+        environment.values,
+        timeout,
+        grace,
+        stdin_file=plan.stdin_file,
+        low_priority=low_priority,
     )
 
 

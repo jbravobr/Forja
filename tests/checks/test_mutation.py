@@ -1,6 +1,8 @@
 """The mutation check: pure pieces first, then the real thing over a small project."""
 
 import asyncio
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,7 +20,7 @@ from forja.checks.mutation import (
     untested_lines,
     worker_count,
 )
-from forja.core.adapters import NotSupported, Operation, OperationRequest
+from forja.core.adapters import CommandPlan, NotSupported, Operation, OperationRequest
 from forja.core.gates import GateInput
 from forja.core.gates.models import (
     Approved,
@@ -27,9 +29,10 @@ from forja.core.gates.models import (
     InconclusiveReason,
     Rejected,
 )
+from forja.core.process import ProcessRunner, ProcessSpec
 from forja.core.reports.models import CoverageReport, FileCoverage
 from forja.core.states import Level
-from forja.mutation.executor import Mutant, TestsDidNotRun
+from forja.mutation.executor import Mutant, TestsDidNotRun, TestVerdict
 from tests.checks.support import Scene, sinks
 from tests.core.idempotency.conftest import Repo
 
@@ -149,6 +152,63 @@ def test_each_mutant_asks_for_the_tests_as_a_run_repeated_in_the_same_copy(
         asyncio.run(runner(tmp_path / "copy", 5.0))
 
     assert asked == [(Operation.TEST, OperationRequest(root=tmp_path / "copy", rerun=True))]
+
+
+def test_the_tests_of_a_mutant_run_at_low_priority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    specs: list[ProcessSpec] = []
+    run = ProcessRunner.run
+
+    async def noted(self: ProcessRunner, operation_id: str, spec: ProcessSpec, log: Path) -> object:
+        specs.append(spec)
+        return await run(self, operation_id, spec, log)
+
+    monkeypatch.setattr(ProcessRunner, "run", noted)
+
+    class Passing:
+        def plan(self, operation: Operation, request: OperationRequest) -> CommandPlan:
+            return CommandPlan((sys.executable, "-c", "pass"), request.root)
+
+    host = {key: value for key, value in os.environ.items() if key.upper() == "SYSTEMROOT"}
+    runner = AdapterRunner(Passing(), host, tmp_path / "logs")  # type: ignore[arg-type]
+
+    assert asyncio.run(runner(tmp_path, 20.0)) is TestVerdict.PASSED
+    assert [spec.low_priority for spec in specs] == [True]
+
+
+class _Plan:
+    """An adapter whose test command is the one given."""
+
+    def __init__(self, *command: str) -> None:
+        self.command = command
+
+    def plan(self, operation: Operation, request: OperationRequest) -> CommandPlan:
+        return CommandPlan(self.command, request.root)
+
+
+def _host() -> dict[str, str]:
+    return {key: value for key, value in os.environ.items() if key.upper() == "SYSTEMROOT"}
+
+
+def test_the_runner_makes_its_folder_of_logs_with_the_parents_and_leaves_no_log_in_it(
+    tmp_path: Path,
+) -> None:
+    logs = tmp_path / "not" / "there" / "yet"
+    runner = AdapterRunner(_Plan(sys.executable, "-c", "pass"), _host(), logs)  # type: ignore[arg-type]
+
+    assert asyncio.run(runner(tmp_path, 20.0)) is TestVerdict.PASSED
+    assert asyncio.run(runner(tmp_path, 20.0)) is TestVerdict.PASSED  # the folder is there by now
+
+    assert list(logs.iterdir()) == []
+
+
+def test_a_test_command_that_cannot_start_means_the_tests_did_not_run(tmp_path: Path) -> None:
+    missing = str(tmp_path / "no-such-program")
+    runner = AdapterRunner(_Plan(missing), _host(), tmp_path / "logs")  # type: ignore[arg-type]
+
+    with pytest.raises(TestsDidNotRun, match="spawn_failed"):
+        asyncio.run(runner(tmp_path, 20.0))
 
 
 def judge(scene: Scene) -> object:

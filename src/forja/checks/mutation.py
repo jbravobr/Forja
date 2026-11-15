@@ -189,7 +189,11 @@ class AdapterRunner:
             raise TestsDidNotRun(plan.reason)
         # a stale bytecode file could run the original code in place of the mutant
         env = {**plan.env_set, "PYTHONDONTWRITEBYTECODE": "1"}
-        spec = build_spec(replace(plan, env_set=env), self.host_env, timeout=timeout)
+        # the baseline and every mutant yield to the rest of the machine: a run of mutants
+        # takes every processor for minutes, and nobody waits on one of them at the keyboard
+        spec = build_spec(
+            replace(plan, env_set=env), self.host_env, timeout=timeout, low_priority=True
+        )
         number = next(self.ids)
         log = self.logs / f"mutant-{number}.log"
         self.logs.mkdir(parents=True, exist_ok=True)

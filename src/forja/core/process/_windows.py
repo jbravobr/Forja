@@ -17,6 +17,8 @@ if sys.platform == "win32":
     _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     _PROCESS_ALL_ACCESS = 0x1F0FFF
     _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+    _JOB_OBJECT_LIMIT_PRIORITY_CLASS = 0x00000020
+    _IDLE_PRIORITY_CLASS = 0x00000040
     _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
     _STILL_ACTIVE = 259
     _TH32CS_SNAPPROCESS = 0x00000002
@@ -111,6 +113,20 @@ if sys.platform == "win32":
     _nt.NtResumeProcess.argtypes = [wintypes.HANDLE]
     _nt.NtResumeProcess.restype = ctypes.c_long
 
+    def _limit(job: Any, flags: int, priority_class: int | None = None) -> None:
+        limits = _ExtendedLimits()
+        limits.BasicLimitInformation.LimitFlags = flags
+        if priority_class is not None:
+            limits.BasicLimitInformation.PriorityClass = priority_class
+        ok = _k32.SetInformationJobObject(
+            job,
+            _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(limits),
+            ctypes.sizeof(limits),
+        )
+        if not ok:
+            raise ctypes.WinError(ctypes.get_last_error())
+
     class WindowsJobGroup:
         """Kill-on-close Job Object: the whole tree dies with the handle or on ``kill``.
 
@@ -122,23 +138,25 @@ if sys.platform == "win32":
             job = _k32.CreateJobObjectW(None, None)
             if not job:
                 raise ctypes.WinError(ctypes.get_last_error())
-            limits = _ExtendedLimits()
-            limits.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-            ok = _k32.SetInformationJobObject(
-                job,
-                _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
-                ctypes.byref(limits),
-                ctypes.sizeof(limits),
-            )
-            if not ok:
-                error = ctypes.WinError(ctypes.get_last_error())
+            try:
+                _limit(job, _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+            except OSError:
                 _k32.CloseHandle(job)
-                raise error
+                raise
             self._job: Any = job
             self._pid: int | None = None
 
         def spawn_kwargs(self) -> dict[str, Any]:
             return {"creationflags": _CREATE_NEW_PROCESS_GROUP | _CREATE_SUSPENDED}
+
+        def lower_priority(self) -> None:
+            """The job gives the idle class to every process in it, and none of them can leave
+            it: the tree runs only when nothing else on the machine wants the processor."""
+            _limit(
+                self._job,
+                _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | _JOB_OBJECT_LIMIT_PRIORITY_CLASS,
+                _IDLE_PRIORITY_CLASS,
+            )
 
         def attach(self, pid: int) -> None:
             handle = _k32.OpenProcess(_PROCESS_ALL_ACCESS, False, pid)

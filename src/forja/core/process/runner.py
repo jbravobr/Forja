@@ -97,6 +97,8 @@ class ProcessRunner:
         group = self._group_factory()
         try:
             try:
+                if spec.low_priority:
+                    group.lower_priority()
                 with contextlib.ExitStack() as files:
                     stdin: int | BinaryIO = subprocess.DEVNULL
                     if spec.stdin_file is not None:

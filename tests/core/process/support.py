@@ -13,6 +13,20 @@ from forja.core.process import (
     creation_token,
 )
 
+# What a process says of itself: the priority class on Windows, the niceness elsewhere.
+OWN_PRIORITY = (
+    "import os, sys\n"
+    "if sys.platform == 'win32':\n"
+    "    import ctypes\n"
+    "    k32 = ctypes.WinDLL('kernel32')\n"
+    "    k32.GetCurrentProcess.restype = ctypes.c_void_p\n"
+    "    k32.GetPriorityClass.argtypes = [ctypes.c_void_p]\n"
+    "    print(k32.GetPriorityClass(k32.GetCurrentProcess()))\n"
+    "else:\n"
+    "    print(os.getpriority(os.PRIO_PROCESS, 0))\n"
+)
+LOWEST_PRIORITY = 0x40 if sys.platform == "win32" else 19  # the idle class; the highest niceness
+
 
 class RecordingSink:
     def __init__(self) -> None:

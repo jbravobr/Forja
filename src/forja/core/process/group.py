@@ -9,6 +9,11 @@ class ProcessGroup(Protocol):
         """Extra keyword arguments for process creation."""
         ...
 
+    def lower_priority(self) -> None:
+        """Make the whole tree yield the processor to everything else on the machine. Asked
+        before the process is created."""
+        ...
+
     def attach(self, pid: int) -> None:
         """Put the freshly created process under this group's control."""
         ...

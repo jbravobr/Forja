@@ -58,6 +58,8 @@ class ProcessSpec:
     ``timeout`` is mandatory (``None`` means no limit) so that callers decide it explicitly.
     ``grace`` is how long a polite stop request is given before the whole tree is killed.
     ``stdin_file`` is fed to the process as its standard input (otherwise stdin is empty).
+    ``low_priority`` makes the process and all it starts yield the processor to everything else
+    on the machine: for long work nobody waits on at the keyboard.
     """
 
     command: Sequence[str]
@@ -66,6 +68,7 @@ class ProcessSpec:
     timeout: float | None
     grace: float = 5.0
     stdin_file: Path | None = None
+    low_priority: bool = False
 
     def __post_init__(self) -> None:
         check_command_safety(self.command)

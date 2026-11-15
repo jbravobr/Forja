@@ -67,6 +67,12 @@ def test_the_spec_has_a_filtered_environment_and_the_plans_own_values(tmp_path: 
     }
     assert process_spec.stdin_file == package
     assert (process_spec.timeout, process_spec.cwd) == (30, tmp_path)
+    assert process_spec.low_priority is False
+
+
+def test_the_spec_is_of_low_priority_only_when_the_caller_asks(tmp_path: Path) -> None:
+    assert build_spec(plan(tmp_path), {}, timeout=5, low_priority=True).low_priority is True
+    assert build_spec(plan(tmp_path), {}, timeout=5).low_priority is False
 
 
 def test_an_unsafe_plan_fails_when_the_spec_is_built(tmp_path: Path) -> None:

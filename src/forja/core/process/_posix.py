@@ -9,6 +9,8 @@ if sys.platform != "win32":
 
     from forja.core.process._sampling import PeakSampler, Snapshot, default_snapshot
 
+    LOWEST_PRIORITY = 19  # the highest niceness there is
+
     class PosixGroup:
         """Own session and process group: ``killpg`` reaches the whole tree.
 
@@ -19,11 +21,20 @@ if sys.platform != "win32":
             self._pid: int | None = None
             self._snapshot = snapshot or default_snapshot()
             self._sampler: PeakSampler | None = None
+            self._lowest = False
 
         def spawn_kwargs(self) -> dict[str, Any]:
             return {"start_new_session": True}
 
+        def lower_priority(self) -> None:
+            self._lowest = True
+
         def attach(self, pid: int) -> None:
+            if self._lowest:
+                # the child leads its own process group: every process of it, and whatever
+                # they start from now on, yields to the rest of the machine
+                with suppress(ProcessLookupError, PermissionError):
+                    os.setpriority(os.PRIO_PGRP, pid, LOWEST_PRIORITY)
             self._pid = pid
             self._sampler = PeakSampler(pid, self._snapshot)
             self._sampler.start()
