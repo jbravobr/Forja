@@ -2,14 +2,18 @@ import asyncio
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
 
 from forja.core.reports.models import MutantStatus
+from forja.mutation import executor
 from forja.mutation.executor import (
     BaselineFailed,
+    MachineTooBusy,
     Mutant,
+    TestsDidNotRun,
     TestVerdict,
     run_mutants,
 )
@@ -193,12 +197,38 @@ def test_a_worker_count_of_zero_still_runs_one_worker(project: Path, tmp_path: P
     assert len(_roots_used(project, tmp_path, workers=0)) == 1
 
 
-def test_without_a_count_there_is_a_worker_per_processor_up_to_four(
+def test_without_a_count_there_is_a_worker_per_processor_as_in_the_mutator(
     project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(os, "cpu_count", lambda: 3)
+    monkeypatch.setattr(os, "cpu_count", lambda: 6)
 
-    assert len(_roots_used(project, tmp_path)) == 3
+    assert len(_roots_used(project, tmp_path)) == 6
+
+
+def test_the_copies_of_the_workers_are_made_at_the_same_time(
+    project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    together = threading.Barrier(3, timeout=10)
+    copy = executor._fresh_copy  # noqa: SLF001
+
+    def waiting(source: Path, target: Path) -> None:
+        together.wait()  # raises unless the three copies are under way at once
+        copy(source, target)
+
+    monkeypatch.setattr(executor, "_fresh_copy", waiting)
+
+    async def runner(root: Path, timeout: float | None) -> TestVerdict:
+        return TestVerdict.PASSED
+
+    mutants = [mutant(b"x > 0", b"x < 0") for _ in range(3)]
+    report = run(project, tmp_path, mutants, runner, workers=3)
+
+    assert [m.status for m in report.mutants] == [MutantStatus.SURVIVED] * 3
+    assert sorted(path.name for path in (tmp_path / "scratch").iterdir()) == [
+        "worker-0",
+        "worker-1",
+        "worker-2",
+    ]
 
 
 def test_when_the_processors_cannot_be_counted_one_worker_runs(
@@ -390,3 +420,115 @@ def test_with_one_worker_a_timeout_is_not_judged_again(project: Path, tmp_path: 
 
     assert [m.status for m in report.mutants] == [MutantStatus.TIMEOUT]
     assert len(calls) == 1
+
+
+# -- a timeout only kills while the unchanged copy still passes in the same time -------------------
+
+
+def _scripted(
+    unchanged: list[TestVerdict], slow: list[TestVerdict], log: list[tuple[str, float | None]]
+) -> object:
+    """A runner that answers ``unchanged`` in turn for the unchanged copy and ``slow`` in turn for
+    the ``SLOW`` mutant, kills any other mutant, and notes each run and the time it was given."""
+
+    def turn(kind: str, timeout: float | None, answers: list[TestVerdict]) -> TestVerdict:
+        log.append((kind, timeout))
+        return answers[[name for name, _ in log].count(kind) - 1]
+
+    async def runner(root: Path, timeout: float | None) -> TestVerdict:
+        content = (root / "calc.py").read_bytes()
+        if content == CALC:
+            return turn("unchanged", timeout, unchanged)
+        if content == SLOW:
+            return turn("slow", timeout, slow)
+        return turn("other", timeout, [TestVerdict.FAILED] * 9)
+
+    return runner
+
+
+def kinds(log: list[tuple[str, float | None]]) -> list[str]:
+    return [kind for kind, _ in log]
+
+
+def test_a_timeout_alone_stands_when_the_unchanged_copy_still_passes_in_the_same_time(
+    project: Path, tmp_path: Path
+) -> None:
+    log: list[tuple[str, float | None]] = []
+    passed = TestVerdict.PASSED
+    runner = _scripted([passed, passed], [TestVerdict.TIMED_OUT], log)
+
+    report = run(project, tmp_path, [mutant(b"x > 0", b"x >= 0")], runner, workers=1)
+
+    assert [m.status for m in report.mutants] == [MutantStatus.TIMEOUT]
+    assert kinds(log) == ["unchanged", "slow", "unchanged"]
+    assert log[2][1] is not None and log[2][1] == log[1][1]  # the time the mutant was given
+
+
+def test_a_timeout_on_a_machine_too_busy_for_the_unchanged_copy_gives_no_verdict(
+    project: Path, tmp_path: Path
+) -> None:
+    log: list[tuple[str, float | None]] = []
+    runner = _scripted([TestVerdict.PASSED, TestVerdict.TIMED_OUT], [TestVerdict.TIMED_OUT], log)
+    mutants = [mutant(b"x > 0", b"x >= 0"), mutant(b"x > 0", b"x < 0")]
+
+    with pytest.raises(MachineTooBusy, match="too busy"):
+        run(project, tmp_path, mutants, runner, workers=1)
+
+    # checked at once: the mutant after it never ran, and the copy was left as it was
+    assert kinds(log) == ["unchanged", "slow", "unchanged"]
+    assert (tmp_path / "scratch" / "worker-0" / "calc.py").read_bytes() == CALC
+    assert issubclass(MachineTooBusy, TestsDidNotRun)  # the gate reads it as no measurement
+
+
+def test_a_mutant_out_of_time_beside_the_others_and_alone_is_checked_against_the_unchanged_copy(
+    project: Path, tmp_path: Path
+) -> None:
+    log: list[tuple[str, float | None]] = []
+    timed_out = TestVerdict.TIMED_OUT
+    runner = _scripted([TestVerdict.PASSED, timed_out], [timed_out, timed_out], log)
+    mutants = [mutant(b"x > 0", b"x >= 0"), mutant(b"x > 0", b"x < 0")]
+
+    with pytest.raises(MachineTooBusy):
+        run(project, tmp_path, mutants, runner, workers=2)
+
+    assert kinds(log).count("slow") == 2
+    assert kinds(log)[-2:] == ["slow", "unchanged"]
+
+
+def test_a_mutant_that_passes_alone_asks_nothing_more_of_the_unchanged_copy(
+    project: Path, tmp_path: Path
+) -> None:
+    log: list[tuple[str, float | None]] = []
+    runner = _scripted([TestVerdict.PASSED], [TestVerdict.TIMED_OUT, TestVerdict.PASSED], log)
+    mutants = [mutant(b"x > 0", b"x >= 0"), mutant(b"x > 0", b"x < 0")]
+
+    report = run(project, tmp_path, mutants, runner, workers=2)
+
+    assert [m.status for m in report.mutants] == [MutantStatus.SURVIVED, MutantStatus.KILLED]
+    assert kinds(log).count("unchanged") == 1
+
+
+def test_beside_the_others_a_timeout_is_not_yet_checked_against_the_unchanged_copy(
+    project: Path, tmp_path: Path
+) -> None:
+    log: list[tuple[str, float | None]] = []
+    passed, timed_out = TestVerdict.PASSED, TestVerdict.TIMED_OUT
+    runner = _scripted([passed, passed], [timed_out, timed_out], log)
+    mutants = [mutant(b"x > 0", b"x >= 0"), mutant(b"x > 0", b"x < 0")]
+
+    report = run(project, tmp_path, mutants, runner, workers=2)
+
+    assert [m.status for m in report.mutants] == [MutantStatus.TIMEOUT, MutantStatus.KILLED]
+    # once before any mutant and once after the second timeout, never after the first
+    assert kinds(log).count("unchanged") == 2
+    assert kinds(log)[-2:] == ["slow", "unchanged"]
+
+
+def test_tests_that_stopped_passing_on_the_unchanged_copy_after_a_timeout_stop_the_run(
+    project: Path, tmp_path: Path
+) -> None:
+    log: list[tuple[str, float | None]] = []
+    runner = _scripted([TestVerdict.PASSED, TestVerdict.FAILED], [TestVerdict.TIMED_OUT], log)
+
+    with pytest.raises(BaselineFailed, match="no longer pass"):
+        run(project, tmp_path, [mutant(b"x > 0", b"x >= 0")], runner, workers=1)

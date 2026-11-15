@@ -3,7 +3,9 @@
 Nothing here knows a language. The caller hands over each mutant as the bytes the file would
 have, whether a test runs the changed line, and a function that runs the whole test command.
 As in unclebob/mutator a mutant on an uncovered line is not run, a failing or timed-out run kills
-the mutant, and the timeout is ten times the baseline, never below two seconds.
+the mutant, and the timeout is ten times the baseline, never below two seconds. Unlike the
+mutator, a timeout only kills while the unchanged copy still passes within that same time: on a
+machine too busy for that the run ends without a verdict (``MachineTooBusy``).
 """
 
 import asyncio
@@ -80,6 +82,11 @@ class BaselineFailed(Exception):
     """The tests do not pass on the unchanged copy, so a failure would prove nothing."""
 
 
+class MachineTooBusy(TestsDidNotRun):
+    """The unchanged copy no longer passes within the time a mutant is given, so a mutant that
+    ran out of time proves nothing: the machine is what is slow."""
+
+
 def _fresh_copy(source: Path, target: Path) -> None:
     def left_out(directory: str, names: list[str]) -> set[str]:
         at_root = Path(directory) == source
@@ -117,13 +124,35 @@ async def _judge(
     }[verdict]
 
 
+async def _still_in_time(runner: TestRunner, root: Path, timeout: float) -> None:
+    """A mutant ran out of time with nothing else running. That only kills it if the unchanged
+    copy, run right after it, still passes within the same limit.
+
+    The limit comes from a baseline that ran while the machine was free. The tests run at the
+    lowest priority, so on a machine that has since become busy they hardly run at all: a mutant
+    the tests would have passed runs out of time, and counting it as killed would approve what
+    should be rejected. The mutator counts every timeout as a kill; here a timeout the machine
+    explains ends the run without a verdict."""
+    verdict = await runner(root, timeout)
+    if verdict is TestVerdict.TIMED_OUT:
+        raise MachineTooBusy(
+            "the unchanged copy no longer passes in the time a mutant is given: the machine is "
+            "too busy to tell a slow mutant from one that never ends"
+        )
+    if verdict is not TestVerdict.PASSED:
+        raise BaselineFailed("the tests no longer pass on the unchanged copy")
+
+
 async def _work(
     queue: "asyncio.Queue[tuple[int, Mutant]]",
     results: dict[int, MutantStatus],
     runner: TestRunner,
     root: Path,
     timeout: float,
+    alone: bool,
 ) -> None:
+    """Judge mutants from the queue in the copy ``root``. ``alone`` says no other worker runs:
+    a timeout is then final, and is checked against the unchanged copy at once."""
     while True:
         try:
             index, mutant = queue.get_nowait()
@@ -131,6 +160,8 @@ async def _work(
             return
         path = root / mutant.file
         results[index] = await _judge(runner, root, path, path.read_bytes(), mutant, timeout)
+        if alone and results[index] is MutantStatus.TIMEOUT:
+            await _still_in_time(runner, root, timeout)
 
 
 async def _alone(
@@ -144,11 +175,14 @@ async def _alone(
 
     The timeout comes from a baseline that ran alone. With several test commands running at once
     a mutant the tests would have passed may only be slow, and counting it as killed would raise
-    the score for no reason. Alone, it gets the conditions the baseline had."""
+    the score for no reason. Alone, it gets the conditions the baseline had; one that runs out of
+    time again is checked against the unchanged copy at once."""
     for index, mutant in enumerate(mutants):
         if results[index] is MutantStatus.TIMEOUT:
             path = root / mutant.file
             results[index] = await _judge(runner, root, path, path.read_bytes(), mutant, timeout)
+            if results[index] is MutantStatus.TIMEOUT:
+                await _still_in_time(runner, root, timeout)
 
 
 async def run_mutants(
@@ -164,9 +198,11 @@ async def run_mutants(
 
     The baseline run (the whole test command on the unchanged copy) must pass; its duration sets
     the timeout of each mutant at ten times that, but never below two seconds. With more than
-    one worker, a mutant that timed out is judged once more with nothing else running. As in the
-    mutator there are never more workers than mutants to run, and with none to run nothing is
-    copied.
+    one worker, a mutant that timed out is judged once more with nothing else running. A timeout
+    with nothing else running is final only if the unchanged copy, run right after it, still
+    passes in that time; if not, ``MachineTooBusy`` (or ``BaselineFailed``) ends the run. As in the
+    mutator there is a worker per processor unless ``workers`` says otherwise, never more workers
+    than mutants to run, and with none to run nothing is copied.
     """
     to_run = sum(1 for mutant in mutants if mutant.covered)
     if to_run == 0:
@@ -176,11 +212,12 @@ async def run_mutants(
                 for m in mutants
             )
         )
-    asked = max(1, workers) if workers is not None else min(4, os.cpu_count() or 1)
+    asked = max(1, workers) if workers is not None else os.cpu_count() or 1
     count = min(asked, to_run)
     roots = [scratch / f"worker-{n}" for n in range(count)]
-    for root in roots:
-        await asyncio.to_thread(_fresh_copy, worktree, root)
+    # all at once: one after the other, the copies of a worker per processor would take longer
+    # than many a run of mutants
+    await asyncio.gather(*(asyncio.to_thread(_fresh_copy, worktree, root) for root in roots))
     loop = asyncio.get_running_loop()
     started = loop.time()
     if await runner(roots[0], baseline_timeout) is not TestVerdict.PASSED:
@@ -190,7 +227,9 @@ async def run_mutants(
     for item in enumerate(mutants):
         queue.put_nowait(item)
     results: dict[int, MutantStatus] = {}
-    await asyncio.gather(*(_work(queue, results, runner, root, timeout) for root in roots))
+    await asyncio.gather(
+        *(_work(queue, results, runner, root, timeout, alone=count == 1) for root in roots)
+    )
     if count > 1:
         await _alone(mutants, results, runner, roots[0], timeout)
     return MutationReport(
