@@ -41,7 +41,7 @@ A nota é a fração de mutantes mortos:
 nota = mortos / (mortos + sobreviventes)
 ```
 
-Um mutante que estoura o tempo conta como morto. Um mutante em linha que nenhum teste executa não roda e fica fora da nota; num comando que ocupa várias linhas, basta que o relatório de cobertura marque a linha do mutante ou a linha onde o comando começa. Se nenhum mutante rodou, não há nota e o gate passa. Uma nota abaixo de `min_score` reprova.
+Um mutante que estoura o tempo conta como morto, desde que a máquina não seja a causa (veja "Quando roda"). Um mutante em linha que nenhum teste executa não roda e fica fora da nota; num comando que ocupa várias linhas, basta que o relatório de cobertura marque a linha do mutante ou a linha onde o comando começa. Se nenhum mutante rodou, não há nota e o gate passa. Uma nota abaixo de `min_score` reprova.
 
 ### Que alterações a Forja faz
 
@@ -78,6 +78,10 @@ A verificação só age se a tentativa acrescentou linhas em arquivo de produç�
 
 Limites de tempo: a verificação inicial dos testes pode levar até 600 segundos. Cada mutante tem como limite dez vezes a duração dessa verificação inicial, nunca menos de 2 segundos. Estourar o limite mata o mutante.
 
+Prioridade: a verificação inicial e os testes de cada mutante rodam na prioridade mais baixa do sistema (classe ociosa no Windows, `nice` 19 no Linux e no macOS), junto com tudo o que eles iniciam. A mutação usa todos os processadores, mas só o que o resto da máquina deixa livre: quem está no teclado vem primeiro. Com a máquina ocupada, a mutação demora mais.
+
+Estouro de tempo com a máquina ocupada: um mutante que estoura o tempo ao lado dos outros é julgado de novo sozinho. Se estoura de novo, a Forja roda em seguida os testes na cópia sem alteração, com o mesmo limite. Se eles passam, o mutante está morto. Se nem eles terminam a tempo, quem está lento é a máquina, não o mutante: a Forja não conta o mutante como morto e o resultado é inconclusivo. Nisto a Forja difere do `unclebob/mutator`, que conta todo estouro como morte.
+
 O comando de testes dos mutantes é o do adaptador da linguagem. Em projeto Maven ele é `mvn test`, sem o `clean` do gate de testes: os mutantes de um trabalhador rodam um depois do outro na mesma cópia, e o compilador refaz o que mudou. Um comando de teste trocado em `[checks.tests.commands]` não vale para a mutação, e a mutação não aceita `commands`.
 
 ### Mutação incremental
@@ -105,7 +109,7 @@ Uma função que a tentativa não tocou não entra, e um sobrevivente que já ex
 | `mode` | `blocking` ou `observation` | `observation` | `blocking` exige `promotion` |
 | `on_inconclusive` | `block` ou `premise` | `premise` | o que fazer quando a medição não pôde ser feita |
 | `thresholds.<linguagem>.min_score` | número maior que `0` e até `1` | `0.80`; `0.70` para `python` e `go` | nota mínima. Valor fora dessa faixa é ignorado e vale o padrão. |
-| `limits.workers` | inteiro maior que `0` | o menor entre `4` e o número de processadores | quantos mutantes rodam em paralelo. Cada trabalhador usa uma cópia do projeto. Valor que não é inteiro positivo é ignorado. |
+| `limits.workers` | inteiro maior que `0` | o número de processadores | quantos mutantes rodam em paralelo, no máximo. Cada trabalhador usa uma cópia do projeto, e nunca há mais trabalhadores que mutantes a rodar. Valor que não é inteiro positivo é ignorado. |
 
 Os padrões menores de Python e Go existem porque a mutação nessas linguagens é mais lenta e mais frágil.
 
@@ -157,6 +161,8 @@ A lista de sobreviventes diz ao agente que teste falta: cada linha é uma mudan�
 | --- | --- |
 | os testes falham na cópia sem alteração | `mutation: the tests do not pass on the unchanged copy` |
 | o comando de testes não executa | `mutation: the tests could not run (<motivo>)` |
+| um mutante estoura o tempo e os testes da cópia sem alteração também não terminam nesse tempo | `mutation: the tests could not run (the unchanged copy no longer passes in the time a mutant is given: the machine is too busy to tell a slow mutant from one that never ends)` |
+| um mutante estoura o tempo e os testes da cópia sem alteração passam a falhar | `mutation: the tests do not pass on the unchanged copy` |
 | a ferramenta de cobertura não executa, termina com erro ou não escreve o relatório | `coverage: ...` |
 | a linguagem não tem cobertura disponível | não aplicável |
 

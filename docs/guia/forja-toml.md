@@ -220,7 +220,7 @@ Um limite vale para o repositório todo, sem linguagem. O arquivo aceita qualque
 | --- | --- | --- | --- | --- |
 | `scope` | `max_files` | `8` arquivos por tarefa | inteiro maior que zero | máximo de arquivos que a tarefa pode mudar. A Forja aplica o menor entre o limite da tarefa e o seu; a política só pode apertar. |
 | `scope` | `max_lines` | `400` linhas por tarefa | inteiro maior que zero | máximo de linhas mudadas. Mesma regra. |
-| `mutation` | `workers` | o menor entre `4` e o número de processadores | inteiro maior que zero | quantos mutantes rodam em paralelo. |
+| `mutation` | `workers` | o número de processadores | inteiro maior que zero | quantos mutantes rodam em paralelo, no máximo. |
 | `duplication` | `min_tokens` | `50` | inteiro | tamanho mínimo, em tokens, de um trecho para contar como clone. O agente recebe o mesmo valor na instrução. |
 | `duplication` | `min_lines` | `5` | inteiro | tamanho mínimo, em linhas, de um trecho para contar como clone. O agente recebe o mesmo valor na instrução. |
 | `voice` | `max_dashes` | `3` | inteiro | travessões que um arquivo (ou a mensagem de commit) pode acrescentar. Acima disso, o achado é reportado. O agente é instruído a não usar nenhum. |

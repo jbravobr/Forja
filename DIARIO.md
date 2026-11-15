@@ -909,3 +909,308 @@ Fora da avaliação: o dono pediu para avaliar o que estava aberto no GitHub. N�
 - Mutação sobre o que o pull request mudou em `src`, junto com a próxima leva que mexe em `src`.
 - Prova de vida com o Cursor 2026.11 de verdade, para conferir as partes 2 e 3.
 - O pull request 1 segue aberto no GitHub até `correcoes-p0` chegar a `main`. A branch foi enviada ao remoto e o pull request recebeu um comentário com o que foi feito.
+
+## 14/11/2026 — o desempenho da mutação passa a ser o ponto central
+
+Sessão de análise e decisão. Nenhum código mudou; só o `CLAUDE.md` e este diário.
+
+### O que motivou
+
+O dono está descontente com o caminho seguido no desempenho da mutação. Com a Forja rodando, a máquina (Ryzen 9 7900X3D, 24 threads, 32 GB) não serve para jogo nem para transmissão ao vivo. O gate de mutação é um pilar de qualidade e pede o máximo de desempenho real, sem perder qualidade.
+
+### O que foi conferido no código
+
+- **Nenhum processo de mutação roda com prioridade baixa.** A busca por `priority`, `nice` e `affinity` em `src` e `scripts` só achou `_CREATE_NEW_PROCESS_GROUP | _CREATE_SUSPENDED` em `core/process/_windows.py`. Os testes dos mutantes disputam CPU de igual para igual com o resto da máquina.
+- **O gate roda o comando de testes inteiro para cada mutante** (`AdapterRunner`, `Operation.TEST`, com `-x` em Python). A escolha de testes pela linha mutada, a ordem dos testes e o histórico entre rodadas existem só em `scripts/mutate.py`.
+- **O padrão de workers é 4 no gate** (`mutation/executor.py`) e 8 no script.
+- **O gate já faz uma base por rodada.** "Base uma vez por comando" só falta no script, que faz uma por arquivo.
+
+### Decisões do dono
+
+| Assunto | Decisão |
+| --- | --- |
+| Prioridade baixa nos processos de mutação, no gate e no script | Fazer, mesmo sem estar confirmada no mutator. |
+| Um worker por núcleo como padrão, no gate e no script | Fazer. |
+| Go: só o pacote do arquivo mutado, como no mutator | Fazer. |
+| Ordem do trabalho | Esta leva passa à frente do item 5. |
+| Testes pela linha mutada e histórico dentro do gate, "só em Python por enquanto" | Recusado como proposto. Os pilares da Forja não têm comportamento diferente por linguagem. A técnica entra no gate para todas as linguagens do requisito básico, ou não entra. |
+
+### Conclusões
+
+- **A proposta "só em Python por enquanto" foi um erro meu.** A regra passou a estar escrita no `CLAUDE.md`, item 7: processo, qualidade, assertividade e usabilidade iguais em todas as linguagens, frameworks e sistemas operacionais do requisito básico.
+- **A escolha de testes pela linha no gate depende de cobertura por teste em cada linguagem.** Hoje só o script a tem, em Python, pelos contextos do `coverage`. O equivalente nas outras linguagens ainda não foi levantado; é a primeira parte do plano.
+- **A medição de `orchestrator/measurer.py` (22 min, 86 mutantes) é anterior à cópia enxuta e ao modo diferencial.** Precisa ser refeita antes de qualquer mudança.
+- **O que preserva a qualidade:** morto pelo subconjunto é morto pelo conjunto; sobrevivente só conta depois do conjunto inteiro. Ficam recusados: amostrar mutantes, encurtar o tempo-limite, pular a reconferência e descartar mutante por heurística de equivalência. Toda mudança entra com medição antes e depois e com comparação de vereditos.
+
+### Verificação
+
+Nada rodou: nenhum código mudou.
+
+### Pendências
+
+- **Leva de desempenho da mutação, a fazer, à frente do item 5:** plano primeiro; prioridade baixa; um worker por núcleo; Go só no pacote; base uma vez por comando no script; cobertura por teste em cada linguagem, e com ela a escolha pela linha, a ordem dos testes e o histórico no gate; nova medição de `measurer.py`, a escolha por função de teste no lugar de arquivo, e rodar primeiro quem matou da última vez.
+- **Reler o `unclebob/mutator` por inteiro antes de implementar** (regra 3), conferindo se ele trata prioridade de processo.
+- As pendências da entrada de 14/11 sobre as decisões do dono continuam, agora depois desta leva.
+
+## 14/11/2026 — plano da leva de desempenho da mutação
+
+Sessão de leitura e plano. Nenhum código mudou; só este diário. O plano espera a ordem do dono.
+
+### O que foi lido
+
+- **Forja:** `mutation/executor.py`, `checks/mutation.py`, o comando de testes e o de cobertura dos cinco adaptadores, o pedido e as capacidades em `core/adapters/language.py`, o grupo de processos de `core/process` (Windows e POSIX), o modelo de cobertura de `core/reports`, e de `scripts/mutate.py` o runner, `judge_file` e `main`.
+- **`unclebob/mutator` em `830ec7e`,** o mesmo commit de 13/11: README, `runner.py`, `workers.py`, `engine.py`, `cli.py` e `coverage.py`, por inteiro. Não relidos: `metrics.py`, `sites.py`, `functions.py`, `edn.py`, `report.py`, `model.py` e `crapper_link.py`; nenhum deles executa mutante. `metrics.py` tem de ser relido antes da parte do histórico (fases 4 e 5). O `crapper` não foi lido.
+
+### O que foi conferido
+
+1. **O mutator não trata prioridade de processo.** A busca por `nice`, `priority`, `affinity`, `setpriority`, `sched_` e `ionice` no repositório inteiro não achou nada. A prioridade baixa é divergência, já decidida pelo dono.
+2. **Workers no mutator:** o menor entre os sítios escolhidos, `os.cpu_count()` e `--max-workers` (`workers.py:75`).
+3. **Base no mutator:** uma por par de comando e pasta, guardada entre os arquivos do mesmo comando (`engine.py:191`), sem limite de tempo. O executor recebe o tempo-limite já calculado: `max(2, base × fator)` (`engine.py:231`).
+4. **Go no mutator:** `go test -count=1` no pacote do arquivo (`runner.py:205`). Como a base é por comando, é uma base por pacote.
+5. **O mutator não escolhe testes, não os ordena e não para no primeiro que falha.** Python roda `pytest`, Java `mvn -q test -DexcludeTags=no-mutate`, TypeScript `npm test`. Escolha pela linha, ordem e histórico por teste são da Forja.
+6. **Correção à entrada anterior: o gate não usa `-x` em Python.** `languages/python/adapter.py:251` planeja `pytest -p no:cacheprovider -q -rA --color=no`. `-x` só aparece em `scripts/mutate.py:587` e em `cli/facade.py:63`. No gate, nas seis linguagens, o mutante morto roda a suíte até o fim.
+7. **O modelo de cobertura do gate já guarda os testes de cada linha.** `FileCoverage.tests` (`core/reports/models.py:31`) é preenchido pelo leitor do coverage.py, e o driver de Python já grava o contexto por função de teste (`coverage_driver.py:30`, no formato `tests/test_a.py::test_x`). `MutationCheck` não lê esse campo. Os leitores das outras linguagens (istanbul, JaCoCo, Cobertura, perfil do Go) não o preenchem.
+8. **Filtro de testes nos adaptadores:** só Python aceita `test_files` (`TEST_FILTER_BY_FILE`). Nenhum adaptador aceita `tests`. Go, Java (Maven e Gradle), C# e TypeScript/JavaScript respondem `NotSupported` a qualquer filtro.
+9. **As cópias dos workers são feitas uma depois da outra** (`executor.py:182`). A 0,96 s por cópia (medida de 13/11 na árvore da Forja), 24 workers custam cerca de 23 s antes da base.
+10. **O script faz até duas bases por arquivo:** `judge_file` chama `run_mutants` uma vez para a rodada estreita e outra para a reconferência, e cada chamada roda a sua base.
+11. **A cobertura de Go é medida com `-coverpkg=./...`** (`languages/go/adapter.py:186`): uma linha pode estar coberta só por teste de outro pacote.
+12. **Esta máquina tem WSL com Ubuntu** (`wsl -l -q`). O que há instalado lá não foi conferido. macOS não há.
+
+### O plano
+
+Valem as regras da entrada anterior: morto pelo subconjunto é morto pelo conjunto; sobrevivente só conta depois do conjunto inteiro; nada de amostrar, encurtar o tempo-limite, pular a reconferência ou descartar por equivalência; toda mudança com medição antes e depois e comparação de vereditos. Um commit por item, com teste.
+
+| Fase | O que | Depende de |
+| --- | --- | --- |
+| 0 | Medição de base | nada |
+| 1 | Prioridade baixa e um worker por núcleo | 0 |
+| 2 | Go só no pacote, e a base uma vez por comando no script | 1 |
+| 3 | Levantamento: filtro, parada e teste por linha em cada linguagem | nada |
+| 4 | No gate: testes da linha, ordem e histórico, nas seis linguagens de uma vez | 2, 3 e a decisão do dono sobre o levantamento |
+| 5 | No script: escolha por função de teste, e quem matou roda primeiro | 2 |
+
+**Fase 0: medição de base.** Nenhum código muda.
+
+- Script: `orchestrator/measurer.py` com `--mutate-all` e cobertura nova, com a máquina parada. Guardar o tempo de cada parte (cobertura, base, mutantes, reconferidos), o pico de memória e o veredito de cada mutante.
+- Gate: uma rodada do `MutationCheck` num projeto de cada linguagem, com o mesmo registro. Quais projetos de exemplo servem não foi conferido; os testes `slow` de mutação real são o ponto de partida.
+- Esses vereditos são a referência de comparação de todas as fases.
+
+**Fase 1: prioridade baixa e um worker por núcleo.** A prioridade vem antes: 24 workers em prioridade normal piorariam a queixa.
+
+- Prioridade no gate: `ProcessSpec` ganha um campo que pede prioridade baixa, e `AdapterRunner` o liga para a base e para os mutantes. No Windows, a classe de prioridade é imposta pelo Job Object que `WindowsJobGroup` já cria (o campo `PriorityClass` já está declarado em `_BasicLimits`), e assim vale para a árvore inteira. No POSIX, a prioridade é dada ao grupo de processos em `PosixGroup.attach`; a sessão nova já existe. As chamadas (`JOB_OBJECT_LIMIT_PRIORITY_CLASS`, `os.setpriority`) estão aqui de memória e têm de ser conferidas na documentação antes de escrever.
+- Prioridade no script: o próprio processo baixa a sua prioridade no começo de `main`; canário, cobertura, base e mutantes herdam.
+- Nível: o mais baixo de cada sistema (classe ociosa no Windows, 19 no POSIX).
+- Teste: um processo neto diz a própria prioridade. No Windows aqui; no Linux pelo WSL.
+- Workers: o padrão passa a `os.cpu_count()` no gate (`executor.py:179`) e no script (`mutate.py:694`), como no mutator. `limits.workers` e `--max-workers` continuam como teto. As cópias dos workers passam a ser feitas em paralelo (achado 9). O guia `gates/mutacao.md` muda no padrão de `limits.workers`.
+- Medir: tempo e pico de memória com 24 workers, com a máquina parada e com a máquina em uso.
+- Risco: o tempo-limite é de relógio. Com a máquina ocupada, um mutante em prioridade baixa pode estourar o tempo sem ter laço nenhum e contar como morto. `_alone` já julga de novo, sozinho, quem estourou, e isso fica. Se a medição com a máquina em uso der veredito diferente, a fase para e o caso volta ao dono.
+
+**Fase 2: Go só no pacote, e a base uma vez por comando no script.**
+
+- O executor passa a aceitar uma base já medida por quem o chama, como no mutator, e a fazer duas passagens: a estreita e, para quem sobreviveu a ela, a inteira. É o que `judge_file` faz hoje por fora, com duas chamadas. O runner passa a saber qual arquivo foi mutado.
+- Go: o pedido ao adaptador ganha um aviso com o arquivo mutado, do tipo do `rerun`, que só o Go lê: `go test -count=1 -json` no pacote do arquivo. Uma base por comando distinto, como no mutator. O sobrevivente do pacote é julgado por `./...` antes de contar, por causa do achado 11. Nas outras linguagens o mutator roda o comando inteiro; o ganho equivalente nelas é a fase 4.
+- Script: uma base por comando, com a união dos testes dos arquivos pedidos, e o tempo-limite de dez vezes essa base, como no mutator. O `--timeout` por teste do pytest continua a pegar o laço em segundos. Base que falha: saída 2 e histórico intacto, como hoje.
+- Medir: `measurer.py` e uma rodada de vários arquivos, antes e depois; no gate, um projeto Go com mais de um pacote.
+
+**Fase 3: levantamento.** Nenhum código de produção muda. Para Python, Go, Java com Maven, Java com Gradle, C#, e TypeScript e JavaScript com Vitest e com Jest, três respostas, tiradas da documentação de cada ferramenta e de uma prova de vida num projeto pequeno, no Windows e no Linux:
+
+- (a) como rodar só os testes escolhidos, e qual é a unidade (função, classe, arquivo ou pacote);
+- (b) como parar no primeiro teste que falha e como impor a ordem;
+- (c) como saber quais testes executam cada linha, e quanto custa medir.
+
+Ponto de partida: Python tem (a) por arquivo e (c) por função, já no gate. As outras não têm nada disso na Forja. De memória, sem conferir: JaCoCo, coverlet, istanbul e o perfil do Go não dizem o teste de cada linha num relatório só; o equivalente provável é uma medição por unidade de teste, e o custo dela é o que decide.
+
+Saída: uma tabela por linguagem com (a), (b) e (c) provados e o custo medido. A técnica só segue para a fase 4 se as seis tiverem as três respostas.
+
+**Fase 4: no gate, nas seis linguagens de uma vez.**
+
+- Adaptadores: o filtro por teste, que o contrato já prevê (`tests`, `test_files`), e a parada no primeiro teste que falha quando o pedido é `rerun` (achado 6).
+- Leitores de cobertura: preenchem `FileCoverage.tests`.
+- `MutationCheck`: cada mutante é julgado primeiro pelos testes das suas linhas (`site.lines`, com a âncora); o sobrevivente, pelo comando inteiro. O tempo-limite continua o de dez vezes a base do comando inteiro.
+- Ordem: primeiro o teste que matou o mesmo mutante da última vez.
+- Histórico: serve só para a ordem. Nenhum mutante deixa de rodar no gate (ponto 2 para o dono).
+- Onde o gate guarda o histórico entre uma tentativa e outra não foi lido; faz parte da fase.
+- Medir, por linguagem: antes e depois, mesmos mutantes, mesmos vereditos. O guia `gates/mutacao.md` muda em "Quando roda" e em "Mutação incremental".
+
+**Fase 5: no script.**
+
+- Escolha por função de teste: os contextos do `coverage` já são por função, e o script os reduz a arquivo. Passa a pedir os testes pelo id. A reconferência continua pelo conjunto inteiro. Atenção ao que o item 41 registrou: o que roda na preparação de um fixture fica na conta do teste anterior, e por função isso pesa mais; a medição conta os reconferidos.
+- Quem matou roda primeiro: o histórico de hoje guarda os arquivos que julgaram, não o teste que falhou. Passa a guardar o teste que falhou (versão 3) e a rodá-lo primeiro.
+- Medir: `measurer.py`, contra a fase 0 e a fase 2.
+
+**Verificação de cada fase:** `ruff check .`, `ruff format --check`, `mypy`, a suíte rápida e a mutação dos arquivos de `src` que a fase mudou. A suíte completa com `slow` fecha a leva, sozinha na máquina.
+
+### Pontos para o dono
+
+1. **Nível da prioridade.** O plano usa o mais baixo de cada sistema. É uma constante; se o dono quiser outro nível, muda nela.
+2. **Histórico no gate só para a ordem.** No script, o veredito aproveitado tem a rede do `--mutate-all` antes de cada release. No gate não há essa rede, e entre uma tentativa e outra o agente muda justamente o código em volta: um "morto" aproveitado poderia ser um sobrevivente. Rodando todos, com o teste que matou na frente, o mutante morto custa um teste.
+3. **macOS não pode ser provado nesta máquina.** O caminho POSIX é o mesmo do Linux, que roda no WSL.
+
+### Verificação
+
+Nada rodou: nenhum código mudou.
+
+### Pendências
+
+- **A leva, pelas fases acima,** a começar pela 0, depois da ordem do dono.
+- **Reler `metrics.py` do mutator** antes das fases 4 e 5.
+- As pendências da entrada anterior sobre as decisões do dono continuam, depois desta leva.
+
+## 14/11/2026 — leva de desempenho, fases 0 e 1: a prioridade baixa aprova o que devia reprovar com a máquina toda ocupada
+
+A fase 1 parou na medição com a máquina em uso, como o plano previa. O código das duas mudanças está escrito e testado na árvore de trabalho, **sem commit**, à espera da decisão do dono.
+
+### Decisões do dono
+
+Os três pontos do plano foram confirmados: a prioridade mais baixa de cada sistema; no gate, o histórico só para a ordem; macOS sem prova nesta máquina.
+
+### Fase 0: medição de base
+
+Código de `8b61fbe`, no checkout de verificação. A máquina não estava parada de todo: durante a rodada do script eu rodei `ruff`, `mypy`, cerca de 150 testes rápidos e a instalação do ambiente no WSL.
+
+| Rodada | Resultado |
+| --- | --- |
+| Script, `orchestrator/measurer.py`, `--mutate-all`, 8 workers | 2201 s no total: canário 2 s, cobertura por teste 382 s, o arquivo 1816 s. 94 mutantes, 21 arquivos de teste, todos mortos. O script não diz quanto do arquivo é base e quanto é mutante. |
+| Gate, um projeto por linguagem | tabela abaixo, coluna "antes" |
+
+O pico de memória da rodada do script não foi medido de forma confiável: a amostra somou 1,29 GB para 44 processos `python`, o que não é crível. Os vereditos da rodada ficaram guardados (o histórico `.metrics/mutate` do checkout).
+
+**O projeto de cada linguagem** é o de `tests/languages/<linguagem>/test_mutation.py` (em Python, o de `tests/checks/support.py`), com N funções a mais, cada uma com um teste que mata o seu único mutante (`a - b`). O medidor chama `MutationCheck.evaluate` e guarda o veredito de cada mutante. Ele ficou no scratchpad da sessão, não no repositório.
+
+### Fase 1: o que foi feito
+
+| Mudança | Arquivos | Teste novo |
+| --- | --- | --- |
+| Prioridade baixa no gate. `ProcessSpec.low_priority` pede; o runner chama `ProcessGroup.lower_priority` antes de criar o processo. No Windows o Job Object impõe a classe ociosa à árvore inteira (`JOB_OBJECT_LIMIT_PRIORITY_CLASS`); no POSIX, `os.setpriority` dá 19 ao grupo de processos em `attach`. `AdapterRunner` liga para a base e para cada mutante. | `core/process/model.py`, `group.py`, `runner.py`, `_windows.py`, `_posix.py`, `core/adapters/common.py`, `checks/mutation.py` | `tests/core/process/test_priority.py` (7), um em `tests/core/adapters/test_common.py`, um em `tests/checks/test_mutation.py` |
+| Prioridade baixa no script. `yield_the_machine` baixa a do próprio processo no começo de `main`; o que ele inicia herda. | `scripts/mutate.py` | dois em `tests/mutation/test_mutate_script.py` |
+| Um worker por núcleo. O padrão passa a `os.cpu_count()` no gate e no script. As cópias dos workers são feitas ao mesmo tempo. | `mutation/executor.py`, `scripts/mutate.py`, `docs/guia/gates/mutacao.md`, `docs/guia/forja-toml.md` | dois em `tests/mutation/test_executor.py`; um ajustado em `test_mutate_script.py` |
+
+Conferido na documentação antes de escrever: `JOB_OBJECT_LIMIT_PRIORITY_CLASS` é `0x20` e vale para todos os processos do job; `IDLE_PRIORITY_CLASS` é `0x40` e é herdada pelos filhos; `os.setpriority` com `PRIO_PGRP` existe no Unix desde o Python 3.3. A página do Job Object diz que quem chama precisa do privilégio `SE_INC_BASE_PRIORITY_NAME`; nesta máquina, sem privilégio, a classe ociosa foi imposta e o teste a lê no processo neto.
+
+### Medições do gate, máquina parada
+
+Antes: `8b61fbe`, 4 workers, prioridade normal. Depois: árvore de trabalho, 24 workers, prioridade baixa. Tempo total do `evaluate`, e a memória que a máquina perdeu no pior momento.
+
+| Linguagem | 30 mutantes, antes | depois | 120 mutantes, antes | depois |
+| --- | --- | --- | --- | --- |
+| Python | 9,2 s; 0,1 GB | 6,6 s; 0,7 GB | 26,5 s; 0,3 GB | 15,7 s; 0,7 GB |
+| Go | 13,5 s; 0,5 GB | 8,0 s; 1,8 GB | 31,5 s; 0,5 GB | 25,0 s; 1,2 GB |
+| Java (Maven) | 65,8 s; 1,0 GB | 57,0 s; 4,9 GB | 234,1 s; 2,0 GB | 203,2 s; 5,7 GB |
+| C# | 40,8 s; 1,0 GB | 28,8 s; 4,7 GB | 124,2 s; 3,2 GB | 85,3 s; 5,2 GB |
+| TypeScript (Vitest) | 7,2 s; 0,3 GB | 4,2 s; 1,3 GB | 21,4 s; 0,4 GB | 11,2 s; 1,4 GB |
+
+Vereditos iguais, mutante a mutante, nas cinco linguagens e nos dois tamanhos.
+
+### Medições do gate, máquina em uso
+
+48 mutantes por linguagem, 12 deles com teste que não confere nada (têm de sobreviver). A carga são processos em laço, em prioridade normal, ligados depois da base.
+
+| Carga | Código | Resultado |
+| --- | --- | --- |
+| nenhuma | novo | 12 sobreviventes e 36 mortos nas cinco. Python 7,7 s; Go 11,0 s; Java 81,5 s; C# 41,0 s; TypeScript 5,7 s. |
+| 12 processos | novo | vereditos iguais nas cinco. Python 25,8 s; Go 73,8 s; Java 481,8 s; C# 244,1 s; TypeScript 23,7 s. |
+| 24 processos | novo | **Python: 42 mortos por tempo, 3 sobreviventes, 3 mortos (260 s). TypeScript: 48 mortos por tempo (675 s), e o gate aprova onde devia reprovar** (a nota certa é 0,75, abaixo do limite 0,80). Java, C# e Go não foram medidos nesta carga. |
+| 24 processos | antigo (4 workers, prioridade normal) | vereditos certos: 12 sobreviventes e 36 mortos. Python 31,8 s; TypeScript 47,3 s, reprovado. |
+
+### Conclusões
+
+- **Com todos os processadores ocupados, a prioridade baixa troca sobrevivente por morto.** O tempo-limite é de relógio e vem de uma base que rodou com a máquina livre. Um processo de classe ociosa quase não roda quando tudo está ocupado; o mutante estoura o tempo ao lado dos outros, estoura de novo sozinho em `_alone`, e conta como morto. Em prioridade normal o mutante divide o processador com a carga e cabe nas dez vezes.
+- **Com metade dos processadores ocupados os vereditos se mantêm,** e é `_alone` que os segura: os mutantes que estouram ao lado dos outros são julgados de novo um a um. É isso que leva Java de 81 s a 482 s.
+- **Um worker por núcleo rende pouco onde o comando de testes já usa vários núcleos.** Com 120 mutantes e seis vezes mais workers: Java 1,15 vez mais rápido, Go 1,26, C# 1,46, Python 1,7, TypeScript 1,9, com duas a quatro vezes mais memória. Em Java cada `mvn test` levou cerca de 39 s com 24 juntos, contra cerca de 8 s com 4; o limite, de dez vezes a base, é de cerca de 60 s.
+- **O Job Object impõe a prioridade sem privilégio nesta máquina.** Se um sistema recusar, o processo não é criado (`SPAWN_FAILED`) e o gate fica inconclusivo.
+
+### Dificuldades
+
+- Um script embutido no shell deixou de aplicar cinco trocas com `\n` no medidor, sem erro. O mesmo tropeço das sessões anteriores; refeito pela ferramenta de edição.
+- Duas rodadas com carga passaram dos dez minutos do comando e seguiram em segundo plano.
+
+### Verificação
+
+- `ruff check`, `ruff format --check` e `mypy` strict: limpos, 631 arquivos.
+- `pytest -m "not slow" -n auto`: 9873 aprovados, 41 pulados, 267 s.
+- Linux, pelo WSL (Ubuntu 22.04, Python 3.12, ambiente próprio): os testes de prioridade, os dois do script, o do `AdapterRunner` e `test_common.py`, 22 aprovados. A suíte inteira não rodou no Linux.
+- Não rodou: a mutação dos arquivos de `src` tocados; a nova medição de `measurer.py` com o código novo; a suíte completa com `slow`; Java, C# e Go com 24 processos de carga; macOS.
+
+### Pendências
+
+- **Decisão do dono: como a prioridade baixa deixa de trocar sobrevivente por morto.** Sugestão: o estouro de tempo só conta como morte se, logo depois dele, a cópia sem mutação ainda passa dentro do mesmo limite. Quando não passa, a máquina estava ocupada demais para julgar, e o gate fica inconclusivo em vez de contar o mutante como morto. É divergência do mutator, que conta todo estouro como morte. Custa uma base a mais por mutante que estoura duas vezes.
+- **Depois da decisão:** medir de novo com 24 processos de carga nas cinco linguagens, mutação dos arquivos tocados, nova medição de `measurer.py`, e os commits (um por item).
+- **A árvore de trabalho tem as duas mudanças da fase 1 sem commit,** além do `CLAUDE.md` e do diário.
+- As fases 2 a 5 do plano esperam a fase 1.
+
+## 14/11/2026 — leva de desempenho, fase 1 fechada: o estouro de tempo só mata se a máquina não for a causa
+
+### Decisão do dono
+
+A sugestão da entrada anterior foi aceita ("sim, implemente"): o estouro de tempo só conta como morte se, logo depois dele, a cópia sem mutação ainda passa dentro do mesmo limite. Quando não passa, a rodada fica sem veredito. É divergência do mutator, que conta todo estouro como morte.
+
+### O que foi feito
+
+| Mudança | Arquivos | Teste novo | Commit |
+| --- | --- | --- | --- |
+| Prioridade baixa no gate (descrita na entrada anterior). O literal `0` da classe de prioridade saiu de `WindowsJobGroup.__init__`: `_limit` só grava a classe quando ela é pedida. | `core/process/*`, `core/adapters/common.py`, `checks/mutation.py` | `tests/core/process/test_priority.py` (7), um em `test_common.py`, três em `tests/checks/test_mutation.py` | `7ea132d` |
+| Cinco mutantes antigos de `_windows.py` mortos por teste: o código de saída de uma árvore morta e de um processo morto sozinho, e os identificadores abertos sobre um processo, que não podem ser herdados. | `tests/core/process/test_windows_group.py` | os três do arquivo | `c5aac71` |
+| Um worker por núcleo, cópias dos workers ao mesmo tempo, e a guarda do estouro de tempo no executor: `_still_in_time` roda a cópia sem mutação no limite do mutante e levanta `MachineTooBusy` (filha de `TestsDidNotRun`) quando ela estoura. No gate isso dá inconclusivo. | `mutation/executor.py` | oito em `tests/mutation/test_executor.py` | `3f9224d` |
+| Script: prioridade mais baixa do sistema, um worker por núcleo, saída 2 com o histórico intacto quando a máquina está ocupada, e o estouro do limite por teste tratado como estouro de tempo (abaixo). | `scripts/mutate.py` | oito em `tests/mutation/test_mutate_script.py`, e um ajustado | `104e349` |
+| O teste do gate diferencial pede razão acima do limite (1,25), não acima de 2. | `tests/checks/test_differential_check.py` | nenhum | `a91536a` |
+
+Os itens que dividem arquivo foram no mesmo commit: worker por núcleo e guarda em `executor.py`; prioridade, worker por núcleo e limite por teste em `scripts/mutate.py`.
+
+### A guarda, medida no gate
+
+48 mutantes por linguagem, 12 que têm de sobreviver, 24 workers, prioridade baixa.
+
+| Carga | Resultado |
+| --- | --- |
+| nenhuma | vereditos iguais aos da base. Python 7,1 s; Go 9,5 s; Java 71,7 s; C# 36,0 s; TypeScript 5,0 s. |
+| 12 processos | vereditos iguais. Python 13,9 s; Go 43,2 s; Java 309,4 s; C# 74,7 s; TypeScript 6,4 s. |
+| 24 processos | as cinco inconclusivas, com "the unchanged copy no longer passes in the time a mutant is given". Python 60 s; Go 65 s; Java 252 s; C# 192 s; TypeScript 50 s. Nenhuma aprovou. |
+
+### O script: o limite por teste tinha o mesmo defeito
+
+A primeira rodada de mutação dos arquivos tocados parou em `_windows.py`: os testes falharam na cópia sem mutação. Repetindo a base com a saída guardada, o processo do `pytest-xdist` morria em `tests/languages/python/test_environment.py::test_an_editable_install_of_a_src_layout_repository_stays_visible`. O teste leva 12,4 s sozinho e passou dos 30 s do `--timeout` por teste com 24 processos lado a lado (1 falha em 2 repetições). O comentário do script dizia que o teste mais lento "leva alguns segundos".
+
+O que isso mostrou: no script, um teste que estoura o limite saía como teste que falhou (`pytest-timeout` encerra com código 1), e o mutante contava como morto. Com prioridade ociosa e a máquina ocupada, era o mesmo morto falso que o dono mandou corrigir no gate. Apliquei a mesma regra, sem nova pergunta:
+
+- `PytestRunner` reconhece o estouro pela linha que o `pytest-timeout` escreve no método `thread` (`+++ Timeout +++`, conferida no código da versão 2.4.0 instalada), pedido em todos os sistemas, e devolve `TIMED_OUT`. O executor julga o mutante de novo sozinho e, se estourar outra vez, pede a cópia sem mutação.
+- Essa cópia recebe os testes em que o mutante estourou, não todos os do arquivo: é o mesmo comando no mesmo limite, e custa segundos em vez de uma base inteira em um processo só. O runner sem arquivo-fonte (o do rejulgamento por todos os testes) continua a rodar todos.
+- O limite por teste foi de 30 s para 120 s, cerca de dez vezes o teste mais lento sozinho. Com o estouro tratado, esse número só mexe no tempo, não no veredito.
+
+### Mutação dos arquivos tocados
+
+Quatro rodadas de `scripts/mutate.py --mutate-all`, 24 workers, prioridade ociosa, com vigia da memória livre.
+
+| Rodada | Resultado |
+| --- | --- |
+| 1 (5306 s) | `mutation/executor.py` (24), `core/process/runner.py` (23), `model.py` (13) e `group.py` (1) sem sobrevivente. `checks/mutation.py` (45): 3 sobreviventes, `mkdir(parents, exist_ok)` e `unlink(missing_ok)` em `AdapterRunner.__call__`, linhas que o meu teste novo passou a cobrir sem conferir. `_windows.py`: base falhou, saída 2. Memória livre mínima 2,16 GB. |
+| 2 (5944 s) | `checks/mutation.py` sem sobrevivente (453 s). `_windows.py` (21): 6 sobreviventes, 3474 s, cinco rejulgados por todos os testes. `core/adapters/common.py` (16) e `orchestrator/measurer.py` (94) sem sobrevivente. Memória livre mínima 3,25 GB. |
+| 3 (427 s) | `_windows.py`: base falhou de novo. |
+| 4 (787 s) | `_windows.py` (20, 340 s) e `checks/differential.py` (16, 139 s) sem sobrevivente. Saída 0. |
+
+A falha da rodada 3 era outro teste: `tests/checks/test_differential_check.py::test_a_slower_version_rejects_with_the_ratio_and_the_limit`, que pedia razão acima de 2 entre programas de 0,6 s e 0,05 s e mediu 1,85 (e 1,67 na suíte rápida). Só apareceu rodando a base numa cópia, como o script faz, em 1 de 4 repetições; na árvore principal passou 4 de 4. `checks/differential.py` entrou na rodada 4 porque afrouxei um teste que o protege.
+
+Ficam sem rodar 15 sítios em linhas que nenhum teste rápido executa: 12 em `checks/mutation.py` (eram 18) e 3 em `_windows.py`. `_posix.py` não foi mutado: o script roda no Windows, onde nenhum teste executa as linhas dele.
+
+### O script, antes e depois
+
+`orchestrator/measurer.py`, `--mutate-all`, 94 mutantes, todos mortos nas duas: 1816 s com 8 workers em prioridade normal; 1477 s com 24 em prioridade ociosa (1,23 vez). A cobertura por teste foi de 382 s para 299 a 315 s. A rodada de 24 workers chegou a tomar cerca de 12 GB: a memória livre da máquina caiu de 14 GB para 2,16 GB.
+
+### Conclusões
+
+- **A prioridade baixa não cobre a memória.** Um worker por núcleo rende 1,2 vez no script e de 1,15 a 1,9 no gate, e toma de duas a quatro vezes mais memória. Quem joga ou transmite com a Forja rodando sente a memória, não só o processador. `limits.workers` e `--max-workers` baixam o número; o padrão ficou o do mutator, como o plano aprovado pede.
+- **Com 24 processos, teste de tempo deixa de ser estável.** Os dois que derrubaram a base dependiam de quanto tempo um processo leva para começar. Outros podem aparecer em arquivos que esta rodada não tocou.
+- **O script não diz qual teste falhou na base.** A saída do `pytest` é descartada; achar os dois testes custou três rodadas e um medidor à parte.
+
+### Verificação
+
+- `ruff check`, `ruff format --check` e `mypy` strict: limpos, 632 arquivos.
+- `pytest -m "not slow" -n16`, Windows: 9895 aprovados, 41 pulados, 256 s.
+- Linux, pelo WSL: os arquivos de teste tocados e `tests/core/process` inteiro, 256 aprovados, 6 pulados e 1 falha, `tests/mutation/test_mutate_script.py::test_each_line_gets_the_test_files_that_ran_it`, que compara `src\\forja\\nowhere.py` com `src/forja/nowhere.py`. Já falhava em `8b61fbe`; não é desta leva e não foi corrigida.
+- Não rodou: a suíte completa com `slow`; a suíte inteira no Linux; macOS; Java, C# e Go do código antigo com 24 processos de carga; a mutação de `scripts/mutate.py` (o script só muta `src`) e de `_posix.py`.
+
+### Pendências
+
+- **Fases 2 a 5 do plano.** Antes das fases 4 e 5, reler `metrics.py` do mutator.
+- **Para o dono decidir, se quiser:** o padrão de um worker por núcleo, dado o custo de memória medido; e se o script deve mostrar o teste que falhou na base.
+- O teste do Linux que falha desde `8b61fbe`.
+- Nada foi enviado ao GitHub: os commits estão em `correcoes-p0`, só na máquina.
