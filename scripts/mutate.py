@@ -3,7 +3,7 @@
     scripts/mutate.py              # the source files changed since HEAD (and new ones)
     scripts/mutate.py --all        # every source file
     scripts/mutate.py src/forja/checks/changes.py
-    scripts/mutate.py --max-workers 4   # at most four runs at once (default: 8, or the cores)
+    scripts/mutate.py --max-workers 4   # at most four runs at once (default: one per processor)
 
 It runs the Forja's own mutator (``forja.mutation``, the rules of unclebob/mutator on tree-sitter,
 ADR 0021) on the Forja's own source, the way the mutator runs on any project: the coverage report
@@ -29,8 +29,14 @@ and runs every one: the run to make before a release, because what the tests lea
 
 Nothing in the source can switch the gate off: a comment that does is rejected by the scope gate.
 
-Exit: 0 every mutant was killed or suppressed; 2 the tests fail before any mutation; 3 a mutant
-survived; 4 the canary failed. It runs wherever Python runs, Windows included.
+The run goes at the lowest priority of the system, so whoever is at the machine comes first. A
+mutant that runs out of time, in one test or in all of them, is judged again alone, and is only
+killed while the unchanged copy still passes in that time: on a machine too busy for that the run
+stops without a verdict, and is to be made again.
+
+Exit: 0 every mutant was killed or suppressed; 2 the tests fail before any mutation, or the
+machine was too busy to judge a mutant; 3 a mutant survived; 4 the canary failed. It runs wherever
+Python runs, Windows included.
 """
 
 import argparse
@@ -41,6 +47,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -60,6 +67,7 @@ from forja.mutation import apply_site, discover
 from forja.mutation.executor import (
     TIMEOUT_FACTOR,
     BaselineFailed,
+    MachineTooBusy,
     Mutant,
     TestsDidNotRun,
     TestVerdict,
@@ -75,7 +83,30 @@ LCOV = COVERAGE / "lcov.info"  # where the engine looks for the coverage of a Py
 # The integration tests run too: without them the code they alone reach (the call to the agent CLI,
 # the way back) counts as untested. Each file only runs the test files that reach it.
 TESTS_ENV: dict[str, str] = {}
-TEST_TIMEOUT = 30  # seconds for one test; the slowest of the project takes a few
+# Seconds for one test: about ten times the slowest of the project alone (12 s), which went past
+# 30 s beside the other runs of a machine of 24 processors. A test that goes past it is a run out
+# of time, not a failed test: see PytestRunner.
+TEST_TIMEOUT = 120
+# the line pytest-timeout writes, in its thread method, before it ends the run of such a test
+OUT_OF_TIME = re.compile(rb"^\++ Timeout \++\s*$", re.MULTILINE)
+IDLE_PRIORITY_CLASS = 0x00000040  # Windows: runs only when nothing else wants the processor
+LOWEST_PRIORITY = 19  # elsewhere: the highest niceness there is
+
+
+def yield_the_machine() -> None:
+    """Give this process the lowest priority of the system. Whatever it starts inherits it: the
+    canary, the coverage runs, the unchanged copy and every mutant. A run takes every processor
+    for minutes, and whoever is at the machine comes first. The mutator does not do this."""
+    if sys.platform == "win32":
+        import ctypes  # noqa: PLC0415
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        if not kernel.SetPriorityClass(kernel.GetCurrentProcess(), IDLE_PRIORITY_CLASS):
+            raise ctypes.WinError(ctypes.get_last_error())
+    else:
+        os.setpriority(os.PRIO_PROCESS, 0, LOWEST_PRIORITY)
 
 
 def run(
@@ -546,6 +577,12 @@ class PytestRunner:
     ``tests`` are the test files of the whole source file. With ``source`` and ``narrowed``, a
     copy that holds a mutant (known by the content of ``source``) is judged by the tests of the
     mutated line alone; the unchanged copy, and a mutant nobody narrowed, by all of them.
+
+    A test that goes past ``TEST_TIMEOUT`` is a run out of time, the same as a run that goes past
+    the limit of the executor, and not a failed test: the executor judges such a mutant again
+    alone, and then asks for the unchanged copy in the same limit. That copy is given the tests
+    the mutant ran out of time on, which is what tells a busy machine from a mutant that never
+    ends.
     """
 
     __test__ = False
@@ -562,11 +599,26 @@ class PytestRunner:
         self.source, self.narrowed = source, narrowed or {}
         self.base_workers = max(1, base_workers)
         self.base_seconds: float | None = None  # how long the unchanged copy took, once known
+        # by copy, the tests its last run went out of time on
+        self.out_of_time: dict[Path, list[str]] = {}
 
     def chosen(self, root: Path) -> list[str]:
         if self.source is None:
             return self.tests
         return self.narrowed.get(fingerprint((root / self.source).read_bytes()), self.tests)
+
+    def unchanged(self, root: Path) -> bool:
+        if self.source is None:
+            return False
+        return (root / self.source).read_bytes() == (ROOT / self.source).read_bytes()
+
+    def asked(self, root: Path) -> list[str]:
+        """The tests of this run: those of what is in the copy, or, for the unchanged copy right
+        after a run out of time in it, the tests that run was given."""
+        doubted = self.out_of_time.pop(root, None)
+        if doubted is not None and self.unchanged(root):
+            return doubted
+        return self.chosen(root)
 
     def patience(self, timeout: float | None) -> float | None:
         """How long a mutant may run. The executor gives ten times what the unchanged copy took;
@@ -581,12 +633,15 @@ class PytestRunner:
         # test of the file has to pass there, and they are many: that one run is spread over
         # ``base_workers`` processes. A mutant stops at its first failure and runs in one.
         base = timeout is None and self.base_workers > 1
-        # --timeout: a mutant that loops forever fails its test in seconds, instead of the
-        # executor waiting ten times the whole baseline for it
+        tests = self.asked(root)
+        # --timeout: a mutant that loops forever ends its test in a minute or two, instead of the
+        # executor waiting ten times the whole baseline for it. The thread method, on every
+        # system: it writes the same line and ends the run.
         command = [
             sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider",
             f"-n{self.base_workers if base else 0}",
-            f"--timeout={TEST_TIMEOUT}", "-m", "not slow", *self.deselect, *self.chosen(root),
+            f"--timeout={TEST_TIMEOUT}", "--timeout-method=thread",
+            "-m", "not slow", *self.deselect, *tests,
         ]  # fmt: skip
         started = time.monotonic()
         # the copy's own source must be the one imported, not the installed project's
@@ -596,20 +651,27 @@ class PytestRunner:
             "PYTHONPATH": str(root / "src"),
             "PYTHONDONTWRITEBYTECODE": "1",
         }
-        process = await asyncio.create_subprocess_exec(
-            *command, cwd=root, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=sys.platform != "win32",
-        )  # fmt: skip
-        try:
-            code = await asyncio.wait_for(process.wait(), self.patience(timeout))
-        except TimeoutError:
-            stop_tree(process.pid)
-            await process.wait()
-            return TestVerdict.TIMED_OUT
+        with tempfile.TemporaryFile() as said:
+            process = await asyncio.create_subprocess_exec(
+                *command, cwd=root, env=env, stdout=said, stderr=subprocess.DEVNULL,
+                start_new_session=sys.platform != "win32",
+            )  # fmt: skip
+            try:
+                code = await asyncio.wait_for(process.wait(), self.patience(timeout))
+            except TimeoutError:
+                stop_tree(process.pid)
+                await process.wait()
+                self.out_of_time[root] = tests
+                return TestVerdict.TIMED_OUT
+            said.seek(0)
+            a_test_ran_out_of_time = OUT_OF_TIME.search(said.read()) is not None
         if code == 0:
             if timeout is None:
                 self.base_seconds = time.monotonic() - started
             return TestVerdict.PASSED
+        if a_test_ran_out_of_time:
+            self.out_of_time[root] = tests
+            return TestVerdict.TIMED_OUT
         if code in (1, 2):  # a test failed, or the changed code no longer loads
             return TestVerdict.FAILED
         raise TestsDidNotRun(f"pytest exited with {code}")
@@ -690,8 +752,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("files", nargs="*")
     parser.add_argument("--all", action="store_true")
-    # the name the mutator gives it: a ceiling, never more runs than there is work for
-    parser.add_argument("--max-workers", type=int, default=min(8, os.cpu_count() or 1))
+    # the name the mutator gives it, and its default, one per processor: a ceiling, never more
+    # runs than there is work for
+    parser.add_argument("--max-workers", type=int, default=os.cpu_count() or 1)
     parser.add_argument("--reuse-coverage", action="store_true")
     parser.add_argument("--skip-canary", action="store_true")
     # the two names the mutator has for which mutants run; the second is what runs without either
@@ -721,6 +784,7 @@ def report_survivors(report: MutationReport, allowed: list[dict[str, str]]) -> i
 
 def main() -> int:
     args = parse_args()
+    yield_the_machine()
     # a line at a time even into a pipe or a file: whoever waits an hour sees where the run is
     if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(line_buffering=True)
@@ -764,6 +828,9 @@ def main() -> int:
         to_run = [mutant for at, mutant in enumerate(mutants) if at not in kept]
         try:
             ran, twice = judge_file(file, to_run, tests, by_line, args.max_workers)
+        except MachineTooBusy as error:
+            print(f"{file}: no verdict ({error})")
+            return 2
         except (BaselineFailed, TestsDidNotRun) as error:
             print(f"{file}: the tests fail before any mutation ({error})")
             return 2

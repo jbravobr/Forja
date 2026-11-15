@@ -4,6 +4,7 @@ every test of the file would give."""
 import asyncio
 import importlib.util
 import json
+import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -13,7 +14,8 @@ from typing import Any
 import pytest
 
 from forja.core.reports.models import MutantResult, MutantStatus, MutationReport
-from forja.mutation.executor import Mutant
+from forja.mutation.executor import Mutant, TestVerdict
+from tests.core.process.support import LOWEST_PRIORITY, OWN_PRIORITY
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "mutate.py"
 
@@ -31,6 +33,50 @@ def mutate() -> Iterator[ModuleType]:
         sys.modules.pop(spec.name, None)
 
 
+@pytest.fixture(autouse=True)
+def the_test_process_keeps_its_priority(mutate: Any, monkeypatch: Any) -> None:
+    """``main`` lowers the priority of the process it runs in, and here that is the test run."""
+    monkeypatch.setattr(mutate, "yield_the_machine", lambda: None)
+
+
+# -- the rest of the machine comes first -----------------------------------------------------------
+
+
+def test_the_script_and_what_it_starts_run_at_the_lowest_priority_of_the_system() -> None:
+    code = (
+        "import importlib.util, subprocess, sys\n"
+        f"spec = importlib.util.spec_from_file_location('forja_mutate_script', {str(SCRIPT)!r})\n"
+        "module = importlib.util.module_from_spec(spec)\n"
+        "sys.modules[spec.name] = module\n"
+        "spec.loader.exec_module(module)\n"
+        "module.yield_the_machine()\n"
+        f"exec({OWN_PRIORITY!r})\n"
+        f"child = subprocess.run([sys.executable, '-c', {OWN_PRIORITY!r}], capture_output=True)\n"
+        "print(child.stdout.decode().strip())\n"
+    )
+
+    ran = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+
+    assert ran.stdout.split() == [str(LOWEST_PRIORITY), str(LOWEST_PRIORITY)], ran.stderr
+
+
+def test_the_run_yields_the_machine_before_it_starts_anything(
+    mutate: Any, monkeypatch: Any
+) -> None:
+    order: list[str] = []
+
+    def canary() -> bool:
+        order.append("canary")
+        return False
+
+    monkeypatch.setattr(mutate, "yield_the_machine", lambda: order.append("yield"))
+    monkeypatch.setattr(mutate, "canary", canary)
+    monkeypatch.setattr(sys, "argv", ["mutate.py", "src/calc.py"])
+
+    assert mutate.main() == 4
+    assert order == ["yield", "canary"]
+
+
 # -- the command line ------------------------------------------------------------------------------
 
 
@@ -38,8 +84,8 @@ def test_the_ceiling_of_runs_at_once_is_asked_for_by_the_name_the_mutator_gives_
     mutate: Any, monkeypatch: Any
 ) -> None:
     assert mutate.parse_args(["--max-workers", "3", "a.py"]).max_workers == 3
-    monkeypatch.setattr(mutate.os, "cpu_count", lambda: 32)
-    assert mutate.parse_args([]).max_workers == 8
+    monkeypatch.setattr(mutate.os, "cpu_count", lambda: 32)  # one per processor, as the mutator
+    assert mutate.parse_args([]).max_workers == 32
     monkeypatch.setattr(mutate.os, "cpu_count", lambda: 2)
     assert mutate.parse_args([]).max_workers == 2
     monkeypatch.setattr(mutate.os, "cpu_count", lambda: None)
@@ -243,6 +289,119 @@ def test_the_unchanged_copy_is_timed_and_run_over_the_processes_asked_for(
     assert "-n3" in commands[0] and "-n0" not in commands[0]
     assert "-n0" in commands[1] and "-n3" not in commands[1]
     assert runner.base_seconds is not None and runner.base_seconds >= 0
+
+
+# -- a test out of time is a run out of time, not a failed test ------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("said", "code", "verdict", "noted"),
+    [
+        (b"....\r\n+++++++++ Timeout +++++++++\r\nstack of the thread\r\n", 1, "TIMED_OUT", True),
+        (b"+++++++++ Timeout +++++++++\n", 1, "TIMED_OUT", True),
+        (b"E   assert 'Timeout' in said\n1 failed\n", 1, "FAILED", False),
+        (b"1 failed\n", 1, "FAILED", False),
+        (b"error while collecting\n", 2, "FAILED", False),
+        (b"1 passed\n", 0, "PASSED", False),
+    ],
+)
+def test_the_line_pytest_writes_for_a_test_out_of_time_makes_the_run_one_out_of_time(
+    mutate: Any, monkeypatch: Any, tmp_path: Path, said: bytes, code: int, verdict: str, noted: bool
+) -> None:
+    commands: list[list[str]] = []
+
+    class Done:
+        pid = 0
+
+        async def wait(self) -> int:
+            return code
+
+    async def start(*command: str, **options: Any) -> Done:
+        commands.append(list(command))
+        options["stdout"].write(said)
+        return Done()
+
+    monkeypatch.setattr(mutate.asyncio, "create_subprocess_exec", start)
+    runner = mutate.PytestRunner(["tests/a.py"], [])
+
+    assert asyncio.run(runner(tmp_path, 20.0)) is TestVerdict[verdict]
+    assert runner.out_of_time == ({tmp_path: ["tests/a.py"]} if noted else {})
+    assert f"--timeout={mutate.TEST_TIMEOUT}" in commands[0]
+    assert "--timeout-method=thread" in commands[0]
+
+
+def test_after_a_run_out_of_time_the_unchanged_copy_is_given_the_tests_of_that_run_once(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    project, copy, other = tmp_path / "project", tmp_path / "copy", tmp_path / "other"
+    for root in (project, copy, other):
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "m.py").write_bytes(b"original")
+    monkeypatch.setattr(mutate, "ROOT", project)
+    everything = ["tests/a.py", "tests/b.py"]
+    narrowed = {mutate.fingerprint(b"mutant one"): ["tests/a.py"]}
+    runner = mutate.PytestRunner(everything, [], "src/m.py", narrowed)
+
+    runner.out_of_time[copy] = ["tests/b.py"]
+
+    assert runner.asked(other) == everything  # another copy: nothing ran out of time in it
+    assert runner.asked(copy) == ["tests/b.py"]
+    assert runner.asked(copy) == everything  # only the run right after
+
+
+def test_the_mutant_that_comes_after_a_run_out_of_time_keeps_its_own_tests(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    project, copy = tmp_path / "project", tmp_path / "copy"
+    for root in (project, copy):
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "m.py").write_bytes(b"original")
+    monkeypatch.setattr(mutate, "ROOT", project)
+    narrowed = {mutate.fingerprint(b"mutant one"): ["tests/a.py"]}
+    runner = mutate.PytestRunner(["tests/a.py", "tests/b.py"], [], "src/m.py", narrowed)
+
+    runner.out_of_time[copy] = ["tests/b.py"]
+    (copy / "src" / "m.py").write_bytes(b"mutant one")
+
+    assert runner.asked(copy) == ["tests/a.py"]
+    assert runner.out_of_time == {}  # and the unchanged copy, later, is no longer in doubt
+
+
+def test_a_runner_without_a_source_gives_every_test_after_a_run_out_of_time_too(
+    mutate: Any, tmp_path: Path
+) -> None:
+    runner = mutate.PytestRunner(["tests/a.py", "tests/b.py"], [])
+    runner.out_of_time[tmp_path] = ["tests/a.py"]
+
+    assert runner.asked(tmp_path) == ["tests/a.py", "tests/b.py"]
+
+
+def test_a_mutant_that_never_ends_is_out_of_time_on_a_real_project(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    """``count`` walks up to ``n``. With the step of 1 turned into 0 it never gets there: the test
+    goes past the limit of one test, the mutant is judged again alone, and the unchanged copy
+    still passes that test in time, so the mutant stays out of time."""
+    root = tmp_path / "project"
+    (root / "src").mkdir(parents=True)
+    (root / "tests").mkdir()
+    source = "def count(n):\n    i = 0\n    while i < n:\n        i += 1\n    return i\n"
+    (root / "src" / "walk.py").write_text(source, encoding="utf-8")
+    (root / "tests" / "test_walk.py").write_text(
+        "from walk import count\n\n\ndef test_count():\n    assert count(3) == 3\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mutate, "ROOT", root)
+    monkeypatch.setattr(mutate, "deselected", lambda: [])
+    monkeypatch.setattr(mutate, "TEST_TIMEOUT", 2)
+    tests = ["tests/test_walk.py"]
+    mutants = [m for m in mutate.mutants_of("src/walk.py", root, frozenset({4})) if m.line == 4]
+    assert [m.change for m in mutants] == ["1 -> 0"]
+
+    report, twice = mutate.judge_file("src/walk.py", mutants, tests, {}, 2)
+
+    assert [m.status for m in report.mutants] == [MutantStatus.TIMEOUT]
+    assert twice == []
 
 
 # -- the verdict is the one every test of the file gives -------------------------------------------
@@ -845,4 +1004,27 @@ def test_tests_that_fail_before_any_mutation_leave_the_history_as_it_was(
     monkeypatch.setattr(mutate, "judge_file", failing)
 
     assert mutate.main() == 2
+    assert mutate.snapshot_path("src/calc.py").read_text(encoding="utf-8") == left
+
+
+def test_a_machine_too_busy_to_judge_a_mutant_ends_the_run_and_leaves_the_history_as_it_was(
+    mutate: Any, monkeypatch: Any, tmp_path: Path, capsys: Any
+) -> None:
+    (tmp_path / "src").mkdir()
+    source = tmp_path / "src" / "calc.py"
+    source.write_text(CALC, encoding="utf-8")
+    assert run_main(mutate, monkeypatch, tmp_path, MutantStatus.KILLED)[0] == 0
+    left = mutate.snapshot_path("src/calc.py").read_text(encoding="utf-8")
+    source.write_text(CALC.replace("a - b", "b - a"), encoding="utf-8")
+
+    def busy(*_: object) -> None:
+        raise mutate.MachineTooBusy("the machine is too busy")
+
+    monkeypatch.setattr(mutate, "judge_file", busy)
+    capsys.readouterr()
+
+    assert mutate.main() == 2
+    said = capsys.readouterr().out
+    assert "src/calc.py: no verdict (the machine is too busy)" in said
+    assert "the tests fail" not in said
     assert mutate.snapshot_path("src/calc.py").read_text(encoding="utf-8") == left
