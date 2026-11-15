@@ -172,7 +172,9 @@ def test_a_slower_version_rejects_with_the_ratio_and_the_limit(
     assert isinstance(result, Rejected)
     [found] = result.findings
     assert (found.message, found.target, found.limit) == ("slower than the base", "t", 1.25)
-    assert found.measured is not None and found.measured > 2
+    # above the limit, and no more is asked: beside many other runs the start of the interpreter
+    # weighs on both versions and brings the ratio of 0.6 s to 0.05 s down from 12 to under 2
+    assert found.measured is not None and found.measured > 1.25
 
 
 def test_the_loosest_limit_of_the_languages_is_used(log: EventLog, tmp_path: Path) -> None:
