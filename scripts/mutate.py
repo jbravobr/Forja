@@ -14,10 +14,12 @@ each line. A surviving mutant fails the run unless ``mutation-suppressions.toml`
 reason a person approved.
 
 What makes it faster changes no verdict. The coverage run deals the test files into several runs
-that go at the same time. The unchanged copy of each file, where every test of the file has to
-pass, is run over several processes. A mutant is judged first by the test files that run its
-line; one that survives them is judged again by every test of the file before it counts as a
-survivor, so the answer is always the one all of them give.
+that go at the same time. As in the mutator the unchanged copy is run once for the command, not
+once for each source file: every test file of the source files that have a mutant to run has to
+pass there, over several processes, and the time that takes sets the limit of every mutant. A
+mutant is judged first by the test files that run its line; one that survives them is judged
+again by every test of the file before it counts as a survivor, so the answer is always the one
+all of them give.
 
 As in the mutator, a run leaves under ``.metrics/mutate`` what became of each mutant and a hash
 of each function, and the next run is differential: a mutant killed then, in a function whose
@@ -57,6 +59,7 @@ import tomllib
 from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -65,12 +68,14 @@ from coverage import CoverageData
 from forja.core.reports.models import MutantResult, MutantStatus, MutationReport
 from forja.mutation import apply_site, discover
 from forja.mutation.executor import (
+    MIN_TIMEOUT,
     TIMEOUT_FACTOR,
     BaselineFailed,
     MachineTooBusy,
     Mutant,
     TestsDidNotRun,
     TestVerdict,
+    baseline,
     run_mutants,
 )
 from forja.mutation.sites import function_spans
@@ -559,6 +564,44 @@ def write_history(
     return path
 
 
+class Asked(NamedTuple):
+    """What one source file asks of the run: its mutants, and those the last run settled."""
+
+    file: str
+    tests: list[str]  # every test file that runs the source file
+    mutants: list[Mutant]
+    ids: list[str]
+    digests: dict[str, str]
+    history: History
+    hashes: dict[str, str]  # of the test files, as they are now
+    kept: set[int]  # the places of the mutants that are not run again
+
+    def to_run(self) -> list[Mutant]:
+        return [mutant for place, mutant in enumerate(self.mutants) if place not in self.kept]
+
+
+def asked_of(file: str, tests: list[str], covered: frozenset[int], mutate_all: bool) -> Asked:
+    mutants = mutants_of(file, ROOT, covered)
+    source = (ROOT / file).read_text(encoding="utf-8")
+    ids, digests = mutation_ids(source, file), form_digests(source, file)
+    history = NO_HISTORY if mutate_all else load_history(file)
+    hashes = test_digests({*tests, *history.tests})
+    kept = carried(mutants, ids, digests, history, hashes)
+    return Asked(file, tests, mutants, ids, digests, history, hashes, kept)
+
+
+def base_tests(asked: Iterable[Asked]) -> list[str]:
+    """The test files of the one run on the unchanged copy: those of every source file that has
+    a mutant to run, in the order of the names (the order pytest gives the files of a directory,
+    which some tests count on). A file whose mutants the last run settled asks for none, so a
+    run with nothing to judge runs no test."""
+    found: set[str] = set()
+    for one in asked:
+        if any(mutant.covered for mutant in one.to_run()):
+            found.update(one.tests)
+    return sorted(found)
+
+
 def stop_tree(pid: int) -> None:
     """End a process and what it started: a mutant that loops must not leave workers behind."""
     if sys.platform == "win32":
@@ -567,83 +610,37 @@ def stop_tree(pid: int) -> None:
         os.killpg(pid, signal.SIGKILL)
 
 
-def fingerprint(content: bytes) -> bytes:
-    return hashlib.sha256(content).digest()
-
-
 class PytestRunner:
-    """Runs the chosen test files in a copy of the project, as the executor asks.
+    """Runs ``tests`` in a copy of the project, as the executor asks: the tests of the line of a
+    mutant, every test of a source file, or the tests of the whole run.
 
-    ``tests`` are the test files of the whole source file. With ``source`` and ``narrowed``, a
-    copy that holds a mutant (known by the content of ``source``) is judged by the tests of the
-    mutated line alone; the unchanged copy, and a mutant nobody narrowed, by all of them.
+    A run is one process: a mutant stops at its first failure. With ``processes`` it is spread
+    over that many, for the unchanged copy of the whole run, where every test has to pass and
+    they are many.
 
     A test that goes past ``TEST_TIMEOUT`` is a run out of time, the same as a run that goes past
     the limit of the executor, and not a failed test: the executor judges such a mutant again
-    alone, and then asks for the unchanged copy in the same limit. That copy is given the tests
-    the mutant ran out of time on, which is what tells a busy machine from a mutant that never
-    ends.
+    alone, and then asks the same runner for the unchanged copy in the same limit. That copy
+    runs the tests the mutant ran out of time on, which is what tells a busy machine from a
+    mutant that never ends.
     """
 
     __test__ = False
 
-    def __init__(
-        self,
-        tests: list[str],
-        deselect: list[str],
-        source: str | None = None,
-        narrowed: Mapping[bytes, list[str]] | None = None,
-        base_workers: int = 1,
-    ) -> None:
+    def __init__(self, tests: list[str], deselect: list[str], processes: int = 1) -> None:
         self.tests, self.deselect = tests, deselect
-        self.source, self.narrowed = source, narrowed or {}
-        self.base_workers = max(1, base_workers)
-        self.base_seconds: float | None = None  # how long the unchanged copy took, once known
-        # by copy, the tests its last run went out of time on
-        self.out_of_time: dict[Path, list[str]] = {}
-
-    def chosen(self, root: Path) -> list[str]:
-        if self.source is None:
-            return self.tests
-        return self.narrowed.get(fingerprint((root / self.source).read_bytes()), self.tests)
-
-    def unchanged(self, root: Path) -> bool:
-        if self.source is None:
-            return False
-        return (root / self.source).read_bytes() == (ROOT / self.source).read_bytes()
-
-    def asked(self, root: Path) -> list[str]:
-        """The tests of this run: those of what is in the copy, or, for the unchanged copy right
-        after a run out of time in it, the tests that run was given."""
-        doubted = self.out_of_time.pop(root, None)
-        if doubted is not None and self.unchanged(root):
-            return doubted
-        return self.chosen(root)
-
-    def patience(self, timeout: float | None) -> float | None:
-        """How long a mutant may run. The executor gives ten times what the unchanged copy took;
-        that run was spread over ``base_workers`` processes and a mutant runs in one, so a mutant
-        is given that many times more: never less than ten times the run of one process."""
-        if timeout is None or self.base_seconds is None:
-            return timeout
-        return max(timeout, TIMEOUT_FACTOR * self.base_workers * self.base_seconds)
+        self.processes = max(1, processes)
 
     async def __call__(self, root: Path, timeout: float | None) -> TestVerdict:
-        # The executor asks without a limit only for the unchanged copy, before any mutant. Every
-        # test of the file has to pass there, and they are many: that one run is spread over
-        # ``base_workers`` processes. A mutant stops at its first failure and runs in one.
-        base = timeout is None and self.base_workers > 1
-        tests = self.asked(root)
         # --timeout: a mutant that loops forever ends its test in a minute or two, instead of the
         # executor waiting ten times the whole baseline for it. The thread method, on every
         # system: it writes the same line and ends the run.
         command = [
             sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider",
-            f"-n{self.base_workers if base else 0}",
+            f"-n{self.processes if self.processes > 1 else 0}",
             f"--timeout={TEST_TIMEOUT}", "--timeout-method=thread",
-            "-m", "not slow", *self.deselect, *tests,
+            "-m", "not slow", *self.deselect, *self.tests,
         ]  # fmt: skip
-        started = time.monotonic()
         # the copy's own source must be the one imported, not the installed project's
         env = {
             **os.environ,
@@ -657,29 +654,46 @@ class PytestRunner:
                 start_new_session=sys.platform != "win32",
             )  # fmt: skip
             try:
-                code = await asyncio.wait_for(process.wait(), self.patience(timeout))
+                code = await asyncio.wait_for(process.wait(), timeout)
             except TimeoutError:
                 stop_tree(process.pid)
                 await process.wait()
-                self.out_of_time[root] = tests
                 return TestVerdict.TIMED_OUT
             said.seek(0)
             a_test_ran_out_of_time = OUT_OF_TIME.search(said.read()) is not None
         if code == 0:
-            if timeout is None:
-                self.base_seconds = time.monotonic() - started
             return TestVerdict.PASSED
         if a_test_ran_out_of_time:
-            self.out_of_time[root] = tests
             return TestVerdict.TIMED_OUT
         if code in (1, 2):  # a test failed, or the changed code no longer loads
             return TestVerdict.FAILED
         raise TestsDidNotRun(f"pytest exited with {code}")
 
 
-def judge(mutants: list[Mutant], runner: PytestRunner, workers: int) -> MutationReport:
+def time_limit(tests: list[str], workers: int) -> float:
+    """Run ``tests`` once on an unchanged copy of the project, where every one has to pass
+    (``BaselineFailed``), and say how long a mutant may run.
+
+    As in the mutator this is the baseline of the command, measured once whatever the number of
+    source files, and a mutant is given ten times it. The run is spread over ``workers``
+    processes and a mutant runs in one, so a mutant is given that many times more: never less
+    than ten times the run of one process. A mutant that loops does not wait that long: the
+    limit of one test ends it.
+    """
+    processes = max(1, workers)
     with tempfile.TemporaryDirectory(prefix="forja-mutants-", ignore_cleanup_errors=True) as copies:
-        return asyncio.run(run_mutants(ROOT, Path(copies), mutants, runner, workers=workers))
+        runner = PytestRunner(tests, deselected(), processes)
+        seconds = asyncio.run(baseline(ROOT, Path(copies) / "base", runner))
+    return max(MIN_TIMEOUT, TIMEOUT_FACTOR * processes * seconds)
+
+
+def judge(
+    mutants: list[Mutant], runner: PytestRunner, workers: int, timeout: float | None = None
+) -> tuple[MutationReport, list[int]]:
+    with tempfile.TemporaryDirectory(prefix="forja-mutants-", ignore_cleanup_errors=True) as copies:
+        return asyncio.run(
+            run_mutants(ROOT, Path(copies), mutants, runner, workers=workers, timeout=timeout)
+        )
 
 
 def judge_file(
@@ -688,6 +702,7 @@ def judge_file(
     tests: list[str],
     by_line: LinesToTests,
     workers: int,
+    timeout: float | None = None,
 ) -> tuple[MutationReport, list[int]]:
     """The verdict on every mutant of ``file``, and the places of those judged twice.
 
@@ -698,27 +713,21 @@ def judge_file(
     wrong test for a line (what runs while a fixture is set up is counted for the test before),
     so it is judged again by all of ``tests``, as every mutant used to be. The verdicts are the
     ones the whole of ``tests`` gives; only the time changes.
+
+    ``timeout`` is the limit ``time_limit`` found for the whole run. Without it each set of tests
+    is first run on the unchanged copy, as the executor does for any command.
     """
-    narrowed = {
-        fingerprint(mutant.mutated): tests_of_line(by_line, file, mutant.line, tests)
-        for mutant in mutants
-        if mutant.covered
-    }
-    first = judge(mutants, PytestRunner(tests, deselected(), file, narrowed, workers), workers)
-    doubted = [
-        index
-        for index, (mutant, result) in enumerate(zip(mutants, first.mutants, strict=True))
-        if result.status is MutantStatus.SURVIVED
-        and narrowed.get(fingerprint(mutant.mutated), tests) != tests
-    ]
-    if not doubted:
-        return first, []
-    whole = PytestRunner(tests, deselected(), base_workers=workers)
-    again = judge([mutants[i] for i in doubted], whole, workers)
-    results = list(first.mutants)
-    for index, result in zip(doubted, again.mutants, strict=True):
-        results[index] = result
-    return MutationReport(tuple(results)), doubted
+    deselect = deselected()
+    of_lines: dict[tuple[str, ...], PytestRunner] = {}
+
+    def first(mutant: Mutant) -> PytestRunner | None:
+        chosen = tests_of_line(by_line, file, mutant.line, tests)
+        if chosen == tests:
+            return None
+        return of_lines.setdefault(tuple(chosen), PytestRunner(chosen, deselect))
+
+    aimed = [replace(mutant, first=first(mutant)) for mutant in mutants]
+    return judge(aimed, PytestRunner(tests, deselect), workers, timeout)
 
 
 def canary() -> bool:
@@ -741,7 +750,7 @@ def canary() -> bool:
         for kind in ("loose", "tight"):
             runner = PytestRunner([f"tests/test_{kind}.py"], [])
             with tempfile.TemporaryDirectory(prefix="forja-canary-copies-") as copies:
-                report = asyncio.run(run_mutants(root, Path(copies), mutants, runner, workers=1))
+                report, _ = asyncio.run(run_mutants(root, Path(copies), mutants, runner, workers=1))
             survivors[kind] = len(report.with_status(MutantStatus.SURVIVED))
     return bool(mutants) and survivors["loose"] >= 1 and survivors["tight"] == 0
 
@@ -804,20 +813,30 @@ def main() -> int:
     covered = covered_lines()
     print(f"coverage by test: {time.monotonic() - started:.0f}s")
     allowed = suppressions()
+    asked = {
+        file: asked_of(file, tests_of[file], covered.get(file, frozenset()), args.mutate_all)
+        for file in files
+        if tests_of.get(file)
+    }
+    limit = None
+    of_base = base_tests(asked.values())
+    if of_base:
+        started = time.monotonic()
+        print(f"the unchanged copy: {len(of_base)} test file(s), once for every source file...")
+        try:
+            limit = time_limit(of_base, args.max_workers)
+        except (BaselineFailed, TestsDidNotRun) as error:
+            print(f"the tests fail before any mutation ({error})")
+            return 2
+        print(f"the unchanged copy: {time.monotonic() - started:.0f}s")
     survivors, unreached = 0, 0
     for number, file in enumerate(files, start=1):
-        tests = tests_of.get(file)
-        if not tests:
+        if file not in asked:
             print(f"{file}: no test runs it, so no mutant can be judged")
             survivors += 1
             continue
         started = time.monotonic()
-        mutants = mutants_of(file, ROOT, covered.get(file, frozenset()))
-        source = (ROOT / file).read_text(encoding="utf-8")
-        ids, digests = mutation_ids(source, file), form_digests(source, file)
-        history = NO_HISTORY if args.mutate_all else load_history(file)
-        hashes = test_digests({*tests, *history.tests})
-        kept = carried(mutants, ids, digests, history, hashes)
+        _, tests, mutants, ids, digests, history, hashes, kept = asked[file]
         place = f"[{number}/{len(files)}] {file}"
         before = (
             f", {len(kept)} killed before, the function and its tests left as they were"
@@ -825,9 +844,9 @@ def main() -> int:
             else ""
         )
         print(f"{place}: {len(mutants)} mutant(s){before}, {len(tests)} test file(s)...")
-        to_run = [mutant for at, mutant in enumerate(mutants) if at not in kept]
+        to_run = asked[file].to_run()
         try:
-            ran, twice = judge_file(file, to_run, tests, by_line, args.max_workers)
+            ran, twice = judge_file(file, to_run, tests, by_line, args.max_workers, limit)
         except MachineTooBusy as error:
             print(f"{file}: no verdict ({error})")
             return 2

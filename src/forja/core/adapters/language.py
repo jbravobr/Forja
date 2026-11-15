@@ -104,6 +104,11 @@ class OperationRequest:
     # tests: the same copy is tested again and again, and nobody reads a report of the run. A
     # hint, not a filter: an adapter with nothing to save by it plans the same command
     rerun: bool = False
+    # tests: the one file a mutant changed in this copy. A hint, not a filter: an adapter whose
+    # tool has a smaller run for that file plans it (in Go the package of the file, as in the
+    # mutator), and whoever asks still runs the whole command before a survivor counts. Any
+    # other adapter plans the same command
+    mutated: str | None = None
 
 
 # What a new project may be called: lower-case words joined by hyphens. Every language derives its

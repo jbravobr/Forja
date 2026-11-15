@@ -175,6 +175,10 @@ class GoAdapter:
                 argv = (*self._go, "build", "./...")
             case Operation.TEST | Operation.COVERAGE if request.test_files or request.tests:
                 return NotSupported(operation.value, "Go tests are selected by package, not file")
+            case Operation.TEST if request.mutated is not None:
+                # as in the mutator, a mutant is first judged by the package of its file
+                package = _packages((request.mutated,))
+                argv = (*self._go, "test", "-count=1", "-json", *package)
             case Operation.TEST:
                 argv = (*self._go, "test", "-count=1", "-json", "./...")
             case Operation.COVERAGE:

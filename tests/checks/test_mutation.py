@@ -15,6 +15,7 @@ from forja.checks.mutation import (
     MutationCheck,
     build_mutants,
     changed_lines,
+    judged_first,
     min_score,
     of_language,
     untested_lines,
@@ -152,6 +153,79 @@ def test_each_mutant_asks_for_the_tests_as_a_run_repeated_in_the_same_copy(
         asyncio.run(runner(tmp_path / "copy", 5.0))
 
     assert asked == [(Operation.TEST, OperationRequest(root=tmp_path / "copy", rerun=True))]
+
+
+class _ByPackage:
+    """An adapter that, as the Go one, has a command for the folder of the file a mutant changed;
+    with ``whole`` it has only the one command."""
+
+    def __init__(self, whole: bool = False) -> None:
+        self.whole = whole
+        self.asked: list[OperationRequest] = []
+
+    def plan(self, operation: Operation, request: OperationRequest) -> CommandPlan:
+        self.asked.append(request)
+        folder = "..." if self.whole or request.mutated is None else Path(request.mutated).parent
+        return CommandPlan(("tool", "test", f"./{folder}"), request.root)
+
+
+def _mutant(file: str) -> Mutant:
+    return Mutant(file, 1, "change", "f", b"", True)
+
+
+def test_the_runner_of_a_file_tells_the_adapter_which_file_the_mutant_changed(
+    tmp_path: Path,
+) -> None:
+    adapter = _ByPackage()
+    whole = AdapterRunner(adapter, {}, tmp_path / "logs")  # type: ignore[arg-type]
+    (mutant,) = judged_first(whole, tmp_path, [_mutant("a/x.go")])
+    adapter.asked.clear()
+
+    assert isinstance(mutant.first, AdapterRunner)
+    assert mutant.first.command(tmp_path / "copy") == ("tool", "test", "./a")
+    assert whole.command(tmp_path / "copy") == ("tool", "test", "./...")
+    assert adapter.asked == [
+        OperationRequest(root=tmp_path / "copy", rerun=True, mutated="a/x.go"),
+        OperationRequest(root=tmp_path / "copy", rerun=True),
+    ]
+
+
+def test_mutants_whose_files_get_the_same_smaller_command_share_its_runner(tmp_path: Path) -> None:
+    whole = AdapterRunner(_ByPackage(), {}, tmp_path / "logs")  # type: ignore[arg-type]
+    mutants = [_mutant("a/x.go"), _mutant("b/y.go"), _mutant("a/z.go")]
+
+    first, second, third = judged_first(whole, tmp_path, mutants)
+
+    assert first.first is third.first  # one runner, so one baseline, for the folder
+    assert second.first is not None and second.first is not first.first
+    # the logs of every runner are numbered by the one counter, in the one folder
+    assert isinstance(first.first, AdapterRunner)
+    assert (first.first.ids, first.first.logs) == (whole.ids, whole.logs)
+    assert [(m.file, m.line, m.change, m.mutated) for m in (first, second, third)] == [
+        (m.file, m.line, m.change, m.mutated) for m in mutants
+    ]
+
+
+def test_where_the_adapter_has_only_the_whole_command_no_mutant_is_judged_first(
+    tmp_path: Path,
+) -> None:
+    whole = AdapterRunner(_ByPackage(whole=True), {}, tmp_path / "logs")  # type: ignore[arg-type]
+    mutants = [_mutant("a/x.go"), _mutant("b/y.go")]
+
+    assert judged_first(whole, tmp_path, mutants) == mutants
+    assert all(mutant.first is None for mutant in mutants)
+
+
+def test_an_adapter_that_cannot_plan_the_tests_gives_no_first_runner(tmp_path: Path) -> None:
+    class Refusing:
+        def plan(self, operation: Operation, request: OperationRequest) -> NotSupported:
+            return NotSupported(operation.value, "no tests here")
+
+    whole = AdapterRunner(Refusing(), {}, tmp_path / "logs")  # type: ignore[arg-type]
+    mutants = [_mutant("a/x.go")]
+
+    assert whole.command(tmp_path) is None
+    assert judged_first(whole, tmp_path, mutants) == mutants  # the run itself says why
 
 
 def test_the_tests_of_a_mutant_run_at_low_priority(

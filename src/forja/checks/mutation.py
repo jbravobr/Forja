@@ -2,10 +2,13 @@
 
 The lines the diff added are mutated, and so is every other place in a function that holds one
 (as in the mutator's differential run). As in unclebob/mutator, coverage only says which lines
-a test runs (a mutant on another line is not run), each mutant is judged by the whole test
-command, and the score is killed over killed plus survived; one below the policy's limit reproves.
+a test runs (a mutant on another line is not run), each mutant is judged by the test command,
+and the score is killed over killed plus survived; one below the policy's limit reproves.
 The check serves every language the mutator serves; the adapter it is given supplies the test
-command and the coverage report of its language.
+command and the coverage report of its language. Where the adapter has a smaller command for the
+file of a mutant (in Go the package of the file, as in the mutator), that one judges the mutant
+first; the whole command judges whoever survives it, because the coverage that says a test runs
+the line is measured over every package.
 """
 
 import itertools
@@ -172,9 +175,10 @@ class _Quiet:
         pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)  # the executor keeps a baseline for each runner, by identity
 class AdapterRunner:
-    """Runs the adapter's whole test command in a copy of the repository."""
+    """Runs the adapter's test command in a copy of the repository: the whole one, or with
+    ``mutated`` the one the adapter has for a mutant of that file."""
 
     __test__: ClassVar[bool] = False  # not a test class, whatever its name says to pytest
 
@@ -182,9 +186,18 @@ class AdapterRunner:
     host_env: Mapping[str, str]
     logs: Path
     ids: "itertools.count[int]" = field(default_factory=itertools.count)
+    mutated: str | None = None
+
+    def command(self, root: Path) -> tuple[str, ...] | None:
+        """What would run in ``root``; ``None`` when the adapter cannot plan it."""
+        plan = self.adapter.plan(Operation.TEST, self._request(root))
+        return None if isinstance(plan, NotSupported) else plan.argv
+
+    def _request(self, root: Path) -> OperationRequest:
+        return OperationRequest(root=root, rerun=True, mutated=self.mutated)
 
     async def __call__(self, root: Path, timeout: float | None) -> TestVerdict:
-        plan = self.adapter.plan(Operation.TEST, OperationRequest(root=root, rerun=True))
+        plan = self.adapter.plan(Operation.TEST, self._request(root))
         if isinstance(plan, NotSupported):
             raise TestsDidNotRun(plan.reason)
         # a stale bytecode file could run the original code in place of the mutant
@@ -206,6 +219,23 @@ class AdapterRunner:
         if result.outcome is not Outcome.EXITED:
             raise TestsDidNotRun(result.outcome.value)
         return TestVerdict.PASSED if result.exit_code == 0 else TestVerdict.FAILED
+
+
+def judged_first(runner: AdapterRunner, worktree: Path, mutants: list[Mutant]) -> list[Mutant]:
+    """``mutants``, each with the runner of the smaller command the adapter has for its file,
+    where it has one: mutants whose files get the same command share the runner, and with it
+    the baseline. A mutant whose file gets the whole command is left as it is."""
+    whole = runner.command(worktree)
+    smaller: dict[tuple[str, ...], AdapterRunner] = {}
+    found = []
+    for mutant in mutants:
+        aimed = replace(runner, mutated=mutant.file)
+        command = aimed.command(worktree)
+        if command is None or command == whole:
+            found.append(mutant)
+        else:
+            found.append(replace(mutant, first=smaller.setdefault(command, aimed)))
+    return found
 
 
 def _failed(detail: str) -> Undecided:
@@ -262,10 +292,10 @@ class MutationCheck:
         with tempfile.TemporaryDirectory(prefix="forja-mutants-", ignore_cleanup_errors=True) as d:
             runner = AdapterRunner(self.adapter, self.host_env, Path(d) / "logs")
             try:
-                return await run_mutants(
+                report, _ = await run_mutants(
                     self.worktree,
                     Path(d) / "copies",
-                    mutants,
+                    judged_first(runner, self.worktree, mutants),
                     runner,
                     workers=worker_count(data),
                     baseline_timeout=BASELINE_TIMEOUT,
@@ -274,6 +304,7 @@ class MutationCheck:
                 raise _failed("mutation: the tests do not pass on the unchanged copy") from None
             except TestsDidNotRun as error:
                 raise _failed(f"mutation: the tests could not run ({error})") from None
+            return report
 
     def _unprotected(self, untested: Mapping[str, list[int]]) -> GateResult:
         """Without a test there is nothing to mutate against: the test author must write one."""

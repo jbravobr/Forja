@@ -13,6 +13,7 @@ import pytest
 from forja.checks.changes import read_changes
 from forja.checks.mutation import MutationCheck
 from forja.checks.tooling import Tools
+from forja.core.adapters import CommandPlan, NotSupported, Operation, OperationRequest
 from forja.core.events import EventLog
 from forja.core.gates import GateInput
 from forja.core.gates.models import Approved, GateResult, Rejected
@@ -46,14 +47,31 @@ TEST_THAT_ONLY_CALLS = TEST_ADD + "\nfunc TestSub(t *testing.T) {\n\tSub(3, 1)\n
 TEST_THAT_IS_EMPTY = TEST_ADD + "\nfunc TestSub(t *testing.T) {\n}\n"
 
 
+def write(repo: Repo, files: dict[str, str]) -> None:
+    for name, text in files.items():
+        (repo.path / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo.path / name).write_text(text, encoding="utf-8", newline="\n")
+
+
 def judge(repo: Repo, tmp_path: Path, test_text: str) -> GateResult:
     """Commit the base module, then add ``Sub`` with the given test file and judge the change."""
-    for name, text in BASE.items():
-        (repo.path / name).write_text(text, encoding="utf-8", newline="\n")
+    change = {"calc.go": WITH_SUB, "calc_test.go": test_text}
+    return judge_change(repo, tmp_path, BASE, change, "calc.go", GoAdapter())
+
+
+def judge_change(
+    repo: Repo,
+    tmp_path: Path,
+    base: dict[str, str],
+    change: dict[str, str],
+    changed: str,
+    adapter: GoAdapter,
+) -> GateResult:
+    """Commit ``base``, then write ``change`` over it and judge the lines ``changed`` gained."""
+    write(repo, base)
     repo.sh("add", "-A")
     repo.sh("commit", "-m", "module")
-    (repo.path / "calc.go").write_text(WITH_SUB, encoding="utf-8", newline="\n")
-    (repo.path / "calc_test.go").write_text(test_text, encoding="utf-8", newline="\n")
+    write(repo, change)
 
     log = EventLog.open(tmp_path / "events.jsonl", RUN, clock=FakeClock())
     log.append_transition(Level.EXECUTION, RUN, None, ExecutionState.PREPARING)
@@ -70,10 +88,10 @@ def judge(repo: Repo, tmp_path: Path, test_text: str) -> GateResult:
     changes = asyncio.run(read_changes(repo.git.at(repo.path)))
     check = MutationCheck(
         tools,
-        GoAdapter(),
+        adapter,
         repo.path,
         changes,
-        ("calc.go",),
+        (changed,),
         host_env,
         language="go",
     )
@@ -98,3 +116,76 @@ def test_a_test_that_checks_nothing_is_rejected(repo: Repo, tmp_path: Path, test
         # the body and the closing brace the profile counts in the same block
         assert {f.target for f in result.findings} == {"calc.go:8", "calc.go:9"}
         assert "no test runs this new line" in result.findings[0].message
+
+
+# -- a module of two packages: the package of the file judges first, every package after it --------
+
+TWO_PACKAGES = {
+    "go.mod": BASE["go.mod"],
+    "calc/calc.go": BASE["calc.go"],
+    "calc/calc_test.go": BASE["calc_test.go"],
+    "uses/uses.go": "package uses\n",
+}
+USES = 'package uses\n\nimport (\n\t"testing"\n\n\t"example.com/calc/calc"\n)\n\n'
+OTHER_PACKAGE_CHECKS = USES + (
+    'func TestSub(t *testing.T) {\n\tif calc.Sub(3, 1) != 2 {\n\t\tt.Fatal("sub")\n\t}\n}\n'
+)
+OTHER_PACKAGE_ONLY_CALLS = USES + "func TestSub(t *testing.T) {\n\tcalc.Sub(3, 1)\n}\n"
+
+
+class Listening(GoAdapter):
+    """The Go adapter, noting the file each run of the tests was said to be for."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mutated: list[str | None] = []
+
+    def plan(self, operation: Operation, request: OperationRequest) -> CommandPlan | NotSupported:
+        answer = super().plan(operation, request)
+        # a run in a copy: the runs in the repository only ask which command a file would get
+        if operation is Operation.TEST and "worker-" in request.root.name:
+            assert isinstance(answer, CommandPlan)
+            self.mutated.append(answer.argv[-1])
+        return answer
+
+
+def test_a_line_only_a_test_of_another_package_checks_is_judged_by_every_package(
+    repo: Repo, tmp_path: Path
+) -> None:
+    """``Sub`` is new in ``calc`` and only ``uses`` has a test for it. Coverage is measured over
+    every package, so the line counts as run. The tests of ``calc`` let its mutant live; it only
+    counts once every package has run, and there it is killed."""
+    adapter = Listening()
+    change = {"calc/calc.go": WITH_SUB, "uses/uses_test.go": OTHER_PACKAGE_CHECKS}
+
+    result = judge_change(repo, tmp_path, TWO_PACKAGES, change, "calc/calc.go", adapter)
+
+    assert isinstance(result, Approved)
+    # the package on the unchanged copy and on the mutant, then every package on both
+    assert adapter.mutated == ["./calc", "./calc", "./...", "./..."]
+
+
+def test_a_line_no_package_checks_survives_its_package_and_every_package(
+    repo: Repo, tmp_path: Path
+) -> None:
+    adapter = Listening()
+    change = {"calc/calc.go": WITH_SUB, "uses/uses_test.go": OTHER_PACKAGE_ONLY_CALLS}
+
+    result = judge_change(repo, tmp_path, TWO_PACKAGES, change, "calc/calc.go", adapter)
+
+    assert isinstance(result, Rejected)
+    assert result.findings[0].measured == 0.0
+    assert any(f.target == "calc/calc.go:8" for f in result.findings)
+    assert adapter.mutated == ["./calc", "./calc", "./...", "./..."]
+
+
+def test_a_line_its_own_package_checks_never_waits_for_the_other_packages(
+    repo: Repo, tmp_path: Path
+) -> None:
+    adapter = Listening()
+    change = {"calc/calc.go": WITH_SUB, "calc/calc_test.go": TEST_THAT_CHECKS}
+
+    result = judge_change(repo, tmp_path, TWO_PACKAGES, change, "calc/calc.go", adapter)
+
+    assert isinstance(result, Approved)
+    assert adapter.mutated == ["./calc", "./calc"]

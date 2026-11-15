@@ -140,6 +140,23 @@ def test_build_and_tests_cover_every_package_without_the_test_cache(project: Pat
     assert argv(Operation.TEST, project) == ("g", "test", "-count=1", "-json", "./...")
 
 
+def test_a_mutant_is_first_judged_by_the_package_of_its_file_as_in_the_mutator(
+    project: Path,
+) -> None:
+    def tests(file: str) -> tuple[str, ...]:
+        return argv(Operation.TEST, project, rerun=True, mutated=file)
+
+    assert tests("pkg/deep/calc.go") == ("g", "test", "-count=1", "-json", "./pkg/deep")
+    assert tests("main.go") == ("g", "test", "-count=1", "-json", ".")
+    # only the tests: the other commands are the same whatever file a mutant changed
+    for operation in (Operation.BUILD, Operation.COVERAGE):
+        assert argv(operation, project, mutated="pkg/calc.go") == argv(operation, project)
+    assert isinstance(
+        plan(ADAPTER, Operation.TEST, project, mutated="pkg/calc.go", tests=("TestA",)),
+        NotSupported,
+    )
+
+
 def test_coverage_measures_every_package_and_writes_a_go_profile(project: Path) -> None:
     assert argv(Operation.COVERAGE, project) == (
         "g", "test", "-count=1", "-json", "-coverpkg=./...", f"-coverprofile={COVERAGE_REPORT}",

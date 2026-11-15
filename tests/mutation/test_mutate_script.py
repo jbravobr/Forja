@@ -214,57 +214,11 @@ def test_a_line_no_test_is_named_for_keeps_every_test_of_the_file(mutate: Any) -
     assert mutate.tests_of_line(by_line, "src/other.py", 1, everything) == everything
 
 
-# -- the runner knows the mutant by the content of the file ----------------------------------------
+# -- a run is one process; the unchanged copy of the whole run is spread over several --------------
 
 
-def test_the_runner_gives_a_mutant_its_own_tests_and_the_unchanged_copy_all_of_them(
-    mutate: Any, tmp_path: Path
-) -> None:
-    (tmp_path / "src").mkdir()
-    source = tmp_path / "src" / "m.py"
-    narrowed = {mutate.fingerprint(b"mutant one"): ["tests/a.py"]}
-    runner = mutate.PytestRunner(["tests/a.py", "tests/b.py"], [], "src/m.py", narrowed)
-
-    source.write_bytes(b"original")
-    assert runner.chosen(tmp_path) == ["tests/a.py", "tests/b.py"]
-    source.write_bytes(b"mutant one")
-    assert runner.chosen(tmp_path) == ["tests/a.py"]
-    source.write_bytes(b"mutant nobody narrowed")
-    assert runner.chosen(tmp_path) == ["tests/a.py", "tests/b.py"]
-
-
-def test_a_runner_without_a_source_always_runs_every_test(mutate: Any, tmp_path: Path) -> None:
-    runner = mutate.PytestRunner(["tests/a.py", "tests/b.py"], [])
-
-    assert runner.chosen(tmp_path) == ["tests/a.py", "tests/b.py"]
-
-
-# -- the unchanged copy is run over several processes, a mutant in one -----------------------------
-
-
-def test_a_mutant_is_given_at_least_ten_times_what_one_process_would_take(mutate: Any) -> None:
-    runner = mutate.PytestRunner(["tests/a.py"], [], base_workers=4)
-    assert runner.patience(50.0) == 50.0  # nothing is known of the unchanged copy yet
-    assert runner.patience(None) is None
-
-    runner.base_seconds = 5.0  # over four processes: one alone takes up to twenty
-
-    assert runner.patience(50.0) == 200.0
-    assert runner.patience(500.0) == 500.0  # never less than the executor gives
-    assert runner.patience(None) is None
-
-
-def test_with_one_process_for_the_unchanged_copy_the_limit_is_the_executors(mutate: Any) -> None:
-    runner = mutate.PytestRunner(["tests/a.py"], [])
-    runner.base_seconds = 5.0
-
-    assert runner.patience(50.0) == 50.0
-    assert mutate.PytestRunner(["tests/a.py"], [], base_workers=0).base_workers == 1
-
-
-def test_the_unchanged_copy_is_timed_and_run_over_the_processes_asked_for(
-    mutate: Any, monkeypatch: Any, tmp_path: Path
-) -> None:
+def started_by(mutate: Any, monkeypatch: Any, runner: Any, root: Path) -> list[str]:
+    """The command ``runner`` starts for a run in ``root``."""
     commands: list[list[str]] = []
 
     class Done:
@@ -278,35 +232,113 @@ def test_the_unchanged_copy_is_timed_and_run_over_the_processes_asked_for(
         return Done()
 
     monkeypatch.setattr(mutate.asyncio, "create_subprocess_exec", start)
-    runner = mutate.PytestRunner(["tests/a.py"], [], base_workers=3)
+    assert asyncio.run(runner(root, 20.0)) is TestVerdict.PASSED
+    (command,) = commands
+    return command
 
-    async def both() -> None:
-        await runner(tmp_path, None)  # the unchanged copy: no limit
-        await runner(tmp_path, 20.0)  # a mutant
 
-    asyncio.run(both())
+def test_a_run_is_one_process_given_its_tests_and_stopped_at_the_first_failure(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    runner = mutate.PytestRunner(["tests/a.py", "tests/b.py"], ["--deselect", "tests/a.py::t"])
 
-    assert "-n3" in commands[0] and "-n0" not in commands[0]
-    assert "-n0" in commands[1] and "-n3" not in commands[1]
-    assert runner.base_seconds is not None and runner.base_seconds >= 0
+    command = started_by(mutate, monkeypatch, runner, tmp_path)
+
+    assert command[-4:] == ["--deselect", "tests/a.py::t", "tests/a.py", "tests/b.py"]
+    assert "-x" in command and "-n0" in command
+
+
+def test_the_run_of_the_whole_command_is_spread_over_the_processes_asked_for(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    command = started_by(mutate, monkeypatch, mutate.PytestRunner(["tests/a.py"], [], 3), tmp_path)
+
+    assert "-n3" in command and "-n0" not in command
+    assert mutate.PytestRunner(["tests/a.py"], [], 0).processes == 1
+
+
+# -- one run on the unchanged copy for the whole command, as in the mutator ------------------------
+
+
+def test_a_mutant_is_given_ten_times_what_one_process_would_take_on_the_unchanged_copy(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    measured: list[tuple[Path, Path, list[str], list[str], int]] = []
+
+    async def baseline(worktree: Path, copy: Path, runner: Any) -> float:
+        measured.append((worktree, copy.parent, runner.tests, runner.deselect, runner.processes))
+        assert copy.parent.is_dir() and not copy.exists()
+        return 5.0
+
+    monkeypatch.setattr(mutate, "ROOT", tmp_path)
+    monkeypatch.setattr(mutate, "baseline", baseline)
+    monkeypatch.setattr(mutate, "deselected", lambda: ["--deselect", "x"])
+
+    # five seconds over four processes: one alone takes up to twenty, and ten times that is given
+    assert mutate.time_limit(["tests/a.py", "tests/b.py"], 4) == 200.0
+    ((worktree, scratch, tests, deselect, processes),) = measured
+    assert (worktree, tests, deselect, processes) == (
+        tmp_path,
+        ["tests/a.py", "tests/b.py"],
+        ["--deselect", "x"],
+        4,
+    )
+    assert not scratch.exists()  # the copy is gone with the run
+    assert mutate.time_limit(["tests/a.py"], 1) == 50.0
+    assert mutate.time_limit(["tests/a.py"], 0) == 50.0
+
+
+def test_however_fast_the_unchanged_copy_a_mutant_is_given_two_seconds(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    async def baseline(worktree: Path, copy: Path, runner: Any) -> float:
+        return 0.01
+
+    monkeypatch.setattr(mutate, "ROOT", tmp_path)
+    monkeypatch.setattr(mutate, "baseline", baseline)
+    monkeypatch.setattr(mutate, "deselected", lambda: [])
+
+    assert mutate.time_limit(["tests/a.py"], 1) == 2.0
+
+
+def asking(mutate: Any, tests: list[str], covered: list[bool], kept: set[int]) -> Any:
+    mutants = [mutant(place + 1, b"m", covered=runs) for place, runs in enumerate(covered)]
+    return mutate.Asked("src/m.py", tests, mutants, [], {}, mutate.NO_HISTORY, {}, kept)
+
+
+def test_the_unchanged_copy_runs_the_tests_of_every_source_file_with_a_mutant_to_run(
+    mutate: Any,
+) -> None:
+    asked = [
+        asking(mutate, ["tests/test_m.py", "tests/b.py"], [True], set()),
+        asking(mutate, ["tests/b.py", "tests/a.py"], [True, True], {0}),
+        asking(mutate, ["tests/settled.py"], [True, True], {0, 1}),  # the last run killed both
+        asking(mutate, ["tests/unreached.py"], [False], set()),  # no test runs its line
+    ]
+
+    # once each, in the order of the names
+    assert mutate.base_tests(asked) == ["tests/a.py", "tests/b.py", "tests/test_m.py"]
+    assert mutate.base_tests(asked[2:]) == []
+    assert [len(one.to_run()) for one in asked] == [1, 1, 0, 1]
+    assert [m.line for m in asked[1].to_run()] == [2]
 
 
 # -- a test out of time is a run out of time, not a failed test ------------------------------------
 
 
 @pytest.mark.parametrize(
-    ("said", "code", "verdict", "noted"),
+    ("said", "code", "verdict"),
     [
-        (b"....\r\n+++++++++ Timeout +++++++++\r\nstack of the thread\r\n", 1, "TIMED_OUT", True),
-        (b"+++++++++ Timeout +++++++++\n", 1, "TIMED_OUT", True),
-        (b"E   assert 'Timeout' in said\n1 failed\n", 1, "FAILED", False),
-        (b"1 failed\n", 1, "FAILED", False),
-        (b"error while collecting\n", 2, "FAILED", False),
-        (b"1 passed\n", 0, "PASSED", False),
+        (b"....\r\n+++++++++ Timeout +++++++++\r\nstack of the thread\r\n", 1, "TIMED_OUT"),
+        (b"+++++++++ Timeout +++++++++\n", 1, "TIMED_OUT"),
+        (b"E   assert 'Timeout' in said\n1 failed\n", 1, "FAILED"),
+        (b"1 failed\n", 1, "FAILED"),
+        (b"error while collecting\n", 2, "FAILED"),
+        (b"1 passed\n", 0, "PASSED"),
     ],
 )
 def test_the_line_pytest_writes_for_a_test_out_of_time_makes_the_run_one_out_of_time(
-    mutate: Any, monkeypatch: Any, tmp_path: Path, said: bytes, code: int, verdict: str, noted: bool
+    mutate: Any, monkeypatch: Any, tmp_path: Path, said: bytes, code: int, verdict: str
 ) -> None:
     commands: list[list[str]] = []
 
@@ -325,55 +357,8 @@ def test_the_line_pytest_writes_for_a_test_out_of_time_makes_the_run_one_out_of_
     runner = mutate.PytestRunner(["tests/a.py"], [])
 
     assert asyncio.run(runner(tmp_path, 20.0)) is TestVerdict[verdict]
-    assert runner.out_of_time == ({tmp_path: ["tests/a.py"]} if noted else {})
     assert f"--timeout={mutate.TEST_TIMEOUT}" in commands[0]
     assert "--timeout-method=thread" in commands[0]
-
-
-def test_after_a_run_out_of_time_the_unchanged_copy_is_given_the_tests_of_that_run_once(
-    mutate: Any, monkeypatch: Any, tmp_path: Path
-) -> None:
-    project, copy, other = tmp_path / "project", tmp_path / "copy", tmp_path / "other"
-    for root in (project, copy, other):
-        (root / "src").mkdir(parents=True)
-        (root / "src" / "m.py").write_bytes(b"original")
-    monkeypatch.setattr(mutate, "ROOT", project)
-    everything = ["tests/a.py", "tests/b.py"]
-    narrowed = {mutate.fingerprint(b"mutant one"): ["tests/a.py"]}
-    runner = mutate.PytestRunner(everything, [], "src/m.py", narrowed)
-
-    runner.out_of_time[copy] = ["tests/b.py"]
-
-    assert runner.asked(other) == everything  # another copy: nothing ran out of time in it
-    assert runner.asked(copy) == ["tests/b.py"]
-    assert runner.asked(copy) == everything  # only the run right after
-
-
-def test_the_mutant_that_comes_after_a_run_out_of_time_keeps_its_own_tests(
-    mutate: Any, monkeypatch: Any, tmp_path: Path
-) -> None:
-    project, copy = tmp_path / "project", tmp_path / "copy"
-    for root in (project, copy):
-        (root / "src").mkdir(parents=True)
-        (root / "src" / "m.py").write_bytes(b"original")
-    monkeypatch.setattr(mutate, "ROOT", project)
-    narrowed = {mutate.fingerprint(b"mutant one"): ["tests/a.py"]}
-    runner = mutate.PytestRunner(["tests/a.py", "tests/b.py"], [], "src/m.py", narrowed)
-
-    runner.out_of_time[copy] = ["tests/b.py"]
-    (copy / "src" / "m.py").write_bytes(b"mutant one")
-
-    assert runner.asked(copy) == ["tests/a.py"]
-    assert runner.out_of_time == {}  # and the unchanged copy, later, is no longer in doubt
-
-
-def test_a_runner_without_a_source_gives_every_test_after_a_run_out_of_time_too(
-    mutate: Any, tmp_path: Path
-) -> None:
-    runner = mutate.PytestRunner(["tests/a.py", "tests/b.py"], [])
-    runner.out_of_time[tmp_path] = ["tests/a.py"]
-
-    assert runner.asked(tmp_path) == ["tests/a.py", "tests/b.py"]
 
 
 def test_a_mutant_that_never_ends_is_out_of_time_on_a_real_project(
@@ -413,107 +398,89 @@ def mutant(line: int, text: bytes, *, covered: bool = True) -> Mutant:
     return Mutant("src/m.py", line, f"change {line}", "f", text, covered)
 
 
-def judged(mutate: Any, monkeypatch: Any, mutants: list[Mutant], verdicts: Any) -> Any:
-    """``judge_file`` with a ``judge`` that records each call and answers from ``verdicts``:
-    ``verdicts(mutant, tests)`` is the status the tests given to that mutant would find."""
-    calls: list[list[tuple[int, tuple[str, ...]]]] = []
+def handed(mutate: Any, monkeypatch: Any, mutants: list[Mutant], timeout: float | None) -> Any:
+    """What ``judge_file`` hands the executor for ``mutants``, and what it answers with."""
+    calls: list[tuple[list[Mutant], Any, int, float | None]] = []
+    answer = (MutationReport(()), [1])
 
-    def judge(some: list[Mutant], runner: Any, workers: int) -> MutationReport:
-        seen, results = [], []
-        for one in some:
-            tests = (
-                tuple(runner.narrowed.get(mutate.fingerprint(one.mutated), runner.tests))
-                if runner.source
-                else tuple(runner.tests)
-            )
-            status = MutantStatus.UNCOVERED if not one.covered else verdicts(one, tests)
-            seen.append((one.line, tests))
-            results.append(MutantResult(one.file, one.line, one.change, status, one.function))
-        calls.append(seen)
-        return MutationReport(tuple(results))
+    def judge(some: list[Mutant], runner: Any, workers: int, limit: float | None) -> Any:
+        calls.append((some, runner, workers, limit))
+        return answer
 
     monkeypatch.setattr(mutate, "judge", judge)
-    monkeypatch.setattr(mutate, "deselected", lambda: [])
+    monkeypatch.setattr(mutate, "deselected", lambda: ["--deselect", "x"])
     by_line = {"src/m.py": {1: {"tests/a.py"}, 2: {"tests/a.py"}, 3: {"tests/a.py", "tests/b.py"}}}
-    report, twice = mutate.judge_file("src/m.py", mutants, TESTS, by_line, 2)
-    return report, twice, calls
+    assert mutate.judge_file("src/m.py", mutants, TESTS, by_line, 2, timeout) is answer
+    ((some, runner, workers, limit),) = calls
+    return some, runner, workers, limit
 
 
-def test_a_mutant_the_tests_of_its_line_kill_is_killed_and_judged_once(
+def test_a_mutant_is_first_judged_by_the_tests_of_its_line_and_then_by_every_test_of_the_file(
     mutate: Any, monkeypatch: Any
 ) -> None:
+    """Coverage may name ``tests/a.py`` for a line whose change only ``tests/b.py`` notices: the
+    executor judges by the whole runner whoever survives the first one."""
     mutants = [mutant(1, b"one"), mutant(2, b"two")]
 
-    report, twice, calls = judged(
-        mutate, monkeypatch, mutants, lambda one, tests: MutantStatus.KILLED
-    )
+    some, whole, workers, limit = handed(mutate, monkeypatch, mutants, 40.0)
 
-    assert [m.status for m in report.mutants] == [MutantStatus.KILLED, MutantStatus.KILLED]
-    assert twice == []
-    assert calls == [[(1, ("tests/a.py",)), (2, ("tests/a.py",))]]
-
-
-def test_a_mutant_that_survives_the_tests_of_its_line_is_judged_again_by_every_test(
-    mutate: Any, monkeypatch: Any
-) -> None:
-    """Coverage named ``tests/a.py`` for line 2, and it is ``tests/b.py`` that notices the change
-    there: the narrow run lets the mutant through, the whole one kills it, as it always did."""
-    mutants = [mutant(1, b"one"), mutant(2, b"two")]
-
-    def verdicts(one: Mutant, tests: tuple[str, ...]) -> MutantStatus:
-        noticed = one.line == 1 or "tests/b.py" in tests
-        return MutantStatus.KILLED if noticed else MutantStatus.SURVIVED
-
-    report, twice, calls = judged(mutate, monkeypatch, mutants, verdicts)
-
-    assert [m.status for m in report.mutants] == [MutantStatus.KILLED, MutantStatus.KILLED]
-    assert twice == [1]
-    assert calls == [
-        [(1, ("tests/a.py",)), (2, ("tests/a.py",))],
-        [(2, ("tests/a.py", "tests/b.py"))],
+    assert [(m.line, m.mutated, m.first.tests) for m in some] == [
+        (1, b"one", ["tests/a.py"]),
+        (2, b"two", ["tests/a.py"]),
     ]
+    assert (whole.tests, whole.deselect, whole.processes) == (TESTS, ["--deselect", "x"], 1)
+    assert (workers, limit) == (2, 40.0)
+    # the same tests, the same runner: without a limit, the executor runs them once on the
+    # unchanged copy and not once for each mutant
+    assert some[0].first is some[1].first
+    assert (some[0].first.deselect, some[0].first.processes) == (["--deselect", "x"], 1)
 
 
-def test_a_mutant_no_test_at_all_notices_survives_after_both_runs(
-    mutate: Any, monkeypatch: Any
-) -> None:
-    mutants = [mutant(1, b"one"), mutant(2, b"two")]
-
-    def verdicts(one: Mutant, tests: tuple[str, ...]) -> MutantStatus:
-        return MutantStatus.KILLED if one.line == 1 else MutantStatus.SURVIVED
-
-    report, twice, calls = judged(mutate, monkeypatch, mutants, verdicts)
-
-    assert [m.status for m in report.mutants] == [MutantStatus.KILLED, MutantStatus.SURVIVED]
-    assert (twice, len(calls)) == ([1], 2)
-
-
-def test_a_survivor_already_judged_by_every_test_is_not_judged_again(
+def test_a_mutant_whose_line_every_test_of_the_file_runs_is_judged_once_by_all_of_them(
     mutate: Any, monkeypatch: Any
 ) -> None:
     mutants = [mutant(3, b"three"), mutant(8, b"eight")]  # line 8: no test named, so all of them
 
-    report, twice, calls = judged(
-        mutate, monkeypatch, mutants, lambda one, tests: MutantStatus.SURVIVED
-    )
+    some, _, _, limit = handed(mutate, monkeypatch, mutants, None)
 
-    assert [m.status for m in report.mutants] == [MutantStatus.SURVIVED, MutantStatus.SURVIVED]
-    assert (twice, len(calls)) == ([], 1)
-    assert calls[0] == [(3, ("tests/a.py", "tests/b.py")), (8, ("tests/a.py", "tests/b.py"))]
+    assert [m.first for m in some] == [None, None]
+    assert limit is None
 
 
-def test_a_mutant_on_a_line_no_test_runs_is_not_given_tests_and_keeps_its_place(
+def test_a_mutant_on_a_line_no_test_runs_keeps_its_place_and_is_still_not_run(
     mutate: Any, monkeypatch: Any
 ) -> None:
     mutants = [mutant(1, b"one", covered=False), mutant(2, b"two")]
 
-    report, twice, _ = judged(mutate, monkeypatch, mutants, lambda one, tests: MutantStatus.KILLED)
+    some, _, _, _ = handed(mutate, monkeypatch, mutants, 40.0)
 
-    assert [(m.line, m.status) for m in report.mutants] == [
-        (1, MutantStatus.UNCOVERED),
-        (2, MutantStatus.KILLED),
+    assert [(m.line, m.covered) for m in some] == [(1, False), (2, True)]
+
+
+def test_the_copies_of_a_run_are_gone_when_it_ends_and_the_limit_reaches_the_executor(
+    mutate: Any, monkeypatch: Any, tmp_path: Path
+) -> None:
+    seen: list[tuple[Path, Path, object, object]] = []
+    answer = (MutationReport(()), [0])
+
+    async def run_mutants(
+        worktree: Path, scratch: Path, mutants: Any, runner: Any, **how: Any
+    ) -> Any:
+        assert scratch.is_dir()
+        seen.append((worktree, scratch, how["workers"], how["timeout"]))
+        return answer
+
+    monkeypatch.setattr(mutate, "ROOT", tmp_path)
+    monkeypatch.setattr(mutate, "run_mutants", run_mutants)
+    runner = mutate.PytestRunner(TESTS, [])
+
+    assert mutate.judge([], runner, 3, 40.0) is answer
+    assert mutate.judge([], runner, 3) is answer
+    assert [(worktree, workers, limit) for worktree, _, workers, limit in seen] == [
+        (tmp_path, 3, 40.0),
+        (tmp_path, 3, None),
     ]
-    assert twice == []
+    assert not any(scratch.exists() for _, scratch, _, _ in seen)
 
 
 def test_a_mutant_judged_twice_was_judged_by_every_test_and_the_others_by_those_of_their_line(
@@ -557,7 +524,7 @@ def test_the_narrow_run_and_the_whole_run_agree_on_a_real_project(
     assert {m.line for m in mutants} == {2, 6}
 
     report, twice = mutate.judge_file("src/calc.py", mutants, tests, by_line, 2)
-    whole = mutate.judge(mutants, mutate.PytestRunner(tests, []), 2)
+    whole, _ = mutate.judge(mutants, mutate.PytestRunner(tests, []), 2)
 
     assert [m.status for m in report.mutants] == [m.status for m in whole.mutants]
     by_status = {m.line: m.status for m in report.mutants}
@@ -852,21 +819,35 @@ def run_main(
     tests: tuple[str, ...] = ("tests/t.py",),
     lines: dict[int, set[str]] | None = None,
     twice: str = "",
+    unchanged: list[Any] | None = None,
 ) -> tuple[int, list[str]]:
     """``main`` over ``src/calc.py`` of ``root`` with every mutant given ``verdict``: the exit
     code, and the functions of the mutants that were handed to the tests. ``tests`` are the test
     files that run the source file, ``lines`` those that run each line, and the mutants of the
-    function ``twice`` are said to have been judged a second time."""
+    function ``twice`` are said to have been judged a second time. ``unchanged`` takes the tests
+    of each run on the unchanged copy, and then the limit each file was judged with."""
     handed: list[str] = []
+    noted = unchanged if unchanged is not None else []
+
+    def time_limit(of_base: list[str], workers: int) -> float:
+        noted.append(of_base)
+        return 77.0
 
     def judge_file(
-        file: str, mutants: list[Mutant], tests: list[str], by_line: Any, workers: int
+        file: str,
+        mutants: list[Mutant],
+        tests: list[str],
+        by_line: Any,
+        workers: int,
+        timeout: float | None,
     ) -> tuple[MutationReport, list[int]]:
+        noted.append(timeout)
         handed.extend(str(m.function) for m in mutants)
         again = [place for place, m in enumerate(mutants) if m.function == twice]
         return MutationReport(tuple(result(m, verdict) for m in mutants)), again
 
     coverage = ({"src/calc.py": list(tests)}, {"src/calc.py": lines or {}})
+    monkeypatch.setattr(mutate, "time_limit", time_limit)
     monkeypatch.setattr(mutate, "ROOT", root)
     monkeypatch.setattr(mutate, "SNAPSHOTS", root / ".metrics" / "mutate")
     monkeypatch.setattr(mutate, "canary", lambda: True)
@@ -1005,6 +986,56 @@ def test_tests_that_fail_before_any_mutation_leave_the_history_as_it_was(
 
     assert mutate.main() == 2
     assert mutate.snapshot_path("src/calc.py").read_text(encoding="utf-8") == left
+
+
+def test_the_unchanged_copy_is_run_once_before_the_mutants_and_not_at_all_with_none_to_run(
+    mutate: Any, monkeypatch: Any, tmp_path: Path, capsys: Any
+) -> None:
+    calc_project(tmp_path, "tests/t.py", "tests/a.py")
+    tests = ("tests/t.py", "tests/a.py")
+    unchanged: list[Any] = []
+
+    def run() -> int:
+        return run_main(mutate, monkeypatch, tmp_path, KILLED, tests=tests, unchanged=unchanged)[0]
+
+    assert run() == 0
+    # every test file of the source file, then the file judged with the limit that run gave
+    assert unchanged == [["tests/a.py", "tests/t.py"], 77.0]
+    assert "the unchanged copy: 2 test file(s)" in capsys.readouterr().out
+
+    del unchanged[:]
+    assert run() == 0
+    assert unchanged == [None]  # the last run settled every mutant: no test runs, no limit
+    assert "the unchanged copy" not in capsys.readouterr().out
+
+
+def test_tests_that_fail_on_the_unchanged_copy_end_the_run_before_any_mutant(
+    mutate: Any, monkeypatch: Any, tmp_path: Path, capsys: Any
+) -> None:
+    calc_project(tmp_path, "tests/t.py")
+    assert run_main(mutate, monkeypatch, tmp_path, KILLED)[0] == 0
+    left = mutate.snapshot_path("src/calc.py").read_text(encoding="utf-8")
+    (tmp_path / "src" / "calc.py").write_text(CALC.replace("a - b", "b - a"), encoding="utf-8")
+    judged: list[object] = []
+
+    def red(*_: object) -> float:
+        raise mutate.BaselineFailed("red")
+
+    monkeypatch.setattr(mutate, "time_limit", red)
+    monkeypatch.setattr(mutate, "judge_file", lambda *asked: judged.append(asked))
+    capsys.readouterr()
+
+    assert mutate.main() == 2
+    assert "the tests fail before any mutation (red)" in capsys.readouterr().out
+    assert judged == []
+    assert mutate.snapshot_path("src/calc.py").read_text(encoding="utf-8") == left
+
+    def gone(*_: object) -> float:
+        raise mutate.TestsDidNotRun("pytest exited with 4")
+
+    monkeypatch.setattr(mutate, "time_limit", gone)
+    assert mutate.main() == 2
+    assert "the tests fail before any mutation (pytest exited with 4)" in capsys.readouterr().out
 
 
 def test_a_machine_too_busy_to_judge_a_mutant_ends_the_run_and_leaves_the_history_as_it_was(

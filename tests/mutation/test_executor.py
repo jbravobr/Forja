@@ -15,6 +15,7 @@ from forja.mutation.executor import (
     Mutant,
     TestsDidNotRun,
     TestVerdict,
+    baseline,
     run_mutants,
 )
 
@@ -62,8 +63,13 @@ def mutant(old: bytes, new: bytes, *, covered: bool = True) -> Mutant:
     return Mutant("calc.py", 2, "change", "is_pos", CALC.replace(old, new), covered)
 
 
-def run(project: Path, tmp_path: Path, mutants: list[Mutant], runner=pytest_runner, **kwargs):  # type: ignore[no-untyped-def]
+def both(project: Path, tmp_path: Path, mutants: list[Mutant], runner=pytest_runner, **kwargs):  # type: ignore[no-untyped-def]
+    """The report, and the places of the mutants judged twice."""
     return asyncio.run(run_mutants(project, tmp_path / "scratch", mutants, runner, **kwargs))
+
+
+def run(project: Path, tmp_path: Path, mutants: list[Mutant], runner=pytest_runner, **kwargs):  # type: ignore[no-untyped-def]
+    return both(project, tmp_path, mutants, runner, **kwargs)[0]
 
 
 def test_a_change_the_tests_notice_is_killed(project: Path, tmp_path: Path) -> None:
@@ -532,3 +538,221 @@ def test_tests_that_stopped_passing_on_the_unchanged_copy_after_a_timeout_stop_t
 
     with pytest.raises(BaselineFailed, match="no longer pass"):
         run(project, tmp_path, [mutant(b"x > 0", b"x >= 0")], runner, workers=1)
+
+
+# -- a smaller run judges a mutant first, and the whole command whoever survives it ----------------
+
+KILLER = CALC.replace(b"x > 0", b"x < 0")
+OTHER = CALC.replace(b"x > 0", b"x != 0")
+Log = list[tuple[str, str, float | None]]
+
+
+def _noting(
+    name: str, log: Log, answers: dict[bytes, TestVerdict] | None = None, pause: float = 0.0
+) -> object:
+    """A runner that notes each of its runs (its name, what the copy held, the time given). The
+    unchanged copy passes after ``pause`` seconds; a mutant gets its answer of ``answers``, and
+    without one the tests pass."""
+
+    async def runner(root: Path, timeout: float | None) -> TestVerdict:
+        content = (root / "calc.py").read_bytes()
+        log.append((name, "unchanged" if content == CALC else "mutant", timeout))
+        if content == CALC:
+            await asyncio.sleep(pause)
+            return TestVerdict.PASSED
+        return (answers or {}).get(content, TestVerdict.PASSED)
+
+    return runner
+
+
+def aimed(content: bytes, first: object) -> Mutant:
+    return Mutant("calc.py", 2, "change", "is_pos", content, True, first)  # type: ignore[arg-type]
+
+
+def runs(log: Log) -> list[tuple[str, str]]:
+    return [(name, held) for name, held, _ in log]
+
+
+def test_a_mutant_its_first_runner_kills_never_reaches_the_whole_command(
+    project: Path, tmp_path: Path
+) -> None:
+    log: Log = []
+    first = _noting("first", log, {KILLER: TestVerdict.FAILED})
+    whole = _noting("whole", log)
+
+    report, twice = both(project, tmp_path, [aimed(KILLER, first)], whole, workers=1)
+
+    assert [m.status for m in report.mutants] == [MutantStatus.KILLED]
+    assert twice == []
+    # not even on the unchanged copy: the whole command has a baseline only if a mutant needs it
+    assert runs(log) == [("first", "unchanged"), ("first", "mutant")]
+
+
+def test_a_mutant_that_survives_its_first_runner_is_judged_by_the_whole_command(
+    project: Path, tmp_path: Path
+) -> None:
+    log: Log = []
+    first = _noting("first", log)  # notices nothing
+    whole = _noting("whole", log, {KILLER: TestVerdict.FAILED, OTHER: TestVerdict.FAILED})
+    mutants = [aimed(KILLER, first), aimed(SLOW, first), mutant(b"x > 0", b"x != 0")]
+
+    report, twice = both(project, tmp_path, mutants, whole, workers=1)
+
+    assert [m.status for m in report.mutants] == [
+        MutantStatus.KILLED,
+        MutantStatus.SURVIVED,
+        MutantStatus.KILLED,
+    ]
+    assert twice == [0, 1]  # the third has no first runner: the whole command judged it once
+    assert runs(log) == [
+        ("first", "unchanged"),  # one baseline for the two mutants that share the runner
+        ("whole", "unchanged"),
+        ("first", "mutant"),
+        ("first", "mutant"),
+        ("whole", "mutant"),
+        ("whole", "mutant"),
+        ("whole", "mutant"),
+    ]
+
+
+def test_each_runner_gives_a_mutant_ten_times_its_own_baseline(
+    project: Path, tmp_path: Path
+) -> None:
+    log: Log = []
+    first = _noting("first", log, pause=0.4)  # ten times that is well over the floor of two
+    whole = _noting("whole", log)
+
+    both(project, tmp_path, [aimed(SLOW, first)], whole, workers=1, baseline_timeout=600.0)
+
+    assert runs(log) == [
+        ("first", "unchanged"),
+        ("first", "mutant"),
+        ("whole", "unchanged"),
+        ("whole", "mutant"),
+    ]
+    given = [timeout for _, _, timeout in log]
+    assert given[0] == given[2] == 600.0
+    assert given[1] is not None and given[1] >= 3.5
+    assert given[3] is not None and 2.0 <= given[3] < 3.0
+
+
+def test_a_limit_the_caller_measured_is_the_limit_of_every_run_and_no_baseline_is_run(
+    project: Path, tmp_path: Path
+) -> None:
+    log: Log = []
+    first = _noting("first", log)
+    whole = _noting("whole", log, {KILLER: TestVerdict.FAILED})
+    mutants = [aimed(SLOW, first), mutant(b"x > 0", b"x < 0")]
+
+    report, twice = both(project, tmp_path, mutants, whole, workers=1, timeout=7.5)
+
+    assert [m.status for m in report.mutants] == [MutantStatus.SURVIVED, MutantStatus.KILLED]
+    assert twice == [0]
+    assert log == [("first", "mutant", 7.5), ("whole", "mutant", 7.5), ("whole", "mutant", 7.5)]
+
+
+def test_a_mutant_out_of_time_in_its_first_runner_is_checked_by_it_against_the_unchanged_copy(
+    project: Path, tmp_path: Path
+) -> None:
+    log: Log = []
+    first = _noting("first", log, {SLOW: TestVerdict.TIMED_OUT})
+    whole = _noting("whole", log)
+
+    report, twice = both(project, tmp_path, [aimed(SLOW, first)], whole, workers=1)
+
+    assert [m.status for m in report.mutants] == [MutantStatus.TIMEOUT]
+    assert twice == []  # out of time is no survivor: the whole command has nothing to add
+    assert runs(log) == [("first", "unchanged"), ("first", "mutant"), ("first", "unchanged")]
+    assert log[2][2] is not None and log[2][2] == log[1][2]
+
+
+def test_a_first_runner_that_does_not_pass_on_the_unchanged_copy_stops_the_run(
+    project: Path, tmp_path: Path
+) -> None:
+    log: Log = []
+
+    async def red(root: Path, timeout: float | None) -> TestVerdict:
+        return TestVerdict.FAILED
+
+    with pytest.raises(BaselineFailed):
+        both(project, tmp_path, [aimed(KILLER, red)], _noting("whole", log), workers=1)
+
+    assert log == []
+
+
+def test_a_lone_survivor_of_the_first_runners_is_judged_alone_by_the_whole_command(
+    project: Path, tmp_path: Path
+) -> None:
+    """Three copies judged three mutants; one survived and only it goes to the whole command, in
+    one copy. Out of time there it ran alone, so it is not judged again: the unchanged copy is
+    asked for at once."""
+    log: Log = []
+    first = _noting("first", log, {KILLER: TestVerdict.FAILED, OTHER: TestVerdict.FAILED})
+    whole = _noting("whole", log, {SLOW: TestVerdict.TIMED_OUT})
+    mutants = [aimed(KILLER, first), aimed(SLOW, first), aimed(OTHER, first)]
+
+    report, twice = both(project, tmp_path, mutants, whole, workers=3)
+
+    assert [m.status for m in report.mutants] == [
+        MutantStatus.KILLED,
+        MutantStatus.TIMEOUT,
+        MutantStatus.KILLED,
+    ]
+    assert twice == [1]
+    assert runs(log)[-3:] == [("whole", "unchanged"), ("whole", "mutant"), ("whole", "unchanged")]
+
+
+def test_the_survivors_of_the_first_runners_are_judged_by_the_whole_command_side_by_side(
+    project: Path, tmp_path: Path
+) -> None:
+    log: Log = []
+    first = _noting("first", log)
+    used: list[Path] = []
+    together = asyncio.Barrier(2)
+
+    async def whole(root: Path, timeout: float | None) -> TestVerdict:
+        if (root / "calc.py").read_bytes() != CALC:
+            used.append(root)
+            await asyncio.wait_for(together.wait(), 10)  # raises unless two run at once
+        return TestVerdict.PASSED
+
+    mutants = [aimed(KILLER, first), aimed(SLOW, first)]
+
+    report, twice = both(project, tmp_path, mutants, whole, workers=2)
+
+    assert [m.status for m in report.mutants] == [MutantStatus.SURVIVED] * 2
+    assert twice == [0, 1]
+    assert sorted(root.name for root in used) == ["worker-0", "worker-1"]
+
+
+# -- the baseline of a command, for a caller that measures it once ---------------------------------
+
+
+def test_the_baseline_of_a_command_is_timed_on_an_unchanged_copy_made_for_it(
+    project: Path, tmp_path: Path
+) -> None:
+    (project / "target").mkdir()
+    (project / "target" / "report.json").write_text("x", encoding="utf-8")
+    seen: list[tuple[Path, float | None, bytes, bool]] = []
+
+    async def runner(root: Path, timeout: float | None) -> TestVerdict:
+        seen.append((root, timeout, (root / "calc.py").read_bytes(), (root / "target").exists()))
+        await asyncio.sleep(0.2)
+        return TestVerdict.PASSED
+
+    seconds = asyncio.run(baseline(project, tmp_path / "base", runner, 30.0))  # type: ignore[arg-type]
+
+    # the copy a worker gets: without the reports at the root
+    assert seen == [(tmp_path / "base", 30.0, CALC, False)]
+    assert 0.1 < seconds < 5.0
+
+
+def test_a_command_that_does_not_pass_on_the_unchanged_copy_has_no_baseline(
+    project: Path, tmp_path: Path
+) -> None:
+    async def runner(root: Path, timeout: float | None) -> TestVerdict:
+        assert timeout is None
+        return TestVerdict.TIMED_OUT
+
+    with pytest.raises(BaselineFailed):
+        asyncio.run(baseline(project, tmp_path / "base", runner))  # type: ignore[arg-type]
