@@ -248,7 +248,7 @@ async def amain(args: Arguments, console: Console, environ: Mapping[str, str]) -
                 console, environ, load_perfil(profile_dir(environ)), detection=detection
             )
         if args.command == "agente":
-            return run_facade(args.agent, Path.cwd(), environ)
+            return await run_facade(args.agent, Path.cwd(), environ)
         if args.command == "revisao":
             return await revisao(args, console, environ, detection)
         return await start(args, console, environ, detection)

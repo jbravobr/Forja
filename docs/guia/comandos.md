@@ -298,13 +298,30 @@ forja agente lint src
 forja agente medir src/inv
 ```
 
-| Subcomando | Ferramenta | Sem `CAMINHO` |
+| Subcomando | O que roda | Sem `CAMINHO` |
 | --- | --- | --- |
-| `testar` | `pytest -q -x -p no:cacheprovider`, com o Python do repositório | o pytest decide o que rodar |
-| `lint` | `ruff check --no-cache` | `.` |
+| `testar` | o comando de testes da linguagem de cada projeto, o mesmo do gate de testes, parando no primeiro teste que falha | todos os projetos da cópia |
+| `lint` | o comando de lint da linguagem de cada projeto, o mesmo do gate de lint | todos os projetos da cópia |
 | `medir` | `lizard` | `.` |
 
-O caminho deve ser relativo, existir dentro do diretório atual, não começar com `-` e não conter `..`. Senão a fachada sai com código `2` e diz "caminho não permitido" ou "caminho não encontrado dentro do projeto". Uso incorreto imprime `uso: forja agente testar|lint|medir [CAMINHO...]` e sai com `2`. A ferramenta tem limite de 600 segundos (código `124` e a mensagem "interrompido: passou de 600 s"); erro de sistema ao abrir a ferramenta sai com `127`. A saída mostra as últimas 80 linhas.
+`testar` e `lint` valem para todas as linguagens que a Forja conduz. A ferramenta de cada uma é a do gate:
+
+| Linguagem | `testar` | `lint` |
+| --- | --- | --- |
+| Python | `pytest`, com o Python do repositório | `ruff check` |
+| Go | `go test ./...` | `golangci-lint run` |
+| Java | `mvn test` ou `gradle test` | Checkstyle, PMD e SpotBugs, os que o projeto declara |
+| C# | `dotnet test` | `dotnet format analyzers` |
+| TypeScript e JavaScript | Vitest ou Jest | ESLint, se o projeto depende dele |
+
+Depois da saída da ferramenta vem o que a Forja leu nela, uma linha para cada: `falhou: <teste>` ou `<arquivo>: <regra> (<quantas>)`. Em Go a saída da ferramenta é a de `go test -json`.
+
+- Com mais de um projeto na cópia, cada um ganha um título (`== <linguagem>: <pasta> ==`). Os testes param no primeiro projeto que falha; o lint passa por todos.
+- Com `CAMINHO`, rodam só os projetos que o contêm. O caminho também restringe o que roda dentro do projeto onde a ferramenta aceita isso (os testes, só em Python); nas outras, roda o projeto inteiro.
+- Quando a linguagem não oferece a operação para o projeto (lint em Java ou TypeScript sem ferramenta declarada, Go sem `golangci-lint`), a fachada diz `<subcomando> não se aplica a este projeto (<linguagem>): <motivo>` e isso não conta como falha.
+- Numa pasta sem projeto de linguagem conhecida, a fachada diz isso e sai com `2`.
+
+O caminho deve ser relativo, existir dentro do diretório atual, não começar com `-` e não conter `..`. Senão a fachada sai com código `2` e diz "caminho não permitido" ou "caminho não encontrado dentro do projeto". Uso incorreto imprime `uso: forja agente testar|lint|medir [CAMINHO...]` e sai com `2`. A ferramenta tem limite de 600 segundos (código `124` e a mensagem "interrompido: passou de 600 s"); ferramenta que não pôde ser aberta sai com `127`. A saída mostra as últimas 80 linhas. O código de saída é o da ferramenta, ou `1` quando ela termina bem e a Forja leu nela teste que falhou ou violação de lint.
 
 ## Rodar sem perguntas
 

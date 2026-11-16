@@ -293,7 +293,7 @@ def test_the_commands_that_do_not_run_are_handed_to_their_own_code(
         calls.append("instalar")
         return code
 
-    def facade(*_a: object) -> int:
+    async def facade(*_a: object) -> int:
         calls.append("run_facade")
         return code
 
