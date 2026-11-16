@@ -1505,6 +1505,17 @@ Levei três pontos ao dono, cada um com uma recomendação, e ele mandou seguir 
 2. **Sem nota, o veredito é pelo mutante vivo.** `min_score` sai. Em `blocking`, mutante vivo em linha do diff devolve a tentativa ao autor de testes uma vez, com os achados; o que continuar vivo na tentativa seguinte vai para o resumo como achado e não bloqueia. Bloquear sempre travaria em mutante equivalente. Em `observation`, como hoje, o achado só aparece no relatório.
 3. **Um mutante por linha e sete por arquivo.** Vale no que roda onde a Forja escolhe o mutante (Go e Python). Em C#, JavaScript, TypeScript e Java a ferramenta roda os mutantes das linhas do diff, e a Forja mostra um por linha e sete por arquivo.
 
+Antes de começar, o dono perguntou se o que determinou segue os artigos e se dá às linguagens a mutação adequada. A resposta: sim no essencial (só o diff, só linha coberta, sem nota, no fluxo de quem escreve, e o blog recomenda as ferramentas de código aberto), com três desvios e um risco.
+
+- **Desvios:** um por linha só vale no que se mostra em quatro linguagens; a remoção de comando (SBR), 72% dos mutantes do Google, não existe igual em todas (o Stryker tem, o PIT só remove chamada de método, o cosmic-ray não tem); o PIT roda a classe tocada inteira.
+- **Risco:** o nó árido é o centro do método, e a Forja só tem as regras do apêndice, sem o "Not useful" que levou o Google de 80% a 15% de achados inúteis. Quem recebe o achado na Forja é um agente, que tende a obedecer, e o blog avisa que matar mutante improdutivo gera teste frágil.
+- **Python é o ponto fraco:** o cosmic-ray acerta a escolha do mutante e não traz capacidade de execução além da que o motor da Forja já tem.
+
+Com isso, mais duas decisões:
+
+4. **O autor de testes pode responder "não útil" a um achado, com o motivo,** em vez de escrever o teste. O achado respondido assim não é cobrado de novo e vai para o resumo com o motivo. O dono lê e decide o que vira regra nova de nó árido. É o equivalente do retorno dos desenvolvedores no Google.
+5. **Python segue com o cosmic-ray.** A medição da tarefa 8 decide: com perda, a fila para e o caso volta ao dono.
+
 ### O plano
 
 **Propósito:** o gate de mutação pelo método do Google, igual nas seis linguagens, executado pela ferramenta de cada uma (e pelo motor da Forja em Go), custando menos do que custa hoje.
@@ -1515,6 +1526,7 @@ Levei três pontos ao dono, cada um com uma recomendação, e ele mandou seguir 
 
 - **O núcleo decide o método,** igual nas seis: as linhas candidatas (acrescentadas ou modificadas pela tentativa, cobertas, não áridas), um por linha e sete por arquivo, nenhuma nota, e o veredito da decisão 2.
 - **Nó árido é decidido pela Forja,** sobre o tree-sitter que ela já tem para as seis linguagens, com as regras do apêndice do artigo: uma implementação, seis gramáticas. Vale antes de rodar onde a Forja escolhe o mutante, e sobre o achado nas demais. O mecanismo da ferramenta (`ignore-methods`, `avoidCallsTo`, `ignorers`) entra a mais, só para poupar tempo.
+- **O "não útil" é do núcleo,** igual nas seis: o achado que o autor de testes recusa com motivo sai da cobrança e vai para o resumo. Por onde o agente responde é definido na tarefa 1, lendo como ele já declara premissas.
 - **Operadores: as cinco famílias do Google** (AOR, LCR, ROR, UOI, SBR). O que a ferramenta tem a mais fica desligado; a família que ela não tem fica registrada como limite da linguagem.
 - **O adaptador planeja o comando de mutação da ferramenta** (`Operation.MUTATION`, que já existe em `core/adapters/language.py` sem quem a planeje) e lê o relatório dela para um modelo comum: arquivo, linha, operador e estado.
 - **Não muda:** linha acrescentada sem teste reprova; o que deixa o gate inconclusivo; a prioridade baixa; a guarda do estouro de tempo onde o motor é da Forja.
@@ -1523,7 +1535,7 @@ Levei três pontos ao dono, cada um com uma recomendação, e ele mandou seguir 
 
 | # | Tarefa | Pronto quando |
 | --- | --- | --- |
-| 1 | **O método e o contrato no núcleo, com Go no motor da Forja:** as linhas do diff no lugar da função inteira, um mutante por linha e sete por arquivo, nó árido, sem nota, o veredito novo. Go vem primeiro porque é a única linguagem que fica no motor. As outras pilhas não passam pelo motor com o método novo: ficam como estão, na branch, até a tarefa da ferramenta delas. | os casos `slow` de mutação de Go dão o veredito esperado (aprova a função conferida, acha o teste que só chama); medido antes e depois nos projetos de Go da fase 4 da leva de desempenho; guia |
+| 1 | **O método e o contrato no núcleo, com Go no motor da Forja:** as linhas do diff no lugar da função inteira, um mutante por linha e sete por arquivo, nó árido, sem nota, o veredito novo e o "não útil" do autor de testes. Go vem primeiro porque é a única linguagem que fica no motor. As outras pilhas não passam pelo motor com o método novo: ficam como estão, na branch, até a tarefa da ferramenta delas. | os casos `slow` de mutação de Go dão o veredito esperado (aprova a função conferida, acha o teste que só chama); medido antes e depois nos projetos de Go da fase 4 da leva de desempenho; guia |
 | 2 | **Go: SBR no motor da Forja.** É a linguagem que fica no motor, e a remoção de comando é a família que falta nele. | o mesmo, para Go |
 | 3 | **TypeScript e JavaScript com Jest: StrykerJS.** | a ferramenta provada no Windows no projeto de teste da pilha, sem alterar o projeto do usuário; os mesmos casos; medido contra o gate de hoje (o "antes" da fase 4); sai do motor o que só servia a essa pilha |
 | 4 | **TypeScript e JavaScript com Vitest: StrykerJS.** | o mesmo |
