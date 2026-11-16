@@ -79,12 +79,16 @@ class AdapterRegistry:
 
     def projects(self, root: Path) -> list[ScopedAdapter]:
         """The projects under ``root``, one adapter instance each, in registration order and
-        then by directory."""
-        return [
-            self.project(adapter.language, detection.roots[0])
-            for adapter in self._languages.values()
-            for detection in find_projects(adapter, root)
-        ]
+        then by directory. Each instance has seen the manifest of its own project: an adapter
+        may learn there what it needs to read the output of the tools (which build tool the
+        project uses), and the instance that found the project is not the one that works on it."""
+        found = []
+        for adapter in self._languages.values():
+            for detection in find_projects(adapter, root):
+                project = self.project(adapter.language, detection.roots[0])
+                project.detect(root)
+                found.append(project)
+        return found
 
     def project(self, language: str, base: str = ".") -> ScopedAdapter:
         """A project of ``language`` at ``base``, with an instance of its own."""

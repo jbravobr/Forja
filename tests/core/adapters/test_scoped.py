@@ -257,6 +257,32 @@ def test_the_registry_makes_one_instance_per_project(tmp_path: Path) -> None:
     assert projects[0].inner is not projects[1].inner
 
 
+def test_each_instance_the_registry_makes_has_seen_the_manifest_of_its_own_project(
+    tmp_path: Path,
+) -> None:
+    """An adapter may learn from the manifest what it needs later (Java: Maven or Gradle). The
+    instance that finds the projects is not the one each project works with."""
+
+    class Remembering(Go):
+        def __init__(self) -> None:
+            self.seen: list[Path] = []
+
+        def detect(self, root: Path) -> Detection | None:
+            self.seen.append(root)
+            return super().detect(root)
+
+    for name in ("a", "b"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "go.mod").write_text("")
+    registry = AdapterRegistry()
+    registry.register_language(Remembering(), Remembering)
+
+    projects = registry.projects(tmp_path)
+
+    seen = [p.inner.seen for p in projects]  # type: ignore[attr-defined]
+    assert seen == [[tmp_path / "a"], [tmp_path / "b"]]
+
+
 def test_a_project_below_the_root_hands_back_what_it_could_not_read_as_it_came(
     tmp_path: Path,
 ) -> None:
