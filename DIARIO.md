@@ -1700,3 +1700,56 @@ Feito em fila, uma pilha de cada vez, cada uma provada antes da seguinte: o núc
 - O efeito do defeito do Gradle nos gates de uma execução real, e um teste do pipeline que registre os adaptadores com fábrica, como a sessão faz.
 - Os quatro itens novos da fila continuam: JavaScript sem `tsconfig.json`; formato e lint em Java e TypeScript só com a ferramenta declarada; instalar dependência nova só para PyPI; `red_green` só reconhece o erro do próprio teste em Python.
 - As demais pendências da entrada anterior continuam.
+
+## 15/11/2026 — um projeto só de JavaScript, sem `tsconfig.json`, é conduzido
+
+Ponto 2 da entrada de 15/11 sobre o suporte por linguagem, o primeiro dos quatro itens novos da fila: `package.json` só era projeto ao lado de um `tsconfig.json`, e um repositório de JavaScript puro era recusado.
+
+### O que foi lido
+
+O adaptador de TypeScript inteiro, a detecção da linha de comando (`cli/detect.py`, `cli/prepare.py`, `cli/scaffold.py`), como o registro acha os projetos (`core/adapters/registry.py`, `projects.py`), como o núcleo mede a base (`orchestrator/measurer.py`, `baseline`) e como os testes com ferramenta de verdade estão montados.
+
+### O que foi feito
+
+| Mudança | Arquivos | Teste novo | Commit |
+| --- | --- | --- | --- |
+| Sem `tsconfig.json`, um `package.json` que depende de `vitest` ou de `jest` é um projeto de JavaScript, do mesmo adaptador (`typescript`). A regra está num lugar só (`is_project`) e serve ao adaptador e à detecção da linha de comando. Com `tsconfig.json` nada mudou. | `languages/typescript/adapter.py`, `cli/detect.py`, `cli/prepare.py` (a mensagem de recusa), `cli/scaffold.py` (um comentário) | sete casos em `tests/languages/typescript/test_adapter.py`, dois em `tests/cli/test_install_languages.py`, dois em `tests/cli/test_main.py` | `52f7751` |
+| O `build` de JavaScript: uma peça da Forja (`js_syntax.cjs`) roda `node --check` em cada arquivo `.js`, `.mjs` e `.cjs`, um processo por arquivo, tantos ao mesmo tempo quantos são os núcleos. Ficam de fora `node_modules`, `dist`, `build`, `coverage` e as pastas ocultas. O leitor do `build` passou a ler também a saída dela (`<arquivo>:<linha>: SyntaxError: ...`). | `languages/typescript/js_syntax.cjs` (novo), `adapter.py`, `parsers.py` | três em `test_adapter.py` | `52f7751` |
+| Prova com a ferramenta de verdade, com Vitest e com Jest: o `build` reprova o arquivo que o Node não lê e ignora o que está em `dist`; a mutação aprova a função conferida e reprova o teste que só chama; `forja agente testar` passa e nomeia o teste que falha. | `tests/languages/typescript/test_javascript.py` (novo, `slow`) | 10 casos | `52f7751` |
+| Prova de ponta a ponta: o reparo num projeto de JavaScript passa por todos os gates e é entregue, e o implementador que mexe no teste congelado é devolvido. | `tests/checks/test_real_languages.py` | 2 casos | `52f7751` |
+| Guia: o arquivo que identifica cada linguagem, e o `build` de JavaScript com o seu limite. | `docs/guia/ambiente.md`, `execucao-toml.md`, `gates/tipos.md` | nenhum | `52f7751` |
+
+Feito em fila: o núcleo, depois Vitest, depois Jest, cada um provado antes do seguinte.
+
+### Conclusões
+
+- **Aceitar o `package.json` não bastava.** A primeira versão só tirava a exigência do `tsconfig.json`, e a prova de ponta a ponta falhou: "A base já não está verde (not applicable: build)". O núcleo recusa a execução se algum projeto do repositório não oferece `build` ou testes (`measurer.py`, `baseline`), e o adaptador só oferecia `build` com o `tsc`. Os testes de unidade passavam todos.
+- **Isso corrige uma frase da entrada de 15/11.** Lá está que, sem a ferramenta, o gate dá "não aplicável", que passa. Vale para formato e lint. Para `build` e testes, "não aplicável" na base recusa a execução inteira.
+- **O `build` de JavaScript é decisão minha, tirada do que já existia:** o contrato diz que todo adaptador oferece `build` (`core/adapters/language.py`, `REQUIRED_OPERATIONS`), e em Python, que também não compila, o `build` é o `compileall`. O equivalente no Node é o `node --check`. Conferido à mão no Node 26.13: aceita módulo ES e CommonJS pelo `package.json` e pela extensão, confere um arquivo por chamada (o segundo argumento é ignorado), e sai com 1 e `SyntaxError` no arquivo quebrado.
+- **Limite do `node --check`: JSX dentro de arquivo `.js`.** O Node recusa, e a base desse projeto não fica verde. A saída é o projeto declarar o seu comando em `[checks.build.commands]`, que passou a valer para JavaScript porque o adaptador agora oferece a operação. Arquivo `.jsx` não é conferido. Está no guia.
+- **Sem `tsconfig.json`, o `build` é sempre a conferência de sintaxe,** mesmo que o projeto dependa de `typescript`: o `tsc -p .` não teria o que ler.
+- **A regra do executor de testes também é decisão minha, e evita uma perda.** Com qualquer `package.json` virando projeto, um repositório Python ou Go com um `package.json` só de ferramentas (Prettier, commitlint) ganharia um projeto sem testes, e a base seria recusada com "not applicable: test". Esse repositório funciona hoje. Por isso, sem `tsconfig.json`, só é projeto o `package.json` que depende de `vitest` ou de `jest`, os dois executores que o adaptador sabe rodar.
+- **A regra não é igual à do TypeScript.** Com `tsconfig.json` o projeto é achado mesmo sem executor de testes, e então a base é recusada. Não mexi: é o comportamento anterior.
+- **Nenhum veredito de TypeScript mudou.** Os 91 testes de `tests/languages/typescript` passaram com a ferramenta de verdade.
+
+### Verificação
+
+- `ruff check .`, `ruff format --check src tests scripts/mutate.py` e `mypy` strict: limpos, 654 e 653 arquivos.
+- `pytest -m "not slow" -n 8`, Windows: 10121 aprovados, 41 pulados, 282 s.
+- Com a ferramenta de verdade, um comando de cada vez, com limite de tempo: `tests/languages/typescript` inteiro, 91 aprovados em 126 s (antes da regra do executor de testes); depois dela, `test_javascript.py`, 10 aprovados; `tests/checks/test_real_languages.py -k "javascript or typescript"`, 10 aprovados em 411 s.
+- Não rodou: a mutação dos arquivos de `src` tocados (`languages/typescript/adapter.py`, `parsers.py`, `cli/detect.py`, `cli/prepare.py`); a suíte completa com `slow`; os testes com ferramenta de verdade das outras linguagens (o código delas não mudou); ESLint e Prettier num projeto de JavaScript; a escolha dos testes da linha (`line_tests`) em JavaScript; execução com agente real; Linux e macOS.
+
+### Pontos para o dono
+
+1. **O `build` de JavaScript pelo `node --check`,** com o limite do JSX em arquivo `.js`. Se o dono preferir outro equivalente, é uma troca no adaptador e na peça.
+2. **A regra do executor de testes.** Um projeto de JavaScript com outro executor (mocha, `node:test`) continua recusado, agora com "Não encontrei nenhuma linguagem". Antes também era recusado.
+3. **`forja criar` não tem modelo de JavaScript.** O adaptador tem um modelo só, o de TypeScript. Não fiz: o ponto era a recusa.
+4. **Raiz de monorepo.** Um `package.json` na raiz, sem `tsconfig.json` e com `vitest` ou `jest`, passa a ser projeto, junto com os pacotes dentro dele. É o ponto 3 da entrada anterior (projeto dentro de projeto roda mais de uma vez), agora mais frequente.
+
+### Pendências
+
+- Os quatro pontos acima, e os três da entrada anterior.
+- Mutação dos arquivos de `src` tocados, junto com as que já esperam.
+- Continua como estava: `thresholds.javascript` é aceito, mas os gates que medem pelo adaptador leem `typescript`; num projeto de JavaScript o limite vale em `thresholds.typescript`. Com `line_tests` ligado, o relator do Jest para os testes da linha pede o pacote `typescript`, e num projeto de JavaScript nada é escolhido.
+- Os três itens que restam na fila: formato e lint em Java e TypeScript só com a ferramenta declarada; instalar dependência nova só para PyPI; `red_green` só reconhece o erro do próprio teste em Python.
+- As demais pendências da entrada anterior continuam.
