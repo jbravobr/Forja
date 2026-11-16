@@ -1523,24 +1523,23 @@ Levei três pontos ao dono, cada um com uma recomendação, e ele mandou seguir 
 
 | # | Tarefa | Pronto quando |
 | --- | --- | --- |
-| 1 | **O método no núcleo, nas seis linguagens, ainda sobre o motor da Forja:** as linhas do diff no lugar da função inteira, um mutante por linha e sete por arquivo, nó árido, sem nota, o veredito novo. | os casos `slow` de mutação das seis pilhas dão o veredito esperado (aprova a função conferida, acha o teste que só chama); medido antes e depois nos projetos da fase 4 da leva de desempenho; guia |
+| 1 | **O método e o contrato no núcleo, com Go no motor da Forja:** as linhas do diff no lugar da função inteira, um mutante por linha e sete por arquivo, nó árido, sem nota, o veredito novo. Go vem primeiro porque é a única linguagem que fica no motor. As outras pilhas não passam pelo motor com o método novo: ficam como estão, na branch, até a tarefa da ferramenta delas. | os casos `slow` de mutação de Go dão o veredito esperado (aprova a função conferida, acha o teste que só chama); medido antes e depois nos projetos de Go da fase 4 da leva de desempenho; guia |
 | 2 | **Go: SBR no motor da Forja.** É a linguagem que fica no motor, e a remoção de comando é a família que falta nele. | o mesmo, para Go |
-| 3 | **TypeScript e JavaScript com Jest: StrykerJS.** | a ferramenta provada no Windows no projeto de teste da pilha, sem alterar o projeto do usuário; os mesmos casos; medido contra a tarefa 1; sai do motor o que só servia a essa pilha |
+| 3 | **TypeScript e JavaScript com Jest: StrykerJS.** | a ferramenta provada no Windows no projeto de teste da pilha, sem alterar o projeto do usuário; os mesmos casos; medido contra o gate de hoje (o "antes" da fase 4); sai do motor o que só servia a essa pilha |
 | 4 | **TypeScript e JavaScript com Vitest: StrykerJS.** | o mesmo |
 | 5 | **Java com Gradle: PIT.** | o mesmo |
 | 6 | **Java com Maven: PIT.** | o mesmo |
 | 7 | **C#: Stryker.NET.** O runtime do .NET 10 entra no manifesto de ferramentas. | o mesmo |
 | 8 | **Python: cosmic-ray.** O paralelismo e o limite de tempo são da Forja: uma sessão por cópia. | o mesmo |
-| 9 | **Fecho:** sai o que ninguém mais usa, conferido no código; a suíte completa com `slow`; a mutação da própria Forja (`scripts/mutate.py`) passa ao método. | a leva pronta |
+| 9 | **Fecho:** sai do motor tudo o que não é de Go, conferido no código; a suíte completa com `slow`; a mutação da própria Forja (`scripts/mutate.py`) passa ao cosmic-ray e ao método. | a leva pronta |
 
-A ordem: a tarefa 1 corta o número de mutantes nas seis de uma vez, sem ferramenta nova. Depois vêm as ferramentas, da pilha mais cara para a mais barata pelas medições que há (Jest 356 s, Gradle 101 a 126 s, C# 36 s, Python 9,5 s no projeto gerado da fase 4), com as duas pilhas da mesma ferramenta em seguida.
+A ordem: a tarefa 1 põe o método e o contrato no núcleo e os prova com Go. Depois vêm as ferramentas, da pilha mais cara para a mais barata pelas medições que há (Jest 356 s, Gradle 101 a 126 s, C# 36 s, Python 9,5 s no projeto gerado da fase 4), com as duas pilhas da mesma ferramenta em seguida.
+
+**Correção do plano, a pedido do dono.** A primeira versão desta fila aplicava o método novo nas seis linguagens ainda sobre o motor da Forja, e só depois trocava pelas ferramentas. O dono corrigiu: onde há ferramenta coerente com o método do Google, a mutação é da ferramenta, e o motor da Forja não gera nem roda mutante ali. O motor fica só em Go, adaptado aos artigos. O que continua da Forja nas seis linguagens é a política do gate, em volta da ferramenta: dizer as linhas do diff, ler o relatório, mostrar um por linha e sete por arquivo, tirar o nó árido e dar o veredito.
 
 **O que cada tarefa de ferramenta prova antes de qualquer código,** porque o levantamento não provou: que roda no Windows; que roda sem alterar o projeto (os plugins do StrykerJS, o plugin do JUnit 5 do PIT, o PIT no Gradle por script de inicialização); a sintaxe que restringe às linhas; os campos do relatório.
 
-**Decisões minhas dentro do plano,** para o dono vetar se quiser:
-
-- **O operador da linha é sorteado com semente fixa por execução.** O artigo sorteia; a escolha pelo histórico, do blog, pede dados que a Forja não tem. A semente existe para a retomada de uma execução dar o mesmo resultado.
-- **Depois da tarefa 1 a vantagem das ferramentas pode encolher:** com sete mutantes por arquivo no máximo, a partida da ferramenta de testes por mutante pesa menos. A medição de cada tarefa decide; nada é previsto aqui.
+**Decisão minha dentro do plano,** para o dono vetar se quiser: onde a Forja escolhe o mutante, o operador da linha é sorteado com semente fixa por execução. O artigo sorteia; a escolha pelo histórico, do blog, pede dados que a Forja não tem. A semente existe para a retomada de uma execução dar o mesmo resultado.
 
 ### Para retomar
 
