@@ -6,7 +6,7 @@ Esta página descreve os dois gates que medem a qualidade do código que a tenta
 
 | `<id>` | Gate | `mode` padrão | `on_inconclusive` padrão | O que mede | Chaves |
 | --- | --- | --- | --- | --- | --- |
-| `mutation` | 7 | `observation` | `premise` | os testes percebem mudanças no código que a tentativa escreveu ou tocou | `thresholds.min_score`, `limits.workers` |
+| `mutation` | 7 | `observation` | `premise` | os testes percebem mudanças no código que a tentativa escreveu ou tocou | `thresholds.min_score`, `limits.workers`, `limits.line_tests` |
 | `complexity` | 8 | `blocking` | `premise` | nenhuma função nova ou piorada passa do limite de complexidade | `thresholds.max_ccn` |
 | `crap` | 8 | `observation` | `premise` | função complexa e pouco coberta pelos testes | `thresholds.max_crap` |
 | `pass_through` | 8 | `observation` | `premise` | função nova que só repassa os próprios argumentos | nenhuma |
@@ -78,7 +78,16 @@ A verificação só age se a tentativa acrescentou linhas em arquivo de produç�
 
 #### Os testes da linha primeiro
 
-O `unclebob/mutator` roda o comando inteiro de testes para cada mutante. A Forja roda primeiro só os testes que executam as linhas do mutante, onde sabe quais são:
+Esta parte vem desligada. Sem pedido na política, a Forja faz como o `unclebob/mutator`: roda o comando de testes para cada mutante (em Go, o do pacote do arquivo primeiro) e para no primeiro teste que falha. Para ligar:
+
+```toml
+[checks.mutation.limits]
+line_tests = 1
+```
+
+Por que vem desligada: medida em projetos de testes rápidos, a escolha dos testes deixou a mutação mais lenta em Python, Go, Java e C#, e mais rápida só com o Vitest. Cada mutante paga a partida da ferramenta de testes de qualquer jeito, e a escolha acrescenta uma execução que descobre os testes de cada linha e uma verificação inicial por conjunto de testes. O ganho esperado é em projeto cujos testes demoram, e ele ainda não foi medido. Ligar ou desligar não muda veredito, só o tempo.
+
+Ligada, a Forja roda primeiro só os testes que executam as linhas do mutante, onde sabe quais são:
 
 - um de cada vez, sem o paralelismo da ferramenta;
 - na frente, o teste que matou o mesmo mutante na tentativa anterior;
@@ -101,7 +110,7 @@ Como a Forja sabe os testes de cada linha, em cada pilha:
 
 Nada do projeto é alterado. O que a Forja acrescenta entra pela linha de comando, por variável de ambiente ou por arquivo dela, fora do projeto. O que a execução própria grava fica em `.forja-test-lines/`, na pasta do projeto, e é apagado depois de lido.
 
-Quando o mutante não tem testes escolhidos, vale o que valia antes. Isso acontece se:
+Quando o mutante não tem testes escolhidos, vale o que vale com a chave desligada. Isso acontece se:
 
 - o relatório não diz que teste executa a linha (uma linha executada só na carga do módulo, por exemplo);
 - a execução própria falhou ou o relatório dela não pôde ser lido;
@@ -128,7 +137,7 @@ A Forja não muta o projeto todo, só o que a tentativa tocou. Entram:
 - todo ponto de mutação nas linhas que a tentativa acrescentou;
 - todo ponto de mutação dentro das funções que contêm alguma linha acrescentada, mesmo nas linhas antigas dessas funções.
 
-Uma função que a tentativa não tocou não entra, e um sobrevivente que já existia nela não é cobrado. A Forja também não aproveita veredito de uma tentativa para a seguinte: cada tentativa vale por si, e todo mutante roda de novo. A única coisa guardada entre tentativas da mesma execução é qual teste matou cada mutante, e ela só serve para pôr esse teste na frente da fila. A regra é de catraca, não de faxina: o gate cobra o que a tentativa mexeu, não a dívida antiga.
+Uma função que a tentativa não tocou não entra, e um sobrevivente que já existia nela não é cobrado. A Forja também não aproveita veredito de uma tentativa para a seguinte: cada tentativa vale por si, e todo mutante roda de novo. Com `limits.line_tests` ligado, a única coisa guardada entre tentativas da mesma execução é qual teste matou cada mutante, e ela só serve para pôr esse teste na frente da fila. Desligado, nada é guardado. A regra é de catraca, não de faxina: o gate cobra o que a tentativa mexeu, não a dívida antiga.
 
 | Situação | O que acontece |
 | --- | --- |
@@ -147,6 +156,7 @@ Uma função que a tentativa não tocou não entra, e um sobrevivente que já ex
 | `on_inconclusive` | `block` ou `premise` | `premise` | o que fazer quando a medição não pôde ser feita |
 | `thresholds.<linguagem>.min_score` | número maior que `0` e até `1` | `0.80`; `0.70` para `python` e `go` | nota mínima. Valor fora dessa faixa é ignorado e vale o padrão. |
 | `limits.workers` | inteiro maior que `0` | o número de processadores | quantos mutantes rodam em paralelo, no máximo. Cada trabalhador usa uma cópia do projeto, e nunca há mais trabalhadores que mutantes a rodar. Valor que não é inteiro positivo é ignorado. |
+| `limits.line_tests` | inteiro | `0` (desligado) | `1` ou mais liga "Os testes da linha primeiro". Não muda veredito, só o tempo. |
 
 Os padrões menores de Python e Go existem porque a mutação nessas linguagens é mais lenta e mais frágil.
 

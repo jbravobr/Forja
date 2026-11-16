@@ -197,7 +197,7 @@ def test_a_new_method_the_tests_check_is_approved_with_or_without_the_tests_of_e
     history = tmp_path / "history.json"
     tool = adapter() if with_lines else CSharpAdapter()
 
-    result = judge(repo, tmp_path, TEST_THAT_CHECKS, tool, history)
+    result = judge(repo, tmp_path, TEST_THAT_CHECKS, tool, history, line_tests=True)
 
     assert isinstance(result, Approved)
     if with_lines:  # the test that killed each mutant is kept
@@ -211,7 +211,7 @@ def test_a_test_that_only_calls_the_change_is_rejected_with_or_without_the_tests
 ) -> None:
     tool = adapter() if with_lines else CSharpAdapter()
 
-    result = judge(repo, tmp_path, TEST_THAT_ONLY_CALLS, tool)
+    result = judge(repo, tmp_path, TEST_THAT_ONLY_CALLS, tool, line_tests=True)
 
     assert isinstance(result, Rejected)
     assert result.findings[0].measured == 0.0

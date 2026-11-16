@@ -11,6 +11,7 @@ import pytest
 
 from forja.checks.base import Undecided
 from forja.checks.changes import Changes
+from forja.checks.coverage import CoverageShare
 from forja.checks.mutation import (
     DEFAULT_MIN_SCORE,
     AdapterRunner,
@@ -22,6 +23,7 @@ from forja.checks.mutation import (
     in_order,
     judged_first,
     killers_of,
+    line_tests_first,
     load_killers,
     min_score,
     mutant_id,
@@ -83,6 +85,39 @@ def test_workers_come_from_the_policy_only_when_positive() -> None:
     assert worker_count(gate_input(limits={"workers": 2})) == 2
     assert worker_count(gate_input(limits={"workers": 1})) == 1
     assert worker_count(gate_input(limits={"workers": 0})) is None
+
+
+def test_the_tests_of_the_line_judge_first_only_when_the_policy_asks() -> None:
+    assert line_tests_first(gate_input()) is False
+    assert line_tests_first(gate_input(limits={"workers": 2})) is False
+    assert line_tests_first(gate_input(limits={"line_tests": 0})) is False
+    assert line_tests_first(gate_input(limits={"line_tests": True})) is False
+    assert line_tests_first(gate_input(limits={"line_tests": 1})) is True
+
+
+def test_the_tests_of_each_line_are_measured_only_when_asked_for_and_a_mutant_will_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[Path] = []
+
+    async def measured(tools: object, adapter: object, worktree: Path, *rest: object) -> str:
+        asked.append(worktree)
+        return "named"
+
+    monkeypatch.setattr("forja.checks.mutation.run_line_tests", measured)
+    check = MutationCheck(None, None, tmp_path, None, (), {})  # type: ignore[arg-type]
+    share = CoverageShare()
+    on = gate_input(limits={"line_tests": 1})
+
+    def named(data: GateInput, mutant: Mutant) -> object:
+        return asyncio.run(check._named(data, [mutant], share))  # noqa: SLF001
+
+    # left alone, the policy asks for none: every mutant goes to the command the adapter has
+    assert named(gate_input(), _on("a.py", 1)) is None
+    assert named(on, _on("a.py", 1, covered=False)) is None
+    assert asked == []
+    assert named(on, _on("a.py", 1)) == "named"
+    assert asked == [tmp_path]
 
 
 def test_the_changed_lines_are_those_of_the_files_asked_for_and_no_other() -> None:
@@ -922,7 +957,7 @@ def test_the_gate_judges_by_the_tests_of_the_lines_and_keeps_which_one_killed(
             scene.repo.env,
             history=history,
         )
-        return asyncio.run(check.evaluate(gate_input(limits={"workers": 1})))
+        return asyncio.run(check.evaluate(gate_input(limits={"workers": 1, "line_tests": 1})))
 
     assert isinstance(judged(), Approved)
 

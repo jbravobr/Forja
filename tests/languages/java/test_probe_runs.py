@@ -325,7 +325,9 @@ def verdict(tool: str, work: Path, repo: Repo, *, strong: bool, hide_lines: bool
         language="java",
         history=work / "history.json",
     )
-    data = GateInput(Path("."), "c" * 40, "t", "s", "a", values={})
+    # the tests of the lines first, as the policy may ask; ``hide_lines`` is the run without them
+    values: dict[str, object] = {"limits": {"line_tests": 1}}
+    data = GateInput(Path("."), "c" * 40, "t", "s", "a", values=values)  # type: ignore[arg-type]
     result = asyncio.run(check.evaluate(data))
     assert isinstance(result, (Approved, Rejected)), result
     return type(result)

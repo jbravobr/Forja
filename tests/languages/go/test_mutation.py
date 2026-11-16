@@ -66,8 +66,11 @@ def judge_change(
     change: dict[str, str],
     changed: str,
     adapter: GoAdapter,
+    line_tests: bool = False,
 ) -> GateResult:
-    """Commit ``base``, then write ``change`` over it and judge the lines ``changed`` gained."""
+    """Commit ``base``, then write ``change`` over it and judge the lines ``changed`` gained: by
+    the package of the file first, or with ``line_tests`` by the tests of the lines first, as the
+    policy may ask."""
     write(repo, base)
     repo.sh("add", "-A")
     repo.sh("commit", "-m", "module")
@@ -95,7 +98,8 @@ def judge_change(
         host_env,
         language="go",
     )
-    data = GateInput(Path("."), "c" * 40, "t", "s", "a", values={})
+    values = {"limits": {"line_tests": 1}} if line_tests else {}
+    data = GateInput(Path("."), "c" * 40, "t", "s", "a", values=values)  # type: ignore[arg-type]
     return asyncio.run(check.evaluate(data))
 
 
@@ -150,50 +154,64 @@ class Listening(GoAdapter):
         return answer
 
 
+PACKAGE = ((), "./calc")  # the package of the file, with no test chosen
+EVERY_PACKAGE = ((), "./...")
+BOTH_WAYS = pytest.mark.parametrize("line_tests", [False, True], ids=["package", "line tests"])
+
+
+@BOTH_WAYS
 def test_a_line_only_a_test_of_another_package_checks_is_judged_by_every_package(
-    repo: Repo, tmp_path: Path
+    repo: Repo, tmp_path: Path, line_tests: bool
 ) -> None:
     """``Sub`` is new in ``calc`` and only ``uses`` has a test for it. Coverage is measured over
-    every package, so the line counts as run, and the test of ``uses`` that runs it kills the
-    mutant in its own run."""
+    every package, so the line counts as run. Left alone, the tests of ``calc`` let its mutant
+    live; it only counts once every package has run, and there it is killed. With the tests of
+    the lines, the test of ``uses`` that runs the line kills the mutant in its own run."""
     adapter = Listening()
     change = {"calc/calc.go": WITH_SUB, "uses/uses_test.go": OTHER_PACKAGE_CHECKS}
 
-    result = judge_change(repo, tmp_path, TWO_PACKAGES, change, "calc/calc.go", adapter)
+    result = judge_change(repo, tmp_path, TWO_PACKAGES, change, "calc/calc.go", adapter, line_tests)
 
     assert isinstance(result, Approved)
-    # the test of the line runs on the unchanged copy first (it passes, so it judges), then the
-    # mutant: the test kills it, and the whole command is never run
-    uses = (("example.com/calc/uses/TestSub",), "./uses")
-    assert adapter.runs == [uses, uses]
+    if line_tests:
+        # the test of the line runs on the unchanged copy first (it passes, so it judges), then
+        # the mutant: the test kills it, and the whole command is never run
+        uses = (("example.com/calc/uses/TestSub",), "./uses")
+        assert adapter.runs == [uses, uses]
+    else:
+        # the package on the unchanged copy and on the mutant, then every package on both
+        assert adapter.runs == [PACKAGE, PACKAGE, EVERY_PACKAGE, EVERY_PACKAGE]
 
 
+@BOTH_WAYS
 def test_a_line_no_package_checks_survives_its_package_and_every_package(
-    repo: Repo, tmp_path: Path
+    repo: Repo, tmp_path: Path, line_tests: bool
 ) -> None:
     adapter = Listening()
     change = {"calc/calc.go": WITH_SUB, "uses/uses_test.go": OTHER_PACKAGE_ONLY_CALLS}
 
-    result = judge_change(repo, tmp_path, TWO_PACKAGES, change, "calc/calc.go", adapter)
+    result = judge_change(repo, tmp_path, TWO_PACKAGES, change, "calc/calc.go", adapter, line_tests)
 
     assert isinstance(result, Rejected)
     assert result.findings[0].measured == 0.0
     assert any(f.target == "calc/calc.go:8" for f in result.findings)
-    # the test of the line passes on the unchanged copy and lets the mutant live; only then does
+    # whoever judges first passes on the unchanged copy and lets the mutant live; only then does
     # the whole command get its baseline and judge the mutant
-    uses = (("example.com/calc/uses/TestSub",), "./uses")
-    assert adapter.runs == [uses, uses, ((), "./..."), ((), "./...")]
+    first = (("example.com/calc/uses/TestSub",), "./uses") if line_tests else PACKAGE
+    assert adapter.runs == [first, first, EVERY_PACKAGE, EVERY_PACKAGE]
 
 
+@BOTH_WAYS
 def test_a_line_its_own_package_checks_never_waits_for_the_other_packages(
-    repo: Repo, tmp_path: Path
+    repo: Repo, tmp_path: Path, line_tests: bool
 ) -> None:
     adapter = Listening()
     change = {"calc/calc.go": WITH_SUB, "calc/calc_test.go": TEST_THAT_CHECKS}
 
-    result = judge_change(repo, tmp_path, TWO_PACKAGES, change, "calc/calc.go", adapter)
+    result = judge_change(repo, tmp_path, TWO_PACKAGES, change, "calc/calc.go", adapter, line_tests)
 
     assert isinstance(result, Approved)
-    # the test of the line in its own package, on the unchanged copy and then on the mutant
-    own = (("example.com/calc/calc/TestSub",), "./calc")
+    # in its own package, on the unchanged copy and then on the mutant: the test of the line, or
+    # every test of the package
+    own = (("example.com/calc/calc/TestSub",), "./calc") if line_tests else PACKAGE
     assert adapter.runs == [own, own]

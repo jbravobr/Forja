@@ -142,7 +142,8 @@ def test_the_checks_of_this_increment_are_registered_in_gate_order_with_their_de
         "adr": (14, Mode.OBSERVATION, "premise"),
     }
     assert specs["scope"].limits == {"max_files", "max_lines"}
-    assert specs["mutation"].thresholds == {"min_score"} and specs["mutation"].limits == {"workers"}
+    assert specs["mutation"].thresholds == {"min_score"}
+    assert specs["mutation"].limits == {"workers", "line_tests"}
     assert specs["complexity"].thresholds == {"max_ccn"}
     assert specs["crap"].thresholds == {"max_crap"}
     assert specs["module_depth"].thresholds == {"max_interface_ratio", "min_statements"}

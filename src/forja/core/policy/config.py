@@ -67,7 +67,7 @@ SECTION_KEYS: dict[str, frozenset[str]] = {
 Number = int | float
 # The checks read these as whole numbers and drop a float without a word.
 _WHOLE_LIMITS = frozenset(
-    {"min_tokens", "min_lines", "workers", "max_files", "max_lines", "max_dashes"}
+    {"min_tokens", "min_lines", "workers", "line_tests", "max_files", "max_lines", "max_dashes"}
 )
 
 

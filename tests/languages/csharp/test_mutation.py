@@ -117,8 +117,11 @@ def judge(
     test_text: str,
     adapter: CSharpAdapter | None = None,
     history: Path | None = None,
+    line_tests: bool = False,
 ) -> GateResult:
-    """Commit the base solution, then add ``Sub`` with the given test file and judge the change."""
+    """Commit the base solution, then add ``Sub`` with the given test file and judge the change:
+    by the whole command, or with ``line_tests`` by the tests of the lines first, as the policy
+    may ask."""
     for name, text in BASE.items():
         write(repo.path, name, text)
     repo.sh("add", "-A")
@@ -154,7 +157,8 @@ def judge(
         language="csharp",
         history=history,
     )
-    data = GateInput(Path("."), "c" * 40, "t", "s", "a", values={})
+    values = {"limits": {"line_tests": 1}} if line_tests else {}
+    data = GateInput(Path("."), "c" * 40, "t", "s", "a", values=values)  # type: ignore[arg-type]
     return asyncio.run(check.evaluate(data))
 
 

@@ -181,7 +181,9 @@ def test_the_test_that_kills_a_mutant_is_kept_in_the_history_and_nothing_else_is
         tools, GoAdapter(), repo.path, changes, ("calc.go",), host_env,
         language="go", history=history,
     )  # fmt: skip
-    data = GateInput(Path("."), "c" * 40, "t", "s", "a", values={})
+    # the tests of the lines first, as the policy may ask: the history names the test that killed
+    values: dict[str, object] = {"limits": {"line_tests": 1}}
+    data = GateInput(Path("."), "c" * 40, "t", "s", "a", values=values)  # type: ignore[arg-type]
 
     result = asyncio.run(check.evaluate(data))
 

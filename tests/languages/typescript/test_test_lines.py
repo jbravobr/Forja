@@ -156,7 +156,7 @@ def test_the_run_stops_at_the_first_failure_and_names_that_test(
 def test_the_verdict_is_the_same_with_and_without_the_tests_of_each_line(
     repo: Repo, tmp_path: Path, packages: Path, adapter: TypeScriptAdapter, test_text: str
 ) -> None:
-    result = judge(repo, tmp_path, packages, test_text, adapter=adapter)
+    result = judge(repo, tmp_path, packages, test_text, adapter=adapter, line_tests=True)
 
     if test_text is TEST_THAT_CHECKS:
         assert isinstance(result, Approved)
@@ -170,7 +170,7 @@ def test_the_killer_of_a_mutant_is_kept_for_the_order(
 ) -> None:
     history = tmp_path / "measure" / "killers.json"
 
-    result = judge(repo, tmp_path, packages, TEST_THAT_CHECKS, history=history)
+    result = judge(repo, tmp_path, packages, TEST_THAT_CHECKS, history=history, line_tests=True)
 
     assert isinstance(result, Approved)
     assert "calc.test.ts > sub" in set(load_killers(history).values())
@@ -203,6 +203,7 @@ def test_a_project_made_by_the_template_measures_its_coverage_and_is_judged(
         changed,
         ("src/index.ts",),
         prepare=install,
+        line_tests=True,
     )
 
     assert isinstance(result, Approved), result

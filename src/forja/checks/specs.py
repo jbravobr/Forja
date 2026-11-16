@@ -31,7 +31,7 @@ def default_registry() -> CheckRegistry:
             Mode.OBSERVATION,
             PREMISE,
             thresholds=frozenset({"min_score"}),
-            limits=frozenset({"workers"}),
+            limits=frozenset({"workers", "line_tests"}),
         ),
         CheckSpec("complexity", 8, Mode.BLOCKING, PREMISE, thresholds=frozenset({"max_ccn"})),
         CheckSpec("crap", 8, Mode.OBSERVATION, PREMISE, thresholds=frozenset({"max_crap"})),

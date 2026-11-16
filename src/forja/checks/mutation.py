@@ -107,6 +107,15 @@ def worker_count(data: GateInput) -> int | None:
     return value if ok and isinstance(value, int) else None
 
 
+def line_tests_first(data: GateInput) -> bool:
+    """Whether a mutant is judged first by the tests of its lines. Off unless the policy asks
+    for it (``limits.line_tests`` of one or more): measured on projects of quick tests, the
+    choice cost more time than it saved in every stack but one."""
+    limits = data.values.get("limits")
+    value = limits.get("line_tests") if isinstance(limits, dict) else None
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
 def changed_lines(changes: Changes, files: tuple[str, ...]) -> dict[str, frozenset[int]]:
     """The lines of ``files`` the attempt added, by file."""
     found: dict[str, set[int]] = {}
@@ -466,9 +475,9 @@ class MutationCheck:
     async def _named(
         self, data: GateInput, mutants: list[Mutant], share: CoverageShare
     ) -> CoverageReport | None:
-        """The coverage that names the tests of each line, measured only when a mutant will run;
-        ``None`` when none will."""
-        if not any(mutant.covered for mutant in mutants):
+        """The coverage that names the tests of each line, measured only when the policy asks for
+        the tests of the line first and a mutant will run; ``None`` otherwise."""
+        if not line_tests_first(data) or not any(mutant.covered for mutant in mutants):
             return None
         return await run_line_tests(self.tools, self.adapter, self.worktree, data, share)
 

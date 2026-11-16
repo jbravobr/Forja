@@ -109,5 +109,7 @@ def judge(repo: Repo, tmp_path: Path, tool: CSharpAdapter, history: Path) -> Gat
         language="csharp",
         history=history,
     )
-    data = GateInput(Path("."), "c" * 40, "t", "s", "a", values={})
+    # the tests of the lines first, as the policy may ask: the history names the test that killed
+    values: dict[str, object] = {"limits": {"line_tests": 1}}
+    data = GateInput(Path("."), "c" * 40, "t", "s", "a", values=values)  # type: ignore[arg-type]
     return asyncio.run(check.evaluate(data))

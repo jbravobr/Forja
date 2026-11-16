@@ -136,7 +136,7 @@ Páginas: `gates\seguranca-e-dependencias.md` (gate 2), `gates\tipos.md` (`types
 | `e2e` | 6 | `observation` | `block` | os testes de ponta a ponta passam e nenhum tentou alcançar a rede | |
 | `test_data` | 6 | `observation` | `premise` | os arquivos de teste não ganharam dados pessoais | |
 | `properties` | 6 | `observation` | `premise` | código de produção alterado vem com teste de propriedades | |
-| `mutation` | 7 | `observation` | `premise` | os testes percebem mudanças nas funções que a tentativa tocou | `thresholds.min_score`, `limits.workers` |
+| `mutation` | 7 | `observation` | `premise` | os testes percebem mudanças nas funções que a tentativa tocou | `thresholds.min_score`, `limits.workers`, `limits.line_tests` |
 | `complexity` | 8 | `blocking` | `premise` | nenhuma função nova ou piorada acima do limite de complexidade | `thresholds.max_ccn` |
 | `crap` | 8 | `observation` | `premise` | função complexa e pouco coberta pelos testes | `thresholds.max_crap` |
 | `pass_through` | 8 | `observation` | `premise` | função nova que só repassa os próprios argumentos | |
@@ -221,6 +221,7 @@ Um limite vale para o repositório todo, sem linguagem. O arquivo aceita qualque
 | `scope` | `max_files` | `8` arquivos por tarefa | inteiro maior que zero | máximo de arquivos que a tarefa pode mudar. A Forja aplica o menor entre o limite da tarefa e o seu; a política só pode apertar. |
 | `scope` | `max_lines` | `400` linhas por tarefa | inteiro maior que zero | máximo de linhas mudadas. Mesma regra. |
 | `mutation` | `workers` | o número de processadores | inteiro maior que zero | quantos mutantes rodam em paralelo, no máximo. |
+| `mutation` | `line_tests` | `0` (desligado) | inteiro maior que zero | liga o julgamento de cada mutante primeiro pelos testes das suas linhas. Não muda veredito, só o tempo (veja [mutação](gates/mutacao.md)). |
 | `duplication` | `min_tokens` | `50` | inteiro | tamanho mínimo, em tokens, de um trecho para contar como clone. O agente recebe o mesmo valor na instrução. |
 | `duplication` | `min_lines` | `5` | inteiro | tamanho mínimo, em linhas, de um trecho para contar como clone. O agente recebe o mesmo valor na instrução. |
 | `voice` | `max_dashes` | `3` | inteiro | travessões que um arquivo (ou a mensagem de commit) pode acrescentar. Acima disso, o achado é reportado. O agente é instruído a não usar nenhum. |

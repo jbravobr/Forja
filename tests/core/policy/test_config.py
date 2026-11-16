@@ -258,6 +258,7 @@ def test_numbers_must_be_finite_and_not_booleans() -> None:
         ("duplication", 7, "min_tokens"),
         ("duplication", 7, "min_lines"),
         ("mutation", 5, "workers"),
+        ("mutation", 7, "line_tests"),
         ("scope", 1, "max_files"),
         ("scope", 1, "max_lines"),
         ("voice", 12, "max_dashes"),

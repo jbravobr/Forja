@@ -88,6 +88,7 @@ def judge(
     test_text: str,
     adapter: TypeScriptAdapter | None = None,
     history: Path | None = None,
+    line_tests: bool = False,
 ) -> GateResult:
     """Commit the base project, then add ``sub`` with the given test file and judge the change."""
     changed = {"calc.ts": WITH_SUB, "calc.test.ts": test_text}
@@ -99,6 +100,7 @@ def judge(
         ("calc.ts",),
         adapter=adapter,
         history=history,
+        line_tests=line_tests,
         prepare=lambda root: link(packages, root),
     )
 
@@ -112,9 +114,11 @@ def judge_files(
     adapter: TypeScriptAdapter | None = None,
     history: Path | None = None,
     prepare: Callable[[Path], None] | None = None,
+    line_tests: bool = False,
 ) -> GateResult:
     """Commit ``base``, prepare the project (``prepare``, once the base is in), write ``changed``
-    and judge it as the gate does."""
+    and judge it as the gate does: by the whole command, or with ``line_tests`` by the tests of
+    the lines first, as the policy may ask."""
     for name, text in base.items():
         (repo.path / name).parent.mkdir(parents=True, exist_ok=True)
         (repo.path / name).write_text(text, encoding="utf-8", newline="\n")
@@ -149,7 +153,8 @@ def judge_files(
         language="typescript",
         history=history,
     )
-    data = GateInput(Path("."), "c" * 40, "t", "s", "a", values={})
+    values = {"limits": {"line_tests": 1}} if line_tests else {}
+    data = GateInput(Path("."), "c" * 40, "t", "s", "a", values=values)  # type: ignore[arg-type]
     return asyncio.run(check.evaluate(data))
 
 
