@@ -1625,3 +1625,25 @@ Ponto 1 da entrada anterior: desligar por padrão, com uma chave na política pa
 - Medir num projeto de verdade, com testes que demoram, só se o dono quiser reabrir a escolha.
 - **Para o dono:** se a fase 5 (script) e as medições que faltam (Maven, Jest gerado) continuam na fila ou são encerradas.
 - As demais pendências da entrada anterior continuam.
+
+## 15/11/2026 — a leva de desempenho da mutação está encerrada
+
+### Decisão do dono
+
+A leva termina aqui. Saem da fila, sem serem feitas:
+
+- a fase 5 do plano de 14/11 (no script: escolha por função de teste, e quem matou roda primeiro);
+- as medições que faltavam da fase 4 (Maven, e o Jest no projeto gerado);
+- a medição num projeto de verdade, com testes que demoram. Só volta se o dono reabrir a escolha dos testes da linha.
+
+### O que a leva deixou
+
+- No gate, ligado: prioridade baixa, um worker por núcleo, a guarda do estouro de tempo, Go pelo pacote primeiro, e a parada no primeiro teste que falha quando o comando roda para um mutante.
+- No gate, desligado por padrão: os testes da linha primeiro (`limits.line_tests`).
+- No script: prioridade baixa, um worker por núcleo, a base uma vez por comando e o modo diferencial que vê os testes.
+- Fora da leva, resolvido nela: projeto criado em C# e em TypeScript mede cobertura.
+
+### Pendências
+
+- **O próximo é o ponto 1 da entrada de 15/11 sobre o suporte por linguagem:** o agente só roda testes e lint em Python (`cli/facade.py`).
+- Continuam: a mutação dos arquivos de `src` da fase 4 e da chave `line_tests`; os testes de C# com os testes por linha numa máquina com o `dotnet-coverage`; o veredito instável do código antigo no Gradle; a pergunta dos pilares de teste contra o gate de mutação; os quatro itens novos da fila; as pendências com mudança em `src` de 14/11 (item 5, item 12, restos dos itens 6 e 2, item 34).
