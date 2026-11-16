@@ -1417,3 +1417,131 @@ Esta lista substitui a corrente "as demais pendências da entrada anterior conti
 - Para o dono decidir, se quiser (fases 1 e 2 da leva de desempenho): o padrão de um worker por núcleo, dado o custo de memória medido; e se o script deve mostrar o teste que falhou na base.
 - A diferença entre os 1477 s da fase 1 e os 2103 s da fase 2 em `measurer.py`, sem causa conferida.
 - O que está no GitHub: a entrada do pull request 1 diz que a branch foi enviada ao remoto, e as das fases 1 e 2 da leva de desempenho dizem que os commits estavam em `correcoes-p0`, só na máquina.
+
+## 16/11/2026 — a mutação muda de referência: o método do Google e a ferramenta de cada linguagem
+
+Sessão de decisão e leitura, no worktree `.claude/worktrees/mutacao-nova-abordagem`, branch `mutacao-nova-abordagem`, a partir de `e6be960`. Antes dela, `correcoes-p0` foi enviada ao remoto (`8b61fbe..e6be960`, 19 commits). Nenhum comportamento mudou: a sessão termina com as decisões e o plano, no fim desta entrada.
+
+### Decisões do dono
+
+1. **Todas as ADRs saem.** Estavam atrapalhando o julgamento.
+2. **A mutação passa a ser feita pela ferramenta especializada de cada linguagem:** Stryker.NET (C#), StrykerJS (TypeScript e JavaScript), PIT (Java), `gtramontina/ooze` (Go) e, em Python, o `sixty-north/cosmic-ray`. A primeira escolha em Python era o mutmut; o dono o trocou na mesma sessão, depois de o levantamento mostrar que ele não roda no Windows.
+3. **A verdade sobre teste de mutação é o que o Google aplica e descreve** em "State of Mutation Testing at Google" (Petrović e Ivanković, ICSE-SEIP 2018) e em "Mutation Testing" (blog de testes do Google, 12/04/2021). O `unclebob/mutator` deixou de ser a referência.
+
+A pendência "a pergunta dos pilares de teste contra o gate de mutação", da lista de 16/11, fica substituída pela decisão 3.
+
+### O que foi feito
+
+| Mudança | Arquivos |
+| --- | --- |
+| A pasta `docs/adr` foi removida, 42 arquivos. O texto está no histórico do git, em `e6be960`. | `docs/adr` |
+| Saíram as 14 citações a ADR que ficariam soltas: 12 em comentários de `src`, uma em `scripts/mutate.py` e uma no guia. O gate `adr` do produto, que cobra registro de decisão no repositório do usuário, não mudou. As menções deste diário e da `AVALIACAO.md` ficam como registro. | `src/forja/toolchain` (5), `src/forja/cli` (4), `src/forja/checks` (2), `src/forja/languages/python/environment.py`, `scripts/mutate.py`, `docs/guia/gates/tipos.md` |
+| A regra 2 do `CLAUDE.md` passou a dizer a decisão 3 no lugar do `unclebob/mutator`. Feito sem pedido do dono, para a regra não contradizer a decisão; ele foi avisado. | `CLAUDE.md` |
+
+### O que foi lido
+
+- Os dois artigos do Google, por inteiro, por mim.
+- A documentação e os repositórios das cinco ferramentas e do mutmut, por seis agentes de leitura, um por ferramenta. Os agentes leram resumos das páginas, não as páginas; nada do que está na tabela abaixo foi conferido por mim nem provado com a ferramenta rodando.
+
+### O método do Google
+
+- **Só o diff:** a linha acrescentada ou modificada, que algum teste executa e que não é árida.
+- **No máximo um mutante por linha** (artigo e blog) **e sete por arquivo** (só o blog).
+- **Operadores:** AOR (aritmético), LCR (conector lógico), ROR (relacional), UOI (unário) e SBR (remoção de comando ou bloco). O ABS foi desligado.
+- **Qual operador na linha:** sorteado entre os que cabem (artigo); depois, o mais provável de sobreviver e de ser útil naquele contexto, pelo histórico (blog).
+- **Nó árido:** regras escritas à mão por linguagem (log, definição de flag, `import`, tempo e prazo, reserva de memória, consulta a cache, `<` por `!=` em laço, `equals` e `hashCode`, mensagem de exceção, capacidade de `make`, `len(x) > 0`, `__main__`, `print`, valor padrão de argumento) e a regra transitiva: um comando composto é árido se todo o corpo dele é árido, com a condição junto. O Google tem centenas dessas regras; só o apêndice do artigo as mostra.
+- **Testes:** só os que cobrem a linha mutada.
+- **Não há nota de mutação.** O artigo diz que a taxa de mortos "is not the mutation score". O resultado é o mutante vivo mostrado na revisão de código, com "Please fix" e "Not useful".
+- **Um por linha basta:** em mais de 90% dos casos todos os mutantes da linha morrem ou nenhum morre (blog).
+
+O gate de hoje diverge em três pontos, antes de qualquer ferramenta: reprova por `min_score`, muta a função tocada inteira e roda todo sítio.
+
+### As cinco ferramentas contra o método
+
+| Do método | Stryker.NET 5.1.0 | StrykerJS 10.1.1 | PIT 1.30.2 | `ooze` | cosmic-ray 8.9.0 |
+| --- | --- | --- | --- | --- | --- |
+| Só as linhas do diff | `mutate` com trecho por índice de caractere; `since` por git, granularidade não achada | `mutate arquivo:linha-linha` | não no código aberto, só por classe; por linha é do Arcmutate, comercial | não; só regex de arquivos a ignorar | sim: `cr-filter-git` (as linhas do diff contra uma branch) e `cr-filter-lines` (linhas dadas; está no código, não na documentação) |
+| Um mutante por linha, limite por arquivo | não | não | não por linha; `CLASSLIMIT` por classe | não | não de fábrica; a sessão é um SQLite, e um filtro pode pular itens antes de rodar |
+| Só os testes que cobrem a linha | `coverage-analysis perTest`, padrão | `perTest`, padrão | sim | não usa cobertura; o comando inteiro por mutante | não usa cobertura; o comando inteiro por mutante |
+| Código árido | `ignore-methods` com curinga, comentário | plugin `ignorers` sobre a árvore sintática, comentário | `avoidCallsTo` (quatro bibliotecas de log por padrão), `excludedMethods` | nada | `cr-filter-pragma` e `cr-filter-operators`; nada para chamada de log |
+| Mutante vivo legível por máquina | JSON (`mutation-testing-report-schema`) | o mesmo JSON | `mutations.xml` | só texto no console | a sessão em SQLite e `cosmic-ray dump`, JSON com um item por linha |
+| Sem nota obrigatória | `break-at` 0 por padrão | `thresholds.break` nulo por padrão | limiares opcionais | limite mínimo 1,0 por padrão, ajustável | sim; a taxa é de um comando à parte (`cr-rate`) |
+| Windows nativo | não dito na documentação atual | não dito | não dito; o plugin do Gradle tem build em Windows | CI com Windows 2025 | não dito; CI só em Linux; o encerramento por tempo usa `os.killpg`, com `proc.kill()` de reserva |
+| Sem alterar o projeto | ferramenta global do `dotnet`; pede o runtime do .NET 10 | os plugins do executor de testes "locally in your project"; Node 22 ou mais | Maven por coordenadas, mas o plugin do JUnit 5 é dependência no `pom.xml`; há o executor de linha de comando, com o classpath montado por quem chama | um arquivo de teste e o `require` no módulo | instalado fora do projeto; a configuração é um TOML em qualquer pasta; muta os arquivos no lugar |
+
+Mais sobre o `ooze`, lido no código por agente: copia o repositório inteiro para uma pasta temporária a cada mutante, não roda verificação inicial, não tem limite de tempo por mutante, os tipos do resultado ficam em `internal/` e as duas últimas tags (v0.3.1 e v0.3.0) estão retratadas no `go.mod`. Não tem operador unário nem remoção de comando.
+
+Por que o mutmut saiu: o README oficial diz "if you want to run on windows, you must run inside WSL". O pull request 404 ("Windows support") é rascunho, com os limites de tempo desligados, e o autor parou o trabalho.
+
+Mais sobre o cosmic-ray, lido no código por agente:
+
+- Escreve a mutação no próprio arquivo e o restaura ao fim; a cópia de segurança fica só em memória, e um processo morto à força deixa o arquivo mutado. A documentação manda commitar antes.
+- O distribuidor `local` roda um mutante de cada vez. Em paralelo só com o distribuidor `http`, um trabalhador por clone do git, e o clone só tem o que foi commitado.
+- O limite de tempo é um número fixo de segundos na configuração. `cosmic-ray baseline` roda os testes sem mutação.
+- `exec` retoma a sessão e pula o item que já tem resultado. Nada invalida um resultado quando o código muda.
+- Não tem operador de remoção de comando; tem troca de operador binário, de comparação e unário, `and` por `or`, booleanos, número, `break` por `continue`, laço de zero voltas e remoção de decorador.
+- A versão 8.9.0 e o último commit são de 10/11/2026. Licença MIT.
+
+### Conclusões
+
+- **Três ferramentas servem ao método, com lacunas:** Stryker.NET, StrykerJS e PIT escolhem os testes pela cobertura, não recompilam por mutante e dão relatório por mutante. São as três linguagens em que a mutação da Forja custa mais (Jest 356 s, Gradle 101 a 126 s e C# 36 s no projeto gerado da fase 4).
+- **O `ooze` não serve como está.** Não tem nada do método: nem linha, nem cobertura, nem relatório, e custa mais por mutante que o gate de hoje em Go.
+- **O cosmic-ray serve na escolha do mutante e não ajuda no tempo.** Restringe às linhas do diff, e a sessão em SQLite deixa a Forja pular itens antes de rodar: é a única das cinco em que "um por linha, sete por arquivo" pode valer no que roda. Mas roda o comando de testes inteiro por mutante, um de cada vez, sem cobertura, que é o que o gate de hoje já faz em Python, sem o paralelismo. O paralelismo e a escolha dos testes ficariam com a Forja. No Windows nada foi provado.
+- **Nas outras quatro a escolha do mutante é da ferramenta.** Com elas, o "um por linha, sete por arquivo" só pode valer no que a Forja mostra, não no que roda.
+- **O PIT de código aberto não restringe por linha.** A Forja teria de rodar as classes tocadas e ficar só com os mutantes das linhas do diff.
+- **As decisões 2 e 3 se chocam nesses pontos,** e a escolha é do dono.
+
+### Verificação
+
+- `ruff check` e `ruff format --check` em `src` e `scripts/mutate.py`: limpos, com o `ruff` do checkout principal (o worktree não tem ambiente próprio).
+- `tests/cli/test_links_da_documentacao.py` e `tests/cli/test_guia_cobre_codigo.py`: 173 aprovados.
+- Não rodou: a suíte rápida (só comentários e documentação mudaram); nenhuma das cinco ferramentas.
+
+### Decisões do dono, depois do levantamento
+
+Levei três pontos ao dono, cada um com uma recomendação, e ele mandou seguir as recomendações:
+
+1. **Go fica no motor da Forja, com as regras do Google.** O `ooze` não entra.
+2. **Sem nota, o veredito é pelo mutante vivo.** `min_score` sai. Em `blocking`, mutante vivo em linha do diff devolve a tentativa ao autor de testes uma vez, com os achados; o que continuar vivo na tentativa seguinte vai para o resumo como achado e não bloqueia. Bloquear sempre travaria em mutante equivalente. Em `observation`, como hoje, o achado só aparece no relatório.
+3. **Um mutante por linha e sete por arquivo.** Vale no que roda onde a Forja escolhe o mutante (Go e Python). Em C#, JavaScript, TypeScript e Java a ferramenta roda os mutantes das linhas do diff, e a Forja mostra um por linha e sete por arquivo.
+
+### O plano
+
+**Propósito:** o gate de mutação pelo método do Google, igual nas seis linguagens, executado pela ferramenta de cada uma (e pelo motor da Forja em Go), custando menos do que custa hoje.
+
+**Pronto quando:** as seis linguagens estão no método, cada pilha provada no Windows e medida contra o que havia antes dela; a suíte completa com `slow` passa; o guia diz o que o gate faz. A branch `mutacao-nova-abordagem` só chega a `correcoes-p0` com as seis (regra 7).
+
+**O contrato,** congelado enquanto houver tarefa aberta sobre ele:
+
+- **O núcleo decide o método,** igual nas seis: as linhas candidatas (acrescentadas ou modificadas pela tentativa, cobertas, não áridas), um por linha e sete por arquivo, nenhuma nota, e o veredito da decisão 2.
+- **Nó árido é decidido pela Forja,** sobre o tree-sitter que ela já tem para as seis linguagens, com as regras do apêndice do artigo: uma implementação, seis gramáticas. Vale antes de rodar onde a Forja escolhe o mutante, e sobre o achado nas demais. O mecanismo da ferramenta (`ignore-methods`, `avoidCallsTo`, `ignorers`) entra a mais, só para poupar tempo.
+- **Operadores: as cinco famílias do Google** (AOR, LCR, ROR, UOI, SBR). O que a ferramenta tem a mais fica desligado; a família que ela não tem fica registrada como limite da linguagem.
+- **O adaptador planeja o comando de mutação da ferramenta** (`Operation.MUTATION`, que já existe em `core/adapters/language.py` sem quem a planeje) e lê o relatório dela para um modelo comum: arquivo, linha, operador e estado.
+- **Não muda:** linha acrescentada sem teste reprova; o que deixa o gate inconclusivo; a prioridade baixa; a guarda do estouro de tempo onde o motor é da Forja.
+
+**A fila.** Uma tarefa por sessão, na ordem. Cada tarefa abre com o orçamento declarado (tempo, núcleos e tokens) e fecha medida, um processo pesado de cada vez. Medição com perda para a fila e volta ao dono.
+
+| # | Tarefa | Pronto quando |
+| --- | --- | --- |
+| 1 | **O método no núcleo, nas seis linguagens, ainda sobre o motor da Forja:** as linhas do diff no lugar da função inteira, um mutante por linha e sete por arquivo, nó árido, sem nota, o veredito novo. | os casos `slow` de mutação das seis pilhas dão o veredito esperado (aprova a função conferida, acha o teste que só chama); medido antes e depois nos projetos da fase 4 da leva de desempenho; guia |
+| 2 | **Go: SBR no motor da Forja.** É a linguagem que fica no motor, e a remoção de comando é a família que falta nele. | o mesmo, para Go |
+| 3 | **TypeScript e JavaScript com Jest: StrykerJS.** | a ferramenta provada no Windows no projeto de teste da pilha, sem alterar o projeto do usuário; os mesmos casos; medido contra a tarefa 1; sai do motor o que só servia a essa pilha |
+| 4 | **TypeScript e JavaScript com Vitest: StrykerJS.** | o mesmo |
+| 5 | **Java com Gradle: PIT.** | o mesmo |
+| 6 | **Java com Maven: PIT.** | o mesmo |
+| 7 | **C#: Stryker.NET.** O runtime do .NET 10 entra no manifesto de ferramentas. | o mesmo |
+| 8 | **Python: cosmic-ray.** O paralelismo e o limite de tempo são da Forja: uma sessão por cópia. | o mesmo |
+| 9 | **Fecho:** sai o que ninguém mais usa, conferido no código; a suíte completa com `slow`; a mutação da própria Forja (`scripts/mutate.py`) passa ao método. | a leva pronta |
+
+A ordem: a tarefa 1 corta o número de mutantes nas seis de uma vez, sem ferramenta nova. Depois vêm as ferramentas, da pilha mais cara para a mais barata pelas medições que há (Jest 356 s, Gradle 101 a 126 s, C# 36 s, Python 9,5 s no projeto gerado da fase 4), com as duas pilhas da mesma ferramenta em seguida.
+
+**O que cada tarefa de ferramenta prova antes de qualquer código,** porque o levantamento não provou: que roda no Windows; que roda sem alterar o projeto (os plugins do StrykerJS, o plugin do JUnit 5 do PIT, o PIT no Gradle por script de inicialização); a sintaxe que restringe às linhas; os campos do relatório.
+
+**Decisões minhas dentro do plano,** para o dono vetar se quiser:
+
+- **O operador da linha é sorteado com semente fixa por execução.** O artigo sorteia; a escolha pelo histórico, do blog, pede dados que a Forja não tem. A semente existe para a retomada de uma execução dar o mesmo resultado.
+- **Depois da tarefa 1 a vantagem das ferramentas pode encolher:** com sete mutantes por arquivo no máximo, a partida da ferramenta de testes por mutante pesa menos. A medição de cada tarefa decide; nada é previsto aqui.
+
+### Para retomar
+
+Sessão nova, no worktree `.claude/worktrees/mutacao-nova-abordagem`. O worktree não tem ambiente próprio: `uv sync` nele antes de rodar qualquer coisa. Seguinte: a tarefa 1 da fila, que começa lendo `checks/mutation.py` e `mutation/` por inteiro.
