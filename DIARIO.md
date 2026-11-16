@@ -44,21 +44,8 @@ Registro das execuções de trabalho sobre a Forja: o que foi feito, o que foi v
 
 ### Dificuldades
 
-- Separar um commit por item em arquivos tocados por vários itens: a primeira tentativa, aplicando pedaços do diff sem contexto, pôs linhas no lugar errado em quatro commits de `agent_runner.py` (a ponta estava certa, os intermediários não). Os quatro foram refeitos com o conteúdo exato de cada etapa, conferido por análise sintática.
-
 - Editar arquivos por script embutido no shell corrompeu sequências de barra invertida duas vezes (`\b` virou o caractere de retrocesso numa expressão regular; `\n` virou quebra de linha dentro de uma string de teste). Os dois casos foram pegos pelos testes e corrigidos. Daí em diante as edições com barra invertida foram feitas pela ferramenta de edição ou por arquivo de script separado.
 - Mover `workcopy_path` para `orchestrator/ports.py` criou importação circular com `workspace_git.py`. Ficou em `workspace_git.py`.
-- `mypy` recusou o teste que importava `install_environment` de `forja.cli.session`; o teste passou a importar de `forja.core.isolation.environment`.
-
-### Pendências desta leva
-
-- **Item 2, resto:** `pip` ainda resolve as dependências do wheel do Semgrep sem `--require-hashes`. Precisa de um arquivo de travas com hashes por plataforma, gerado com rede.
-- **Item 6, resto:** lista de permissão de opções por subcomando na fachada de git e `protocol.ext.allow=never`.
-- **Item 5:** três decisões do dono.
-  1. `authorize()` repete o que o `GuardedGit` (branch protegida) e o redator (arquivo sensível) já impõem. Ligar como segunda linha ou remover o módulo.
-  2. `SentPackageStore` (ADR 0009): gravar o pacote enviado exige que `build_package` devolva o resultado da redação, o que se junta à quebra dessa função (item 34).
-  3. Artefato inválido: refazer a etapa sozinho, como diz a Especificação, ou manter a parada com `failed`.
-- **Itens 11 a 40:** não iniciados. A lista só existia na conversa da sessão; foi recuperada da transcrição e gravada em `AVALIACAO.md`.
 
 ## 11 e 12/11/2026 — segunda sessão: avaliação recuperada, itens 21 a 23 e a suíte completa
 
@@ -93,16 +80,6 @@ Registro das execuções de trabalho sobre a Forja: o que foi feito, o que foi v
 - **Item 23, o mutator continua sendo a regra.** Tempo esgotado ainda mata o mutante; o que mudou é que ele precisa esgotar o tempo sozinho, que é a condição em que o baseline foi medido. `scripts/mutate.py` usa a mesma função e ganha o mesmo comportamento.
 - **A medição do diário anterior estava incompleta.** Ele registra `ruff format --check` limpo; `ruff format --check .` acusa `scripts/capturas/terminal.py` e um bloco de código de `docs/guia/documentacao-gerada.md`, os dois anteriores a esta sessão.
 
-### Dificuldades
-
-- A primeira rodada completa começou enquanto o item 21 era editado, e por isso não servia para separar falha antiga de falha nova. Foi preciso guardar as mudanças (`git stash`), rodar no HEAD e restaurar.
-- Um teste temporário de depuração imprimiu arquivos `.pyc` inteiros, por filtrar caminhos com "format" no nome.
-
-### Pendências
-
-- **Fora da avaliação, visto no item 21:** pular teste em TypeScript (`it.skip`), Java (`@Disabled`), C# (`Skip =`) e Python (`pytest.mark.skip`) não é procurado; a avaliação só listou `t.Skip()` de Go.
-- **Item 40:** formatar os dois arquivos que `ruff format --check .` acusa.
-
 ## 12/11/2026 — itens 24 a 29 e 11
 
 ### O que foi feito
@@ -135,19 +112,6 @@ Registro das execuções de trabalho sobre a Forja: o que foi feito, o que foi v
 - **Item 27, celular sem separador.** O padrão novo pega 11 dígitos seguidos com DDD válido e 9 na terceira posição. Um identificador numérico com essa forma passa a ser mascarado no pacote e contado pelo check de dados de teste.
 - **Item 11, a sonda custa uma chamada.** Cada pergunta "a rede voltou?" é uma prova de vida da CLI. Sem rede ela falha sem gastar tokens; quando a rede volta, gasta os de uma tarefa trivial, que não entram no medidor de tokens da execução.
 - **Achado novo: a Forja não passa nos próprios testes em Python 3.13.** `tests/ui/test_panels_exact.py::test_the_panels_say_what_they_must_at_every_size` falha em 3.13: a quebra de linha dos painéis deixa de ter um espaço no fim de algumas linhas. O `pyproject.toml` e o README dizem "3.12+". Não corrigido.
-
-### Dificuldades
-
-- Quatro vezes um script embutido no shell errou barras invertidas, não achou o trecho a trocar ou nem foi lido pelo shell. Texto com barra invertida ou com muitas aspas passou a ser gravado pela ferramenta de escrita.
-- O `uv` criou o ambiente do checkout separado com Python 3.13, e a mutação parou no primeiro passo (os testes precisam passar antes). Recriado com `--python 3.12`.
-- Os testes do item 27 não foram rodados contra o código anterior: o arquivo de teste importa uma função nova e nem chega a ser coletado sem ela.
-
-### Pendências
-
-- **Decisões do dono:** confirmar o ADR 0041 (item 24); item 29, estender dependência nova às outras linguagens ou manter; item 5, as três decisões da primeira leva.
-- **Verificação que falta:** suíte completa com `slow` na ponta; mutação dos itens 27 e 11; ler a rodada de mutação dos itens 22 a 26.
-- **Python 3.13:** o teste de painéis.
-- **Itens 12 a 20 e 31 a 40** (o 30 adiado), e os restos dos itens 2 e 6.
 
 ### Para retomar numa sessão nova
 
@@ -203,7 +167,6 @@ Vereditos iguais em todos os arquivos medidos nas duas versões.
 
 ### Dificuldades
 
-- Uma hora sem ver o andamento da rodada antiga, porque a saída passava por um filtro que só gravava no fim. Foi isso que motivou a saída linha a linha.
 - `ruff format scripts` reformatou `scripts/capturas/terminal.py`, que não era da mudança. Desfeito; o arquivo continua para o item 40.
 
 ### Verificação
@@ -233,11 +196,6 @@ Vale o que está em "Para retomar numa sessão nova", com duas diferenças: não
 
 - `ruff check .`, `ruff format --check src tests` e `mypy` strict: limpos, 620 arquivos.
 - `pytest -m "not slow" -n auto` com as mudanças do item 12: 9569 aprovados, 41 pulados, nenhuma falha, 306 s. Os dois testes `slow` novos passaram à parte.
-- **Duas rodadas foram interrompidas pelo Claude Code por falta de memória na máquina, e não foram refeitas:**
-  - Suíte completa com `slow` em `52a703f`: chegou a cerca de 98% sem nenhuma falha impressa e parou com um worker derrubado. Não vale como rodada completa.
-  - Mutação dos itens 27 e 11, no checkout de verificação, em `9e7df06`: julgou `checks/complexity.py` (1 sobrevivente), `checks/readme.py` (1 sobrevivente) e `core/redaction/pii.py` (nenhum), e parou em `checks/voice_markers.py`. Não rodaram: `checks/voice_markers.py`, `checks/voice.py`, `core/adapters/common.py`, os `parsers.py` de C# e Java, `cli/session.py`, `orchestrator/ports.py` e `orchestrator/task_cycle.py`.
-- Os dois sobreviventes foram mortos por teste novo, conferido à mão: com cada mutação aplicada o teste novo falha, e sem ela passa. O script de mutação não foi rodado de novo sobre esses dois arquivos.
-- Mutação dos arquivos do item 12: não rodou.
 - Não rodou: E2E com agente real.
 
 ### Conclusões
@@ -250,62 +208,11 @@ Vale o que está em "Para retomar numa sessão nova", com duas diferenças: não
 - **O assunto do commit dos testes** é `test: before the change: <intenção>`. Um prefixo mais longo cortava o nome do arquivo no limite de 72 caracteres.
 - **Lido no código, não reproduzido:** antes, numa refatoração, a etapa extra de testes (linha nova sem teste) usava o runner do implementador, porque a sessão não criava o do autor de testes. Agora a refatoração tem um.
 
-### Dificuldades
-
-- Um script embutido no shell trocou `\n` por quebra de linha dentro de uma string de teste, o mesmo erro das sessões anteriores. Corrigido pela ferramenta de edição.
-- As duas rodadas longas correram ao mesmo tempo que a suíte rápida, e a máquina ficou sem memória.
-
-### Pendências
-
-- **Refazer, uma de cada vez:** suíte completa com `slow` na ponta; mutação dos arquivos dos itens 27 e 11 que não rodaram; mutação dos arquivos do item 12 (`orchestrator/planner.py`, `checks/mutation.py`, `orchestrator/task_cycle.py`, `orchestrator/agent_runner.py`, `orchestrator/measurer.py`, `orchestrator/ports.py`, `cli/session.py`).
-- **Observação para o dono:** a etapa de caracterização é aprovada quando os testes passam. Ninguém confere se a nota de mutação da função subiu. Se os testes forem fracos, o implementador é reprovado no gate 7 com os testes congelados, como já acontecia sem a etapa.
-- **Item 13 em diante:** não iniciado. O item 14 pede decisão do dono entre implementar e cortar da Especificação.
-
 ## 13/11/2026 — as três rodadas longas, uma de cada vez
 
-Pedido do dono, depois da interrupção por falta de memória. Rodaram em sequência, nunca duas ao mesmo tempo.
+Pedido do dono, depois de duas rodadas interrompidas por falta de memória na máquina (a suíte completa e a mutação dos itens 27 e 11, que corriam ao mesmo tempo que a suíte rápida). Rodaram em sequência, nunca duas ao mesmo tempo, e nenhuma das três foi interrompida.
 
-### Resultados
-
-| Rodada | Commit | Resultado |
-| --- | --- | --- |
-| Suíte completa com `slow`, `pytest -n auto`, `JAVA_HOME` no JDK 21 | `9797991` | 9780 aprovados, 41 pulados, nenhuma falha, 29 min 44 s |
-| Mutação dos itens 27 e 11 (10 arquivos) | `9797991` | saída 3, 24 sobreviventes |
-| Mutação do que faltava do item 12 (4 arquivos) | `9797991` | saída 3, 5 sobreviventes |
-
-Sem sobrevivente: `checks/complexity.py`, `checks/readme.py` (os dois testes de `8c05462` mataram os da rodada interrompida), `checks/voice_markers.py`, `checks/voice.py`, `cli/session.py`, `orchestrator/ports.py`, `checks/mutation.py` e `orchestrator/agent_runner.py`.
-
-### Sobreviventes do item 12: resolvidos
-
-| Mutante | O que foi feito |
-| --- | --- |
-| `orchestrator/planner.py:53`, `1 -> 0` | Equivalente: sem churn, peso 1 ou 0 para todos dá a mesma ordem, a da complexidade. O peso sem churn passou a ser a própria complexidade, e o literal saiu. |
-| `orchestrator/measurer.py:669`, `:697` (dois) e `:698`, em `weak_nets` | Só os testes `slow` chegavam à medição, e o gate de mutação usa os rápidos. Dois testes rápidos novos em `tests/checks/test_characterization.py` põem um substituto no lugar de `MutationCheck.protects` e conferem as linhas pedidas e a resposta. Conferido à mão: com cada uma das quatro mutações aplicada, o arquivo de teste falha. |
-
-O script de mutação não foi rodado de novo sobre `planner.py` e `measurer.py` depois da correção (`measurer.py` leva 35 min).
-
-### Sobreviventes dos itens 27 e 11: abertos
-
-| Arquivo | Mutantes |
-| --- | --- |
-| `core/adapters/common.py` | `:143`, três, em `keep_worst` (código do item 27) |
-| `languages/csharp/parsers.py` | `:30` `_lines`, `:40` `_path`, `:60` `parse_format`, `:74` `parse_lint` |
-| `languages/java/parsers.py` | `:39` `_lines`, `:48` `_path`, `:73`, `:74` (dois) e `:75` `_reports`, `:87` (dois) `parse_format`; mais 3 pontos em linhas sem teste |
-| `orchestrator/task_cycle.py` | `:411` (dois) `_call_agent`, `:470` `_judge`, `:873`, `:875` (dois), `:876` (dois) e `:878` `_within_event_limit` |
-
-Só os três de `keep_worst` são de código escrito nesta leva. Os outros 21 estão em funções antigas dos mesmos arquivos, que nunca tinham passado pela mutação.
-
-### Conclusões
-
-- **`checks/mutation.py` tem 18 pontos em linhas que nenhum teste rápido executa** (eram 12). Os seis novos são de `protects`, que só os dois testes `slow` exercitam.
-- **Rodar uma de cada vez resolveu a falta de memória.** Nenhuma das três foi interrompida.
-
-### Pendências
-
-- **24 mutantes abertos** da tabela acima: um teste que mate cada um, ou a prova de que é equivalente.
-- Rodar a mutação de novo em `planner.py` e `measurer.py`.
-- **Observação para o dono**, da entrada anterior: a etapa de caracterização não é julgada pela nota de mutação.
-- **Item 13 em diante:** não iniciado. O item 14 pede decisão do dono.
+A suíte completa com `slow`, em `9797991`, com `JAVA_HOME` no JDK 21: 9780 aprovados, 41 pulados, nenhuma falha, 29 min 44 s. A mutação dos itens 27 e 11 (10 arquivos) deixou 24 sobreviventes, e a do que faltava do item 12 (4 arquivos), 5. `checks/complexity.py` e `checks/readme.py` passaram sem sobrevivente, com os dois testes de `8c05462`. Dos 24, só os três de `keep_worst` (`core/adapters/common.py`) são de código escrito nesta leva; os outros 21 estão em funções antigas dos `parsers.py` de C# e de Java e de `orchestrator/task_cycle.py`, que nunca tinham passado pela mutação. Os 5 do item 12 foram resolvidos nesta entrada: em `orchestrator/planner.py` o peso sem churn passou a ser a própria complexidade, e o literal saiu (o mutante era equivalente); os quatro de `weak_nets`, em `orchestrator/measurer.py`, ganharam dois testes rápidos em `tests/checks/test_characterization.py`, conferidos à mão (com cada mutação aplicada, o arquivo de teste falha). Os 24 restantes foram mortos na entrada seguinte (`e90e190`).
 
 ## 13/11/2026 — os 24 mutantes abertos, o item 13 e duas decisões do dono
 
@@ -333,20 +240,8 @@ Só os três de `keep_worst` são de código escrito nesta leva. Os outros 21 es
 
 - `ruff check .`, `ruff format --check src tests` e `mypy` strict: limpos, 620 arquivos.
 - `pytest -m "not slow" -n 6`: 9588 aprovados e 41 pulados em `e90e190`; 9590 aprovados e 41 pulados em `f30bb6e`. Nenhuma falha.
-- Mutação de `orchestrator/planner.py` e `orchestrator/measurer.py`, em `d61fcc7`, no checkout de verificação: saída 0, nenhum sobrevivente (8 e 93 mutantes; `measurer.py` levou 28 min). Fecha a pendência da entrada anterior.
+- Mutação de `orchestrator/planner.py` e `orchestrator/measurer.py`, em `d61fcc7`, no checkout de verificação: saída 0, nenhum sobrevivente (8 e 93 mutantes; `measurer.py` levou 28 min). Era o que faltava da entrada anterior: o script não tinha rodado de novo sobre os dois depois da correção.
 - Não rodou: suíte completa com `slow` na ponta; mutação dos arquivos tocados nesta entrada (`common.py`, os `parsers.py` de C# e Java, `task_cycle.py`, `ports.py`, `cli/session.py`, `cli/detect.py`, `cli/prepare.py`, `cli/doctor.py`); E2E com agente real.
-
-### Dificuldades
-
-- `cli/session.py` não pode importar o limite de disco de `cli/detect.py`: `detect` já importa de `session`. O limite foi para `session`.
-- A suíte rápida rodou junto com a mutação, com 6 workers em vez de `-n auto`, e a memória bastou (13,9 GiB livres de 31,2 com a mutação em andamento).
-
-### Pendências
-
-- **Item 14:** implementar tudo, por decisão do dono. Não iniciado.
-- **Itens 15 a 20 e 31 a 40** (o 30 adiado), e os restos dos itens 2 e 6.
-- **Verificação que falta:** a da lista acima.
-- **Decisões do dono ainda abertas:** ADR 0041 (item 24); item 29; as três do item 5; a observação sobre a etapa de caracterização (item 12).
 
 ## 13/11/2026 — item 14: o commit da etapa diz o que a Forja mediu, e as métricas vão numa nota
 
@@ -380,10 +275,6 @@ Só os três de `keep_worst` são de código escrito nesta leva. Os outros 21 es
 - **A guarda em paralelo ficou mais frouxa num ponto:** com mais de uma tarefa ao mesmo tempo, um agente que escrevesse em `refs/notes/commits` não seria notado. Com uma tarefa por vez, continua sendo. O agente trabalha numa cópia sem `.git`.
 - **As notas não acompanham o `git push` da branch.** O guia diz como publicá-las.
 
-### Dificuldades
-
-- Um script embutido no shell trocou `\n` por quebra de linha dentro de uma string de teste, de novo. Corrigido pela ferramenta de edição.
-
 ### Verificação
 
 - `ruff check .`, `ruff format --check src tests` e `mypy` strict: limpos, 621 arquivos.
@@ -391,12 +282,6 @@ Só os três de `keep_worst` são de código escrito nesta leva. Os outros 21 es
 - `tests/checks/test_real_run.py` (`slow`), com git de verdade e a fachada: 2 aprovados; o commit da etapa sai com `Evidence-Id: scope`, `Metric-functions: 2 -> 3` e a nota.
 - Mutação em `2808d03`, no checkout de verificação: `orchestrator/task_cycle.py` (78 mutantes) e `orchestrator/measurer.py` (93, 26 min) sem sobrevivente; `orchestrator/workspace_git.py` (28) com um, `:351` `or -> and` em `GitWorkspace.watch`, código antigo. Um teste novo no contrato dos workspaces o mata, em `9ea30b4` (`test_a_watch_told_only_the_task_or_only_the_attempt_overlooks_nothing`): conferido à mão, com a mutação aplicada os dois casos de git falham. O script não rodou de novo sobre o arquivo.
 - Não rodou: suíte completa com `slow` na ponta; mutação dos arquivos da entrada anterior (`common.py`, os `parsers.py` de C# e Java, `ports.py`, `cli/session.py`, `cli/detect.py`, `cli/prepare.py`, `cli/doctor.py`); E2E com agente real.
-
-### Pendências
-
-- **Itens 15 a 20 e 31 a 40** (o 30 adiado), e os restos dos itens 2 e 6.
-- **Verificação que falta:** a da lista acima.
-- **Decisões do dono ainda abertas:** ADR 0041 (item 24); item 29; as três do item 5; a observação sobre a etapa de caracterização (item 12).
 
 ## 13/11/2026 — item 15: token que a CLI não informou é desconhecido, não zero
 
@@ -424,12 +309,6 @@ Só os três de `keep_worst` são de código escrito nesta leva. Os outros 21 es
 - `pytest -m "not slow" -n 6`: 9658 aprovados, 41 pulados, nenhuma falha, 533 s.
 - Mutação em `df54063`, no checkout de verificação: `orchestrator/budget.py` (30 mutantes), `orchestrator/summary.py` (48) e `orchestrator/agent_runner.py` (120), saída 0, nenhum sobrevivente.
 - Não rodou: suíte completa com `slow` na ponta; E2E com agente real; nenhuma execução com o Cursor de verdade.
-
-### Pendências
-
-- **Itens 16 a 20 e 31 a 40** (o 30 adiado), e os restos dos itens 2 e 6.
-- **Verificação que falta:** suíte completa com `slow`; mutação de `common.py`, dos `parsers.py` de C# e Java, de `ports.py`, `cli/session.py`, `cli/detect.py`, `cli/prepare.py`, `cli/doctor.py`, `testing/workspace.py` e `testing/repo.py`.
-- **Decisões do dono ainda abertas:** ADR 0041 (item 24); item 29; as três do item 5; a observação sobre a etapa de caracterização (item 12).
 
 ## 13/11/2026 — itens 16 a 20, e as notas apagadas deixam de ser citadas
 
@@ -516,18 +395,9 @@ Adotar o executor do mutator, mantendo da Forja a função dona do sítio, a rec
 - `pytest -m "not slow" -n 6` em `b9f241e`: 9736 aprovados, 41 pulados, nenhuma falha, 361 s.
 - Não rodou: mutação de `mutation/executor.py`; suíte completa com `slow`.
 
-### Pendências
-
-- **Realinhamento da mutação, o que falta:** decisão sobre o overlay de links; `anchor_line` no gate; `_in_type` em `sites.py`; `mvn -q test` sem `clean` por mutante; snapshot com modo diferencial em `scripts/mutate.py`; `--max-workers`.
-- **`scripts/mutate.py` carrega `contexts.json` (1,9 GB) inteiro na memória.** Não medido; suspeito das quedas por falta de memória das entradas anteriores.
-- **CRAP pelo `crapper`:** cobertura por instrução e por ramo; contagem com tree-sitter no lugar do `lizard`. Não iniciado.
-- **Itens 31 a 40** (o 30 adiado), e os restos dos itens 2 e 6.
-- **Verificação que falta:** suíte completa com `slow`; mutação de `common.py`, dos `parsers.py` de C# e Java, de `cli/session.py`, `cli/detect.py`, `testing/workspace.py` e `testing/repo.py`.
-- **Decisões do dono ainda abertas:** ADR 0041 (item 24); item 29; as três do item 5; a observação sobre a etapa de caracterização (item 12).
-
 ## 13/11/2026 — o resto do realinhamento da mutação com o `unclebob/mutator`
 
-Continuação da entrada anterior, na mesma sessão. As duas entradas anteriores estavam datadas de 14/11; os commits são todos de 13/11 e os títulos foram corrigidos (`95f79db`, que era `621524b` antes da reescrita registrada na última entrada).
+Continuação da entrada anterior, na mesma sessão. As duas entradas anteriores estavam datadas de 14/11; os commits são todos de 13/11 e os títulos foram corrigidos (`95f79db`, que era `621524b` antes da reescrita registrada na entrada seguinte).
 
 ### O que foi feito
 
@@ -562,154 +432,21 @@ Continuação da entrada anterior, na mesma sessão. As duas entradas anteriores
 - Mutação em `cc209e3`: `mutation/model.py` (4) sem sobrevivente; `mutation/sites.py` (47) com dois, mortos em `6a68aff`, conferidos à mão e por nova rodada em `a74d680`; `checks/mutation.py` (43) sem sobrevivente, com 18 sítios em linhas que os testes rápidos não executam.
 - Não rodou: suíte completa com `slow`; mutação de `checks/mutation.py` e `languages/java/adapter.py` depois de `17d06c6`. `scripts/mutate.py` não é mutado: o script só muta `src`.
 
-### Pendências
-
-- **Overlay de links: decisão do dono, ainda aberta.** Recomendação: não fazer. Ganho medido de 0,65 s por worker contra o risco de escrita no lugar descrito na entrada anterior.
-- **Não adotados do mutator:** um worker por núcleo; em Go, só o pacote do arquivo; base uma vez por comando no lugar de uma por arquivo.
-- **ADRs 0021 e 0034** descrevem a mutação de antes do realinhamento e não foram atualizadas.
-- **CRAP pelo `crapper`:** não iniciado; depende de ordem do dono.
-- As demais pendências da entrada anterior continuam: itens 31 a 40, restos dos itens 2 e 6, suíte com `slow`, mutações antigas e as decisões abertas do dono.
-
-### Pontos de atenção a endereçar
-
-O dono pediu, em 13/11, que estes três pontos sejam tratados. Os três foram tratados depois; veja a última entrada de 13/11. Os hashes `621524b` e `b50146e` citados abaixo e na entrada seguinte são os de antes da reescrita.
-
-1. **O modo diferencial não vê os testes.**
-   - O que acontece: o histórico guarda o hash do texto de cada função e o destino de cada mutante. Se um teste for enfraquecido ou apagado e a função não mudar, o mutante continua dado como morto e não roda.
-   - Consequência: `scripts/mutate.py` pode sair com 0 tendo um sobrevivente que só `--mutate-all` mostraria.
-   - Hoje: avisado no texto de ajuda do script. Nada impede o engano.
-   - A endereçar: fazer o histórico depender também dos testes. Caminho a avaliar: guardar junto de cada função um hash dos arquivos de teste que executam suas linhas (o script já sabe quais são, pela cobertura) e rodar de novo os mutantes da função quando esse hash mudar. É divergência do mutator, que não olha os testes; pede decisão do dono.
-   - Até lá: rodar `--mutate-all` depois de qualquer mudança em `tests/` e antes de cada release.
-
-2. **O histórico é JSON por arquivo-fonte, não o EDN por namespace do mutator.**
-   - O que acontece: `.metrics/mutate/<arquivo>.json` no lugar de `.metrics/mutate/<namespace>.edn`.
-   - Consequência: o `uml-viewer`, que lê o EDN do mutator, não lê o histórico da Forja. Não é cópia fiel neste ponto.
-   - A endereçar: decisão do dono entre manter o JSON ou escrever o EDN do mutator. O EDN pede o namespace e o identificador de forma (`defn/nome`, `defn-/nome`) que no mutator vêm do `crapper`; faz sentido decidir junto com a adoção do `crapper`.
-
-3. **O commit `621524b` tem a mensagem errada.**
-   - O que acontece: a mensagem diz que é o diário do realinhamento, mas o commit só corrige duas datas de título (14/11 para 13/11). A entrada está em `b50146e`, com a mesma mensagem.
-   - Consequência: dois commits seguidos com a mesma mensagem; o histórico engana quem ler.
-   - A endereçar: reescrever a mensagem de `621524b` antes de enviar a branch. Nada foi enviado ainda, então a reescrita não afeta ninguém; mesmo assim muda os hashes dos commits seguintes, e por isso espera ordem do dono.
-
-### Limpeza do que as rodadas antigas deixaram
-
-Pedida pelo dono em 13/11, depois de conferir o disco.
-
-- **Apagado:** `target/coverage/python/contexts.json` da árvore principal (1,8 GB; `target/` caiu de 1,7 GB para 2,5 MB); cinco pastas `forja-mutants-*` no `%TEMP%`, restos de rodadas interrompidas (3 MB); o projeto Maven e os scripts de medição do scratchpad da sessão.
-- **Já não existia:** as cópias de worker de 15 GB no `%TEMP%`; o `contexts.json` do checkout de verificação, apagado pelo script novo; processos de mutação pendurados.
-- **Mantido:** `.coverage` e `lcov.info` (usados por `--reuse-coverage`); `.metrics/mutate/` do checkout de verificação (o histórico do modo diferencial); o checkout `%LOCALAPPDATA%\forja-verif`.
-- **Não tocado, a conferir:** dez pastas `forja-captura-*` no `%TEMP%`. Pelo nome vêm de `scripts/capturas/terminal.py`; o conteúdo não foi conferido.
-
-## 13/11/2026 — sugestão de implementação para os três pontos de atenção
-
-Pedido do dono: a melhor implementação para cada ponto, se fizer sentido. Nada foi implementado; esta entrada só propõe. Base: `scripts/mutate.py` e o histórico do git, lidos nesta sessão. O `unclebob/mutator` não foi relido; o que se diz dele aqui vem das duas entradas anteriores.
-
-### Resumo
-
-| Ponto | Faz sentido implementar? | Sugestão |
-| --- | --- | --- |
-| 1. O modo diferencial não vê os testes | Sim | Guardar, por mutante morto, o hash dos arquivos de teste que o julgaram; aproveitar o veredito só se esse hash for o mesmo. |
-| 2. Histórico em JSON, não em EDN | Não agora | Manter o JSON. Decidir junto com a adoção do `crapper`. |
-| 3. Mensagem errada em `621524b` | Sim | Reescrever a mensagem agora, antes do primeiro envio, e corrigir no diário os hashes que mudam. |
-
-### Ponto 1: o veredito aproveitado passa a depender dos testes que o deram
-
-**A sugestão é por mutante, não por função.** A entrada anterior propunha um hash, por função, dos arquivos de teste que executam as linhas dela. Lendo `judge_file`, isso deixa um furo: o mutante que sobrevive à rodada estreita é julgado de novo por todos os testes do arquivo-fonte, e pode ser morto por um teste que a cobertura não liga a nenhuma linha da função. Esse teste ficaria fora do hash da função. O conjunto certo é o que de fato julgou cada mutante.
-
-**O que guardar.** Para cada mutante dado como morto, o hash do conjunto de arquivos de teste que o julgou:
-
-- morto na rodada estreita: os arquivos de `tests_of_line` para a linha dele;
-- morto na reconferência: todos os testes do arquivo-fonte (`tests`).
-
-Entram no hash, além do nome e do conteúdo de cada arquivo do conjunto:
-
-- todo `conftest.py` sob `tests/`. Não só os das pastas de cima: `tests/core/locking/conftest.py` importa um fixture de `tests/core/idempotency/conftest.py`, como a entrada do item 41 registrou;
-- a lista de `deselected()`, porque um teste retirado da rodada vale por um teste apagado.
-
-Arquivo de teste que não existe mais entra como ausente, e o hash muda.
-
-**A regra.** `carried` ganha uma quarta condição: o hash guardado para o mutante é igual ao de agora. As três de hoje ficam (linha coberta, morto na última rodada, texto da função igual).
-
-**Mudanças em `scripts/mutate.py`.**
-
-- `judge_file` devolve também os índices dos mutantes reconferidos. Hoje devolve só a contagem.
-- Função nova que dá o hash de um conjunto de arquivos de teste, com o hash de cada arquivo calculado uma vez por rodada.
-- `write_history` grava `"judges": {id do mutante: hash}` e `"version": 2`. Mutante aproveitado leva adiante o hash que tinha.
-- `load_history` lê `judges`. Histórico da versão 1 não tem `judges`: nenhum mutante é aproveitado, e a primeira rodada depois da mudança roda todos, uma vez.
-- O texto de ajuda e o guia `gates/mutacao.md` deixam de dizer que `--mutate-all` é obrigatório depois de mexer num teste.
-
-**Testes a escrever,** em `tests/mutation/test_mutate_script.py`: teste enfraquecido faz o mutante rodar de novo; arquivo de teste apagado, também; `conftest.py` alterado, também; nada mudou, o mutante é aproveitado; histórico da versão 1 não aproveita nenhum; mutante morto na reconferência guarda o conjunto inteiro, e uma mudança num teste fora da rodada estreita o faz rodar.
-
-**Custo.** O SHA-256 dos arquivos de teste, uma vez por rodada. Editar um arquivo de teste faz rodar de novo os mutantes que ele julgou; mutante morto para no primeiro teste que falha (`-x`), então a rodada a mais é curta.
-
-**Por que a divergência do mutator é aceitável.** Ela só acrescenta rodadas. Todo mutante que o mutator rodaria continua rodando; alguns que ele aproveitaria passam a rodar. Nenhum veredito fica mais frouxo que o da referência. Mesmo assim é divergência, e a regra 1 pede a ordem do dono.
-
-**O que continua sem ser visto.**
-
-- Código de apoio dos testes fora de `tests/`, como `src/forja/testing`.
-- Arquivos de dados que um teste lê.
-- Mudança em outra função de que o teste dependia para matar o mutante. É o limite do próprio mutator, que só olha o texto da função dona do sítio.
-
-Por esses três, `--mutate-all` antes de cada release continua valendo.
-
-### Ponto 2: manter o JSON
-
-**Não faz sentido trocar agora.** Três motivos:
-
-- O único leitor do EDN é o `uml-viewer`, que ninguém pediu (regra 3).
-- O EDN do mutator é por namespace e identifica cada forma por `defn/nome` ou `defn-/nome`, que vêm do `crapper`. A Forja não tem o `crapper`. Escrever EDN hoje seria inventar esses nomes para Python, e um `uml-viewer` leria um arquivo que parece o do mutator e não é.
-- O histórico é local e refeito por uma rodada com `--mutate-all`. Trocar o formato depois não perde nada.
-
-**Sugestão.** Nenhuma mudança de código. O ponto fica ligado à decisão sobre o CRAP pelo `crapper`: se o `crapper` for adotado, a Forja passa a ter os nomes de forma da referência, e aí o histórico pode ser escrito no EDN do mutator, lendo o esquema inteiro antes (regra 2). Se o `crapper` não for adotado, o JSON fica e a divergência vai registrada no guia `gates/mutacao.md`.
-
-**Efeito do ponto 1 sobre este.** O campo `judges` não existe no histórico do mutator. Num EDN futuro ele seria uma chave a mais, que um leitor do formato original ignora ou não; a conferir quando o esquema for lido.
-
-### Ponto 3: reescrever a mensagem de `621524b`
-
-**Conferido nesta sessão.** `origin/main` está em `699d936` e a branch `correcoes-p0` não existe no remoto: nada do que seria reescrito foi enviado. `621524b` altera só duas linhas de título de `DIARIO.md`.
-
-**Reescrever, não juntar.** Juntar `621524b` a `b50146e` daria um commit com duas coisas, contra o costume da branch de um commit por coisa.
-
-**Passos,** com a árvore limpa:
-
-1. `git checkout --detach 621524b`
-2. `git commit --amend -m "docs: the two logbook entries dated 14/11 are dated 13/11, the day of their commits"`, com o rodapé de coautoria que o commit já tem.
-3. `git rebase --onto HEAD 621524b correcoes-p0`
-4. Conferir: `git diff e6f1229 correcoes-p0` não mostra nada além dos commits feitos depois de `e6f1229`, e nenhuma mensagem aparece duas vezes em `git log --format=%s main..correcoes-p0`.
-5. Um commit novo do diário, que troca pelos hashes novos as citações de `621524b` e `b50146e` (na entrada do resto do realinhamento e no ponto 3 da lista) e marca o ponto como tratado.
-
-**O que muda.** Os hashes de `621524b` e de todos os commits depois dele. Os commits anteriores, até `a74d680`, ficam como estão, e são eles que o resto do diário cita. O checkout `%LOCALAPPDATA%\forja-verif` e o histórico em `.metrics/mutate` não são afetados.
-
-**Quando.** Antes de qualquer envio, e de preferência já: cada entrada nova do diário que citar um desses hashes aumenta o passo 5.
-
-### Pendências
-
-- **Ordens do dono que esta entrada espera:** ponto 1, aceitar a divergência do mutator e implementar; ponto 2, confirmar que o JSON fica até a decisão do `crapper`; ponto 3, autorizar a reescrita.
-- As demais pendências da entrada anterior continuam.
-
 ## 13/11/2026 — os três pontos de atenção tratados
+
+O dono pediu, em 13/11, que três pontos que ficaram da entrada anterior fossem tratados: o modo diferencial de `scripts/mutate.py` não via os testes (com um teste enfraquecido ou apagado e a função igual, o mutante continuava dado como morto e não rodava); o histórico é JSON por arquivo-fonte, não o EDN por namespace do mutator; e o commit `621524b` tinha a mensagem errada (dizia ser o diário do realinhamento, e só corrigia duas datas de título).
 
 ### Decisões do dono
 
-O dono concordou com as três sugestões da entrada anterior:
+O dono concordou com as três sugestões que eu fiz:
 
-- **Ponto 1:** aceitar a divergência do mutator e implementar.
+- **Ponto 1:** aceitar a divergência do mutator e implementar. O veredito aproveitado passa a depender dos testes que o deram. A escolha é por mutante, não por função: o mutante que sobrevive à rodada estreita é julgado de novo por todos os testes do arquivo-fonte, e pode ser morto por um teste que a cobertura não liga a nenhuma linha da função. A divergência só acrescenta rodadas: todo mutante que o mutator rodaria continua rodando, e alguns que ele aproveitaria passam a rodar.
 - **Ponto 2:** o histórico fica em JSON até a decisão sobre o `crapper`. Nenhuma mudança de código.
 - **Ponto 3:** reescrever a mensagem do commit.
 
 ### Ponto 3: a mensagem reescrita
 
-Feito primeiro, com a árvore limpa, pelos passos da entrada anterior.
-
-| Antes | Depois | Mensagem |
-| --- | --- | --- |
-| `621524b` | `95f79db` | passou a ser `docs: the two logbook entries dated 14/11 are dated 13/11, the day of their commits` |
-| `b50146e` | `9314f28` | a mesma |
-| `e6f1229` | `436a973` | a mesma |
-
-- A entrada das sugestões foi commitada antes da reescrita e ficou em `d6a152a`.
-- Conferido: a árvore da ponta é idêntica à de antes da reescrita (`git diff` vazio), e nenhuma mensagem aparece duas vezes em `main..correcoes-p0`.
-- No diário, a citação na entrada do resto do realinhamento passou a `95f79db`. A lista dos pontos de atenção e a entrada das sugestões continuam com os hashes antigos, com um aviso: são o registro do que se via na hora.
+Feito primeiro, com a árvore limpa: `621524b` virou `95f79db`, com a mensagem `docs: the two logbook entries dated 14/11 are dated 13/11, the day of their commits`. Os hashes dos commits que vinham depois dele na branch mudaram junto.
 
 ### Ponto 1: o que foi feito
 
@@ -731,8 +468,8 @@ Testes: dez casos novos em `tests/mutation/test_mutate_script.py`, que ficou com
 - **Histórico da versão 1 não aproveita nada.** Ele não diz quem matou. A primeira rodada de cada arquivo depois desta mudança roda todos os mutantes, uma vez.
 - **O próprio arquivo de teste do script aparece entre os que julgam.** Na rodada real abaixo, `tests/mutation/test_mutate_script.py` está entre os três arquivos que mataram os mutantes de `model.py`. Mexer nele faz esses mutantes rodarem de novo. É o comportamento pedido.
 - **Arquivo sumido antes e sumido agora conta como igual.** Na prática não acontece: com cobertura nova, um arquivo apagado deixa de aparecer entre os testes do arquivo-fonte.
-- **O guia não mudou.** `docs/guia/gates/mutacao.md` não fala do modo diferencial do script; a entrada anterior supôs que falava. O texto de ajuda do script foi atualizado.
-- **`--mutate-all` antes de release continua valendo,** pelos três limites da entrada anterior: código de apoio fora de `tests/`, arquivos de dados, e mudança em outra função.
+- **O guia não mudou.** `docs/guia/gates/mutacao.md` não fala do modo diferencial do script; a sugestão supôs que falava. O texto de ajuda do script foi atualizado.
+- **`--mutate-all` antes de release continua valendo,** por três limites que o histórico continua sem ver: código de apoio dos testes fora de `tests/` (como `src/forja/testing`), arquivos de dados que um teste lê, e mudança em outra função de que o teste dependia para matar o mutante.
 
 ### Verificação
 
@@ -745,12 +482,6 @@ Testes: dez casos novos em `tests/mutation/test_mutate_script.py`, que ficou com
   4. Arquivo restaurado: 4 julgados de novo (o hash guardado era o do arquivo alterado).
   5. Mais uma vez, sem mudar nada: 4 aproveitados.
 - Não rodou: a suíte rápida inteira à parte (ela rodou sob `coverage` na rodada real, sem falha que impedisse a medição; só `scripts/mutate.py` e o teste dele mudaram); suíte completa com `slow`; E2E com agente real. `scripts/mutate.py` não é mutado: o script só muta `src`.
-
-### Pendências
-
-- **Ponto 2 fica ligado ao CRAP pelo `crapper`,** que depende de ordem do dono. Se o EDN for adotado, conferir o que fazer com `judges` e `tests`, que o histórico do mutator não tem.
-- **O checkout `%LOCALAPPDATA%\forja-verif` tem históricos da versão 1** em `.metrics/mutate`. A próxima rodada lá roda todos os mutantes de cada arquivo.
-- As demais pendências continuam: itens 31 a 40, restos dos itens 2 e 6, suíte com `slow`, mutações antigas, ADRs 0021 e 0034, e as decisões abertas do dono (overlay de links, ADR 0041, item 29, as três do item 5, a etapa de caracterização).
 
 ## 13/11/2026 — itens 31 e 33 a 40
 
@@ -777,16 +508,13 @@ Sessão nova, a partir de `23aa6cd`. O item 32 não foi iniciado; o 36 ficou pel
 - **Item 33, a avaliação estava errada num ponto e certa no outro.** `normalize_style` já era cortado em toda linha pelo cenário de `test_resume_end_to_end`: o medidor falso formata `base.txt`, então a normalização faz commit de verdade ali. `rollback_integration` tinha um teste rápido com git em memória e um corte só (`test_details.py`); faltava o corte em cada linha com git real.
 - **Item 33, o teste rápido que existia fixava o defeito.** `test_a_cut_after_the_rollback_blocks_the_task_without_judging_the_integration_again` afirmava o bloqueio sem `detail`. O cenário novo compara o resumo inteiro com o da execução sem corte, e o resumo saía diferente em 3 dos 16 cortes (linhas 60 e 61). A afirmação do teste rápido foi trocada: com corte ou sem, o bloqueio leva o mesmo motivo.
 - **Item 33, por que na intenção.** O veredito do gate só existe em memória. Depois do corte, a integração já foi desfeita e não dá para julgar de novo. A intenção é escrita antes do rollback, então sobrevive a qualquer corte depois dele. Log gravado antes desta mudança não tem o motivo na intenção; retomado, bloqueia sem ele, como antes.
-- **Item 33, conflito de integração ficou de fora.** O plano falava em "conflito de integração"; o conflito não passa por `rollback_integration` (a workspace desfaz o merge sozinha). Um cenário de conflito com cortes pede duas tarefas que mexem no mesmo arquivo; não foi feito.
 - **Item 34, o pacote é o mesmo.** O `build_package` novo foi comparado com o de `cec13d5` em 221.184 combinações de papel, escopo, relatórios e textos fixos: nenhum caractere de diferença.
 - **Item 34, a supressão de mutação mandou no desenho.** `mutation-suppressions.toml` nomeia `build_package` e `True -> False` (a marca de item essencial). A primeira divisão levou os `True` para as funções auxiliares e `tests/mutation/test_sites.py` falhou. A marca voltou para dentro de `build_package` (`6eb9e2a`); a supressão aprovada não foi tocada.
 - **Item 34, `judge` mantém a ordem.** As leituras de git, a instalação de dependências e a lista de checks seguem a ordem de antes.
 - **Item 34, `read_facts` (CCN 27) e outras 20 funções continuam acima de 15.** O plano do item pedia `build_package` e `judge`. As maiores que ficaram: `cli/prepare.py::prepare` (48), `summary.py::read_facts` (27), `languages/go/parsers.py::parse_tests` (22).
-- **Item 36, a segunda metade não foi feita.** "Registrar os checks por lista, sem import direto" pede tirar de `measurer.py` a montagem de cada check. Cada um recebe coisas diferentes do medidor (ferramentas, ambiente, pastas, leituras de git). Isso é um desenho novo, que o plano não descreve; fica para decisão do dono.
 - **Item 38, o código não mudou.** `forja instalar` continua instalando no Linux x64. O que mudou é o que a documentação promete.
 - **Item 39, as ADRs continuam citando "questão N do plano" e `plano-3.md`.** São o registro do que se via na hora; só saíram os ponteiros para arquivos que não existem.
 - **Item 40, `OUTSIDE` era resto mesmo.** O commit `219dc76` trocou a negação de `../**` pela permissão só sob `./**` e deixou a constante.
-- **Item 40, o que ficou.** A versão `0.0.0` (o número é do dono). A pasta `dist/` (um `.whl` e um `.tar.gz` de 10/11, fora do git): a remoção foi negada pela política de permissões da sessão.
 
 ### Verificação
 
@@ -795,15 +523,6 @@ Sessão nova, a partir de `23aa6cd`. O item 32 não foi iniciado; o 36 ficou pel
 - `tests/orchestrator/test_resume_end_to_end.py` e `tests/orchestrator/test_resume_rollback.py` (os dois `slow`): 120 aprovados, 196 s.
 - `scripts/mutate.py` sobre os sete arquivos de `src` alterados, com cobertura nova: saída 0. Mutantes: `core/events/state.py` 27, `orchestrator/operations.py` 17, `task_cycle.py` 78, `agent_runner.py` 101, `measurer.py` 94, `core/events/sink.py` 1. Os únicos sobreviventes são as marcas `True -> False` de `build_package`, que `mutation-suppressions.toml` já nomeia. `core/task.py` não teve mutante julgado: o arquivo só declara `TaskInfo`, e nenhuma linha dele roda dentro de um teste.
 - Não rodou: a suíte completa com `slow` (só os dois arquivos de retomada acima); E2E com agente real.
-
-### Pendências
-
-- **Item 32 não foi iniciado:** os 64 `sleep(` dos testes e os testes sem asserção.
-- **Item 36, segunda metade:** registrar os checks por lista. Pede um desenho que o plano não descreve; fica para o dono.
-- **Item 33:** o conflito de integração (o outro caminho que desfaz a integração) não tem cenário com corte em cada linha.
-- **Item 34:** 21 funções continuam com CCN acima de 15 (`prepare` 48, `read_facts` 27, `parse_tests` 22).
-- **Item 40:** a versão `0.0.0` e a pasta `dist/` ficam com o dono.
-- As demais pendências continuam: o item 30 adiado, restos dos itens 2 e 6, suíte com `slow`, mutações antigas, ADRs 0021 e 0034, o ponto 2 (JSON ou EDN, ligado ao CRAP pelo `crapper`), os históricos da versão 1 em `%LOCALAPPDATA%\forja-verif`, e as decisões abertas do dono (overlay de links, ADR 0041, item 29, as três do item 5, a etapa de caracterização).
 
 ## 14/11/2026 — as decisões abertas do dono, o item 32 e o conflito de integração do item 33
 
@@ -918,13 +637,6 @@ Sessão de análise e decisão. Nenhum código mudou; só o `CLAUDE.md` e este d
 
 O dono está descontente com o caminho seguido no desempenho da mutação. Com a Forja rodando, a máquina (Ryzen 9 7900X3D, 24 threads, 32 GB) não serve para jogo nem para transmissão ao vivo. O gate de mutação é um pilar de qualidade e pede o máximo de desempenho real, sem perder qualidade.
 
-### O que foi conferido no código
-
-- **Nenhum processo de mutação roda com prioridade baixa.** A busca por `priority`, `nice` e `affinity` em `src` e `scripts` só achou `_CREATE_NEW_PROCESS_GROUP | _CREATE_SUSPENDED` em `core/process/_windows.py`. Os testes dos mutantes disputam CPU de igual para igual com o resto da máquina.
-- **O gate roda o comando de testes inteiro para cada mutante** (`AdapterRunner`, `Operation.TEST`, com `-x` em Python). A escolha de testes pela linha mutada, a ordem dos testes e o histórico entre rodadas existem só em `scripts/mutate.py`.
-- **O padrão de workers é 4 no gate** (`mutation/executor.py`) e 8 no script.
-- **O gate já faz uma base por rodada.** "Base uma vez por comando" só falta no script, que faz uma por arquivo.
-
 ### Decisões do dono
 
 | Assunto | Decisão |
@@ -946,12 +658,6 @@ O dono está descontente com o caminho seguido no desempenho da mutação. Com a
 
 Nada rodou: nenhum código mudou.
 
-### Pendências
-
-- **Leva de desempenho da mutação, a fazer, à frente do item 5:** plano primeiro; prioridade baixa; um worker por núcleo; Go só no pacote; base uma vez por comando no script; cobertura por teste em cada linguagem, e com ela a escolha pela linha, a ordem dos testes e o histórico no gate; nova medição de `measurer.py`, a escolha por função de teste no lugar de arquivo, e rodar primeiro quem matou da última vez.
-- **Reler o `unclebob/mutator` por inteiro antes de implementar** (regra 3), conferindo se ele trata prioridade de processo.
-- As pendências da entrada de 14/11 sobre as decisões do dono continuam, agora depois desta leva.
-
 ## 14/11/2026 — plano da leva de desempenho da mutação
 
 Sessão de leitura e plano. Nenhum código mudou; só este diário. O plano espera a ordem do dono.
@@ -968,7 +674,7 @@ Sessão de leitura e plano. Nenhum código mudou; só este diário. O plano espe
 3. **Base no mutator:** uma por par de comando e pasta, guardada entre os arquivos do mesmo comando (`engine.py:191`), sem limite de tempo. O executor recebe o tempo-limite já calculado: `max(2, base × fator)` (`engine.py:231`).
 4. **Go no mutator:** `go test -count=1` no pacote do arquivo (`runner.py:205`). Como a base é por comando, é uma base por pacote.
 5. **O mutator não escolhe testes, não os ordena e não para no primeiro que falha.** Python roda `pytest`, Java `mvn -q test -DexcludeTags=no-mutate`, TypeScript `npm test`. Escolha pela linha, ordem e histórico por teste são da Forja.
-6. **Correção à entrada anterior: o gate não usa `-x` em Python.** `languages/python/adapter.py:251` planeja `pytest -p no:cacheprovider -q -rA --color=no`. `-x` só aparece em `scripts/mutate.py:587` e em `cli/facade.py:63`. No gate, nas seis linguagens, o mutante morto roda a suíte até o fim.
+6. **O gate não usa `-x` em Python,** ao contrário do que eu tinha dito na sessão anterior. `languages/python/adapter.py:251` planeja `pytest -p no:cacheprovider -q -rA --color=no`. `-x` só aparece em `scripts/mutate.py:587` e em `cli/facade.py:63`. No gate, nas seis linguagens, o mutante morto roda a suíte até o fim.
 7. **O modelo de cobertura do gate já guarda os testes de cada linha.** `FileCoverage.tests` (`core/reports/models.py:31`) é preenchido pelo leitor do coverage.py, e o driver de Python já grava o contexto por função de teste (`coverage_driver.py:30`, no formato `tests/test_a.py::test_x`). `MutationCheck` não lê esse campo. Os leitores das outras linguagens (istanbul, JaCoCo, Cobertura, perfil do Go) não o preenchem.
 8. **Filtro de testes nos adaptadores:** só Python aceita `test_files` (`TEST_FILTER_BY_FILE`). Nenhum adaptador aceita `tests`. Go, Java (Maven e Gradle), C# e TypeScript/JavaScript respondem `NotSupported` a qualquer filtro.
 9. **As cópias dos workers são feitas uma depois da outra** (`executor.py:182`). A 0,96 s por cópia (medida de 13/11 na árvore da Forja), 24 workers custam cerca de 23 s antes da base.
@@ -978,7 +684,7 @@ Sessão de leitura e plano. Nenhum código mudou; só este diário. O plano espe
 
 ### O plano
 
-Valem as regras da entrada anterior: morto pelo subconjunto é morto pelo conjunto; sobrevivente só conta depois do conjunto inteiro; nada de amostrar, encurtar o tempo-limite, pular a reconferência ou descartar por equivalência; toda mudança com medição antes e depois e comparação de vereditos. Um commit por item, com teste.
+Seis fases, com as regras de qualidade da entrada anterior. O que cada uma das fases 0 a 4 fez e mediu está nas entradas seguintes; a fase 5 foi cancelada pelo dono em 15/11, na entrada que encerra a leva.
 
 | Fase | O que | Depende de |
 | --- | --- | --- |
@@ -989,76 +695,13 @@ Valem as regras da entrada anterior: morto pelo subconjunto é morto pelo conjun
 | 4 | No gate: testes da linha, ordem e histórico, nas seis linguagens de uma vez | 2, 3 e a decisão do dono sobre o levantamento |
 | 5 | No script: escolha por função de teste, e quem matou roda primeiro | 2 |
 
-**Fase 0: medição de base.** Nenhum código muda.
-
-- Script: `orchestrator/measurer.py` com `--mutate-all` e cobertura nova, com a máquina parada. Guardar o tempo de cada parte (cobertura, base, mutantes, reconferidos), o pico de memória e o veredito de cada mutante.
-- Gate: uma rodada do `MutationCheck` num projeto de cada linguagem, com o mesmo registro. Quais projetos de exemplo servem não foi conferido; os testes `slow` de mutação real são o ponto de partida.
-- Esses vereditos são a referência de comparação de todas as fases.
-
-**Fase 1: prioridade baixa e um worker por núcleo.** A prioridade vem antes: 24 workers em prioridade normal piorariam a queixa.
-
-- Prioridade no gate: `ProcessSpec` ganha um campo que pede prioridade baixa, e `AdapterRunner` o liga para a base e para os mutantes. No Windows, a classe de prioridade é imposta pelo Job Object que `WindowsJobGroup` já cria (o campo `PriorityClass` já está declarado em `_BasicLimits`), e assim vale para a árvore inteira. No POSIX, a prioridade é dada ao grupo de processos em `PosixGroup.attach`; a sessão nova já existe. As chamadas (`JOB_OBJECT_LIMIT_PRIORITY_CLASS`, `os.setpriority`) estão aqui de memória e têm de ser conferidas na documentação antes de escrever.
-- Prioridade no script: o próprio processo baixa a sua prioridade no começo de `main`; canário, cobertura, base e mutantes herdam.
-- Nível: o mais baixo de cada sistema (classe ociosa no Windows, 19 no POSIX).
-- Teste: um processo neto diz a própria prioridade. No Windows aqui; no Linux pelo WSL.
-- Workers: o padrão passa a `os.cpu_count()` no gate (`executor.py:179`) e no script (`mutate.py:694`), como no mutator. `limits.workers` e `--max-workers` continuam como teto. As cópias dos workers passam a ser feitas em paralelo (achado 9). O guia `gates/mutacao.md` muda no padrão de `limits.workers`.
-- Medir: tempo e pico de memória com 24 workers, com a máquina parada e com a máquina em uso.
-- Risco: o tempo-limite é de relógio. Com a máquina ocupada, um mutante em prioridade baixa pode estourar o tempo sem ter laço nenhum e contar como morto. `_alone` já julga de novo, sozinho, quem estourou, e isso fica. Se a medição com a máquina em uso der veredito diferente, a fase para e o caso volta ao dono.
-
-**Fase 2: Go só no pacote, e a base uma vez por comando no script.**
-
-- O executor passa a aceitar uma base já medida por quem o chama, como no mutator, e a fazer duas passagens: a estreita e, para quem sobreviveu a ela, a inteira. É o que `judge_file` faz hoje por fora, com duas chamadas. O runner passa a saber qual arquivo foi mutado.
-- Go: o pedido ao adaptador ganha um aviso com o arquivo mutado, do tipo do `rerun`, que só o Go lê: `go test -count=1 -json` no pacote do arquivo. Uma base por comando distinto, como no mutator. O sobrevivente do pacote é julgado por `./...` antes de contar, por causa do achado 11. Nas outras linguagens o mutator roda o comando inteiro; o ganho equivalente nelas é a fase 4.
-- Script: uma base por comando, com a união dos testes dos arquivos pedidos, e o tempo-limite de dez vezes essa base, como no mutator. O `--timeout` por teste do pytest continua a pegar o laço em segundos. Base que falha: saída 2 e histórico intacto, como hoje.
-- Medir: `measurer.py` e uma rodada de vários arquivos, antes e depois; no gate, um projeto Go com mais de um pacote.
-
-**Fase 3: levantamento.** Nenhum código de produção muda. Para Python, Go, Java com Maven, Java com Gradle, C#, e TypeScript e JavaScript com Vitest e com Jest, três respostas, tiradas da documentação de cada ferramenta e de uma prova de vida num projeto pequeno, no Windows e no Linux:
-
-- (a) como rodar só os testes escolhidos, e qual é a unidade (função, classe, arquivo ou pacote);
-- (b) como parar no primeiro teste que falha e como impor a ordem;
-- (c) como saber quais testes executam cada linha, e quanto custa medir.
-
-Ponto de partida: Python tem (a) por arquivo e (c) por função, já no gate. As outras não têm nada disso na Forja. De memória, sem conferir: JaCoCo, coverlet, istanbul e o perfil do Go não dizem o teste de cada linha num relatório só; o equivalente provável é uma medição por unidade de teste, e o custo dela é o que decide.
-
-Saída: uma tabela por linguagem com (a), (b) e (c) provados e o custo medido. A técnica só segue para a fase 4 se as seis tiverem as três respostas.
-
-**Fase 4: no gate, nas seis linguagens de uma vez.**
-
-- Adaptadores: o filtro por teste, que o contrato já prevê (`tests`, `test_files`), e a parada no primeiro teste que falha quando o pedido é `rerun` (achado 6).
-- Leitores de cobertura: preenchem `FileCoverage.tests`.
-- `MutationCheck`: cada mutante é julgado primeiro pelos testes das suas linhas (`site.lines`, com a âncora); o sobrevivente, pelo comando inteiro. O tempo-limite continua o de dez vezes a base do comando inteiro.
-- Ordem: primeiro o teste que matou o mesmo mutante da última vez.
-- Histórico: serve só para a ordem. Nenhum mutante deixa de rodar no gate (ponto 2 para o dono).
-- Onde o gate guarda o histórico entre uma tentativa e outra não foi lido; faz parte da fase.
-- Medir, por linguagem: antes e depois, mesmos mutantes, mesmos vereditos. O guia `gates/mutacao.md` muda em "Quando roda" e em "Mutação incremental".
-
-**Fase 5: no script.**
-
-- Escolha por função de teste: os contextos do `coverage` já são por função, e o script os reduz a arquivo. Passa a pedir os testes pelo id. A reconferência continua pelo conjunto inteiro. Atenção ao que o item 41 registrou: o que roda na preparação de um fixture fica na conta do teste anterior, e por função isso pesa mais; a medição conta os reconferidos.
-- Quem matou roda primeiro: o histórico de hoje guarda os arquivos que julgaram, não o teste que falhou. Passa a guardar o teste que falhou (versão 3) e a rodá-lo primeiro.
-- Medir: `measurer.py`, contra a fase 0 e a fase 2.
-
-**Verificação de cada fase:** `ruff check .`, `ruff format --check`, `mypy`, a suíte rápida e a mutação dos arquivos de `src` que a fase mudou. A suíte completa com `slow` fecha a leva, sozinha na máquina.
-
-### Pontos para o dono
-
-1. **Nível da prioridade.** O plano usa o mais baixo de cada sistema. É uma constante; se o dono quiser outro nível, muda nela.
-2. **Histórico no gate só para a ordem.** No script, o veredito aproveitado tem a rede do `--mutate-all` antes de cada release. No gate não há essa rede, e entre uma tentativa e outra o agente muda justamente o código em volta: um "morto" aproveitado poderia ser um sobrevivente. Rodando todos, com o teste que matou na frente, o mutante morto custa um teste.
-3. **macOS não pode ser provado nesta máquina.** O caminho POSIX é o mesmo do Linux, que roda no WSL.
-
 ### Verificação
 
 Nada rodou: nenhum código mudou.
 
-### Pendências
-
-- **A leva, pelas fases acima,** a começar pela 0, depois da ordem do dono.
-- **Reler `metrics.py` do mutator** antes das fases 4 e 5.
-- As pendências da entrada anterior sobre as decisões do dono continuam, depois desta leva.
-
 ## 14/11/2026 — leva de desempenho, fases 0 e 1: a prioridade baixa aprova o que devia reprovar com a máquina toda ocupada
 
-A fase 1 parou na medição com a máquina em uso, como o plano previa. O código das duas mudanças está escrito e testado na árvore de trabalho, **sem commit**, à espera da decisão do dono.
+A fase 1 parou na medição com a máquina em uso: o plano previa que, se essa medição desse veredito diferente, a fase parava e o caso voltava ao dono.
 
 ### Decisões do dono
 
@@ -1119,11 +762,6 @@ Vereditos iguais, mutante a mutante, nas cinco linguagens e nos dois tamanhos.
 - **Um worker por núcleo rende pouco onde o comando de testes já usa vários núcleos.** Com 120 mutantes e seis vezes mais workers: Java 1,15 vez mais rápido, Go 1,26, C# 1,46, Python 1,7, TypeScript 1,9, com duas a quatro vezes mais memória. Em Java cada `mvn test` levou cerca de 39 s com 24 juntos, contra cerca de 8 s com 4; o limite, de dez vezes a base, é de cerca de 60 s.
 - **O Job Object impõe a prioridade sem privilégio nesta máquina.** Se um sistema recusar, o processo não é criado (`SPAWN_FAILED`) e o gate fica inconclusivo.
 
-### Dificuldades
-
-- Um script embutido no shell deixou de aplicar cinco trocas com `\n` no medidor, sem erro. O mesmo tropeço das sessões anteriores; refeito pela ferramenta de edição.
-- Duas rodadas com carga passaram dos dez minutos do comando e seguiram em segundo plano.
-
 ### Verificação
 
 - `ruff check`, `ruff format --check` e `mypy` strict: limpos, 631 arquivos.
@@ -1131,18 +769,11 @@ Vereditos iguais, mutante a mutante, nas cinco linguagens e nos dois tamanhos.
 - Linux, pelo WSL (Ubuntu 22.04, Python 3.12, ambiente próprio): os testes de prioridade, os dois do script, o do `AdapterRunner` e `test_common.py`, 22 aprovados. A suíte inteira não rodou no Linux.
 - Não rodou: a mutação dos arquivos de `src` tocados; a nova medição de `measurer.py` com o código novo; a suíte completa com `slow`; Java, C# e Go com 24 processos de carga; macOS.
 
-### Pendências
-
-- **Decisão do dono: como a prioridade baixa deixa de trocar sobrevivente por morto.** Sugestão: o estouro de tempo só conta como morte se, logo depois dele, a cópia sem mutação ainda passa dentro do mesmo limite. Quando não passa, a máquina estava ocupada demais para julgar, e o gate fica inconclusivo em vez de contar o mutante como morto. É divergência do mutator, que conta todo estouro como morte. Custa uma base a mais por mutante que estoura duas vezes.
-- **Depois da decisão:** medir de novo com 24 processos de carga nas cinco linguagens, mutação dos arquivos tocados, nova medição de `measurer.py`, e os commits (um por item).
-- **A árvore de trabalho tem as duas mudanças da fase 1 sem commit,** além do `CLAUDE.md` e do diário.
-- As fases 2 a 5 do plano esperam a fase 1.
-
 ## 14/11/2026 — leva de desempenho, fase 1 fechada: o estouro de tempo só mata se a máquina não for a causa
 
 ### Decisão do dono
 
-A sugestão da entrada anterior foi aceita ("sim, implemente"): o estouro de tempo só conta como morte se, logo depois dele, a cópia sem mutação ainda passa dentro do mesmo limite. Quando não passa, a rodada fica sem veredito. É divergência do mutator, que conta todo estouro como morte.
+A minha sugestão para o defeito da entrada anterior foi aceita ("sim, implemente"): o estouro de tempo só conta como morte se, logo depois dele, a cópia sem mutação ainda passa dentro do mesmo limite. Quando não passa, a rodada fica sem veredito. É divergência do mutator, que conta todo estouro como morte.
 
 ### O que foi feito
 
@@ -1178,18 +809,9 @@ O que isso mostrou: no script, um teste que estoura o limite saía como teste qu
 
 ### Mutação dos arquivos tocados
 
-Quatro rodadas de `scripts/mutate.py --mutate-all`, 24 workers, prioridade ociosa, com vigia da memória livre.
-
-| Rodada | Resultado |
-| --- | --- |
-| 1 (5306 s) | `mutation/executor.py` (24), `core/process/runner.py` (23), `model.py` (13) e `group.py` (1) sem sobrevivente. `checks/mutation.py` (45): 3 sobreviventes, `mkdir(parents, exist_ok)` e `unlink(missing_ok)` em `AdapterRunner.__call__`, linhas que o meu teste novo passou a cobrir sem conferir. `_windows.py`: base falhou, saída 2. Memória livre mínima 2,16 GB. |
-| 2 (5944 s) | `checks/mutation.py` sem sobrevivente (453 s). `_windows.py` (21): 6 sobreviventes, 3474 s, cinco rejulgados por todos os testes. `core/adapters/common.py` (16) e `orchestrator/measurer.py` (94) sem sobrevivente. Memória livre mínima 3,25 GB. |
-| 3 (427 s) | `_windows.py`: base falhou de novo. |
-| 4 (787 s) | `_windows.py` (20, 340 s) e `checks/differential.py` (16, 139 s) sem sobrevivente. Saída 0. |
-
-A falha da rodada 3 era outro teste: `tests/checks/test_differential_check.py::test_a_slower_version_rejects_with_the_ratio_and_the_limit`, que pedia razão acima de 2 entre programas de 0,6 s e 0,05 s e mediu 1,85 (e 1,67 na suíte rápida). Só apareceu rodando a base numa cópia, como o script faz, em 1 de 4 repetições; na árvore principal passou 4 de 4. `checks/differential.py` entrou na rodada 4 porque afrouxei um teste que o protege.
-
-Ficam sem rodar 15 sítios em linhas que nenhum teste rápido executa: 12 em `checks/mutation.py` (eram 18) e 3 em `_windows.py`. `_posix.py` não foi mutado: o script roda no Windows, onde nenhum teste executa as linhas dele.
+- Sem sobrevivente ao fim de quatro rodadas de `scripts/mutate.py --mutate-all`, com os testes novos: `mutation/executor.py`, `core/process/runner.py`, `model.py`, `group.py` e `_windows.py`, `checks/mutation.py`, `core/adapters/common.py`, `orchestrator/measurer.py` e `checks/differential.py`. Este último entrou porque afrouxei um teste que o protege: `test_a_slower_version_rejects_with_the_ratio_and_the_limit` pedia razão acima de 2, mediu 1,85 rodando numa cópia e derrubou a base de uma rodada.
+- Ficam sem rodar 15 sítios em linhas que nenhum teste rápido executa: 12 em `checks/mutation.py` (eram 18) e 3 em `_windows.py`.
+- `_posix.py` não foi mutado: o script roda no Windows, onde nenhum teste executa as linhas dele.
 
 ### O script, antes e depois
 
@@ -1207,13 +829,6 @@ Ficam sem rodar 15 sítios em linhas que nenhum teste rápido executa: 12 em `ch
 - `pytest -m "not slow" -n16`, Windows: 9895 aprovados, 41 pulados, 256 s.
 - Linux, pelo WSL: os arquivos de teste tocados e `tests/core/process` inteiro, 256 aprovados, 6 pulados e 1 falha, `tests/mutation/test_mutate_script.py::test_each_line_gets_the_test_files_that_ran_it`, que compara `src\\forja\\nowhere.py` com `src/forja/nowhere.py`. Já falhava em `8b61fbe`; não é desta leva e não foi corrigida.
 - Não rodou: a suíte completa com `slow`; a suíte inteira no Linux; macOS; Java, C# e Go do código antigo com 24 processos de carga; a mutação de `scripts/mutate.py` (o script só muta `src`) e de `_posix.py`.
-
-### Pendências
-
-- **Fases 2 a 5 do plano.** Antes das fases 4 e 5, reler `metrics.py` do mutator.
-- **Para o dono decidir, se quiser:** o padrão de um worker por núcleo, dado o custo de memória medido; e se o script deve mostrar o teste que falhou na base.
-- O teste do Linux que falha desde `8b61fbe`.
-- Nada foi enviado ao GitHub: os commits estão em `correcoes-p0`, só na máquina.
 
 ## 15/11/2026 — leva de desempenho, fase 2: Go pelo pacote primeiro, e a base uma vez por comando no script
 
@@ -1289,9 +904,7 @@ Memória livre mínima nas quatro primeiras rodadas: 7,38 GB.
 
 ### Dificuldades
 
-- Um teste novo do executor media `asyncio.sleep(0.3)` e pedia limite de pelo menos 3,0 s; mediu 2,97. Passou a dormir 0,4 s e pedir 3,5 s.
 - `ruff format --check .` acusa dois arquivos em `scripts/capturas`. Conferido com `git stash`: já era assim antes desta fase; ficam para o item 40.
-- A primeira comparação de `measurer.py` foi contra o número da fase 1 e parecia regressão de 37%. A rodada pareada no mesmo dia mostrou que não era.
 
 ### Verificação
 
@@ -1302,23 +915,13 @@ Memória livre mínima nas quatro primeiras rodadas: 7,38 GB.
 - Revisão independente do diff (agente de boas práticas da linguagem): nenhum defeito apontado.
 - Não rodou: a suíte completa com `slow`; a suíte inteira no Linux; os testes de Go de verdade no Linux (o WSL não tem Go); macOS; a mutação de `scripts/mutate.py` (o script só muta `src`).
 
-O checkout de verificação (`%LOCALAPPDATA%\forja-verif`) está em `f0549a0`.
-
-### Pendências
-
-- **Fases 3 a 5 do plano.** A fase 3 é levantamento, sem código de produção; a 4 espera a decisão do dono sobre ele; a 5 depende só desta. Antes das fases 4 e 5, reler `metrics.py` do mutator.
-- **Para o dono decidir, se quiser** (vêm da entrada anterior): o padrão de um worker por núcleo, dado o custo de memória; e se o script deve mostrar o teste que falhou na base.
-- A diferença entre os 1477 s da fase 1 e os 2103 s de hoje em `measurer.py`, sem causa conferida.
-- O teste do Linux que falha desde `8b61fbe`.
-- Nada foi enviado ao GitHub: os commits estão em `correcoes-p0`, só na máquina.
-
 ## 15/11/2026 — leva de desempenho, fase 3: filtro, parada, ordem e testes por linha nas sete pilhas
 
 Sessão de levantamento. Nenhum código de produção mudou; só este diário. A fase 4 espera a decisão do dono sobre o que está aqui.
 
 ### O que foi feito
 
-Para cada pilha do requisito básico (Python com pytest, Go, Java com Maven, Java com Gradle, C# com xUnit, TypeScript com Vitest e com Jest), as três perguntas do plano foram respondidas pela documentação da ferramenta e por prova executada no Windows e no Linux (WSL, Ubuntu 22.04):
+Para cada pilha do requisito básico (Python com pytest, Go, Java com Maven, Java com Gradle, C# com xUnit, TypeScript com Vitest e com Jest), as três perguntas do plano (como rodar só os testes escolhidos, e qual é a unidade; como parar no primeiro teste que falha e como impor a ordem; como saber quais testes executam cada linha, e quanto custa medir) foram respondidas pela documentação da ferramenta e por prova executada no Windows e no Linux (WSL, Ubuntu 22.04):
 
 - Um projeto pequeno por pilha, com os mesmos casos: três unidades de produção, três arquivos de teste, 14 a 17 testes, uma linha com testes de dois arquivos, um teste parametrizado, uma preparação compartilhada que executa código de produção, e uma linha sem teste.
 - Um `prove.sh` com cinco provas (filtro; parada; ordem; testes por linha; ida e volta do id entre o mapa e o filtro) e um `medir.sh` com quatro medidas (testes de hoje; cobertura de hoje; cobertura com testes por linha; um teste só pelo filtro).
@@ -1359,7 +962,7 @@ Quatro séries do Linux tiveram uma rodada fora da faixa, uma delas negativa: é
 
 ### Conclusões
 
-- **As sete pilhas têm as três respostas.** Pelo critério do plano, a técnica pode seguir para a fase 4. A qualidade das respostas não é a mesma em todas, e é isso que o dono decide.
+- **As sete pilhas têm as três respostas.** Pelo critério do plano (as três respostas em todas as pilhas), a técnica pode seguir para a fase 4. A qualidade das respostas não é a mesma em todas, e é isso que o dono decide.
 - **O filtro existe em todas.** A unidade é o caso em Python, Go, C#, Vitest e Jest, e o método em Java.
 - **A parada só é exata em série,** em todas: com o paralelismo da ferramenta ligado (xdist, JUnit em paralelo, coleções do xUnit, workers do Vitest e do Jest), os testes que já começaram terminam. A execução estreita do mutante teria de rodar em série.
 - **A parada é da própria ferramenta em Python, Go, Gradle e Vitest.** Em Maven e em C# exige uma peça posta de fora. Em Jest, só um processo por teste.
@@ -1372,19 +975,11 @@ Quatro séries do Linux tiveram uma rodada fora da faixa, uma delas negativa: é
 
 Registrados, não tratados.
 
-- **Projeto criado pelo modelo de TypeScript não mede cobertura.** O modelo pede `vitest ^2.1.0` sem `@vitest/coverage-v8`, e o comando de cobertura do adaptador sai com `MISSING DEPENDENCY`. Os testes da Forja usam Vitest 5.0.5 com o provedor. Na 2.1.9 com o provedor instalado, o filtro, a configuração injetada e a gravação por teste funcionam; a conversão para linhas não rodou.
-- **Projeto criado pelo modelo de C# também não:** falta o `coverlet.collector`. O adaptador já registra esse limite, e o gate de cobertura fica inconclusivo.
 - **No Python 3.14, o coverage perde testes por linha** com o núcleo padrão: uma linha executada por dois testes aparece com um só; com `COVERAGE_CORE=ctrace` aparecem os dois. Provado no Linux. Hoje só `scripts/mutate.py` escolhe testes por esse dado, e a Forja roda em 3.12.
 - **O JaCoCo do Gradle não tem versão fixada** pela Forja (veio a 0.8.15); o do Maven é 0.8.13.
 - **A documentação do Surefire diz que `skipAfterFailureCount` vale para o JUnit 5.** Na versão 3.2.5 não valeu.
 - **Com `--bail`, o Vitest escreve `not ok <arquivo>` para os arquivos que não rodaram.** Como o leitor da Forja trata essa linha não foi conferido.
 - **Limite da linha de comando do Windows:** cerca de 1050 ids do pytest e 700 do `dotnet test` cabem em 32 767 caracteres. O pytest aceita os ids por arquivo (`@arquivo`, 5000 ids).
-
-### Dificuldades
-
-- A medida de cada levantamento foi feita com os outros quatro rodando; por isso a tabela é da rodada refeita depois.
-- O primeiro levantamento do Vitest leu a ordem pelo relatório, que sai por arquivo, e concluiu errado; o complemento refez pela ordem de início dos testes.
-- O último complemento de C# parou antes de medir no Linux e de escrever a sua seção no `RESULTADO.md`. A medida foi feita por mim; a seção ficou sem escrever, e o que vale para o snapshot é esta entrada e `csharp/snapshot.sh`.
 
 ### Verificação
 
@@ -1406,14 +1001,6 @@ Registrados, não tratados.
 **Ponto 3: aceito.** Suportar uma linguagem é usar as ferramentas do ecossistema dela, e isso é esperado da Forja: ela precisa do `dotnet` para C#, do Maven e do Gradle para Java, e assim por diante. Python é só a linguagem em que a Forja é escrita. Ela é obrigada a cumprir o seu propósito de fábrica de software agêntica, com os gates e os gates de qualidade garantidos em todas as linguagens suportadas. Peças da Forja em Java, C# e JavaScript, postas na execução dos testes, fazem parte desse suporte.
 
 Eu tinha apresentado a manutenção dessas peças como a parte ruim do ponto. Não é objeção: é o trabalho de absorver a particularidade de cada linguagem, que a regra 7 já pede.
-
-### Pendências
-
-- **Fase 4:** espera os pontos 1, 2 e 4.
-- **Fase 5** (script: escolha por função de teste, e quem matou roda primeiro): depende só da fase 2 e pode começar. Antes, reler `metrics.py` do mutator.
-- Os achados fora das três perguntas, sem item na avaliação.
-- As ferramentas em `~/forja-fase3` no WSL e o material em `%LOCALAPPDATA%\forja-fase3` ficam até a fase 4 ser decidida.
-- As pendências da entrada anterior continuam.
 
 ## 15/11/2026 — os pontos da fase 3 decididos, e o suporte por linguagem conferido por evidência
 
@@ -1451,7 +1038,7 @@ Conferido por mim no código:
 1. **O agente só roda testes e lint em Python.** `forja agente testar|lint|medir` chama pytest, ruff e lizard (`cli/facade.py:33-37` e `58-67`). O agente não tem shell próprio (`facade.py:3`): em Go, Java, C# e TypeScript ele entrega sem poder rodar os testes nem o lint.
 2. **JavaScript sem `tsconfig.json` é recusado** (`cli/prepare.py:234-244`; `languages/typescript/adapter.py:111`; `core/policy/config.py:494-495`). São cinco adaptadores; arquivo `.js` é medido dentro de um projeto TypeScript. O `README.md:134` lista JavaScript entre as linguagens que a Forja conduz.
 3. **Formato e lint em Java e em TypeScript só rodam se o projeto declara a ferramenta** (`languages/java/adapter.py:194-202`, `languages/typescript/adapter.py:166-171`). Sem ela o gate dá "não aplicável", que passa (`checks/layout.py:104-105`, `checks/base.py:71-72`). Os modelos de Java e de TypeScript não declaram nenhuma: projeto criado pela Forja nessas linguagens nasce sem os dois gates. Em Python o ruff vem da Forja; em Go, gofmt e golangci-lint vêm do preparo; em C#, do SDK.
-4. **Projeto criado em C# e em TypeScript não mede cobertura** (achado da entrada anterior): falta `coverlet.collector` e `@vitest/coverage-v8`. A mutação exige cobertura (`checks/mutation.py:256`).
+4. **Projeto criado em C# e em TypeScript não mede cobertura** (achado no levantamento da fase 3): falta `coverlet.collector` e `@vitest/coverage-v8`. A mutação exige cobertura (`checks/mutation.py:256`).
 5. **Instalar dependência nova só existe para PyPI** (`checks/dependency_install.py:26`).
 6. **`red_green` só reconhece o erro do próprio teste em Python** (`NameError`, `checks/red_green.py:17`).
 
@@ -1479,13 +1066,6 @@ Não é lacuna: o gate `types` só existe em Python porque nas outras linguagens
 
 - `pytest tests/checks/test_real_languages.py tests/languages`, Windows: 466 aprovados em 1744 s.
 - Não rodou: a suíte inteira; Linux; nada foi medido de novo.
-
-### Pendências
-
-- **Ordem do trabalho, para o dono:** a fase 4 está autorizada. Os seis pontos conferidos não têm item na avaliação; falta dizer se algum passa à frente da fase 4. O ponto 4 tem de estar resolvido para a fase 4 valer em projeto criado pela Forja.
-- **Fase 4,** com as três decisões acima. Antes, reler `metrics.py` do mutator.
-- **Fase 5,** que depende só da fase 2.
-- As pendências da entrada anterior continuam.
 
 ## 15/11/2026 — leva de desempenho, fase 4: os testes da linha primeiro nas seis linguagens; medido, só o Vitest ganha
 
@@ -1570,22 +1150,9 @@ Rodadas minhas, uma execução de cada vez, máquina parada, `MutationCheck.eval
 
 ### Pontos para o dono
 
-1. **O que fazer com a escolha dos testes.** Está no código e ligada. Pelos números, eu não a deixaria ligada por padrão: ela piora o tempo nos projetos medidos, e o caso em que deveria ganhar não foi medido. Três caminhos: (a) medir num projeto de verdade, com testes que demoram, antes de decidir; (b) desligar por padrão, com uma chave na política para ligar; (c) reverter a escolha e ficar com o que não depende dela (o ponto 4, a parada no comando inteiro, a instalação do `dotnet-coverage`, a correção do leitor). Recomendo (a) e, até lá, (b). A parada no comando inteiro também não foi medida em separado.
+1. **O que fazer com a escolha dos testes.** Decidido na entrada seguinte: desligada por padrão, com uma chave na política para ligar. A parada no comando inteiro não foi medida em separado.
 2. **`dotnet-coverage`.** O GitHub dá o repositório que o pacote indica (`microsoft/codecoverage`) como MIT, e por isso ele entrou. O pacote NuGet traz um `License.txt` próprio (Microsoft Software License Terms) e pede aceite de licença. Fica o registro.
 3. **O veredito instável do código antigo no Gradle** (acima) é um defeito anterior a esta fase, sem item na avaliação.
-
-### Pendências
-
-- A decisão do ponto 1 acima.
-- **Não rodou nesta fase:** a mutação dos arquivos de `src` que a fase mudou (`scripts/mutate.py`), que o plano pede, porque toma a máquina inteira por muito tempo; a medição de Maven e do Jest gerado; os testes no Linux (o WSL tem Python 3.10 e a Forja não importa lá; só o driver de Go rodou, com saída 0); macOS.
-- Achados da revisão dos adaptadores, sem correção: em Maven e Gradle de vários módulos a pasta dos dados por teste é relativa ao módulo, e pode ficar lixo fora da raiz; no Jest, `--setupFilesAfterEnv` pela linha de comando substitui o do projeto na execução dos testes por linha, e o relator dela quebra sem `tsconfig.json` (nos dois casos nada é escolhido); a configuração da Forja para o Vitest só carrega `vitest.config.*`; em C#, id com `\\` não casa no filtro, e o índice dos snapshots não foi provado com mais de um projeto de teste; a pasta raiz do cache do lançador de Java só é restringida quando é criada.
-- **Voltar, junto com o dono, à pergunta dos pilares de teste contra o gate de mutação.** Hoje o gate cobra toda linha tocada, seja qual for a complexidade ciclomática. Comparar com o que o `unclebob/mutator` faz, lendo a implementação dele, e decidir juntos se faz sentido mudar. Nada muda até essa análise.
-- **Ponto 1 da entrada anterior** (o agente só roda testes e lint em Python): é o próximo.
-- **Itens novos na fila,** da entrada anterior: JavaScript sem `tsconfig.json`; formato e lint em Java e TypeScript só com a ferramenta declarada; instalar dependência nova só para PyPI; `red_green` só reconhece o erro do próprio teste em Python.
-- **Fase 5** (script), que depende só da fase 2.
-- O `doctor` não lista o `dotnet-coverage`.
-- O checkout de verificação (`%LOCALAPPDATA%\\forja-verif`) está em `c180ea5`. O material desta fase (scripts de medição, `final.jsonl`, a árvore do "antes") está em `%LOCALAPPDATA%\\forja-fase4`.
-- As pendências da entrada anterior continuam.
 
 ## 15/11/2026 — a escolha dos testes da linha fica desligada por padrão
 
@@ -1606,7 +1173,7 @@ Ponto 1 da entrada anterior: desligar por padrão, com uma chave na política pa
 - **O gate volta a julgar como o mutator, nas seis linguagens:** o comando de testes para cada mutante; em Go, o pacote do arquivo primeiro (fase 2).
 - **Fica ligado o que não depende da escolha:** a parada no primeiro teste que falha quando o comando roda para um mutante, a prioridade baixa, um worker por núcleo e a guarda do estouro de tempo. A parada usa peças da Forja em C# (`runner-stop.json`) e no Maven (a extensão do JUnit); essas continuam em uso.
 - **Deixa de rodar:** a execução que descobre os testes de cada linha, a verificação inicial por conjunto de testes e a execução estreita em série. O `killers.json` não é mais gravado. O `dotnet-coverage` deixa de ser necessário para o gate.
-- **O código da escolha continua no repositório,** com os seus testes `slow`, e os achados de revisão sem correção da entrada anterior só valem com a chave ligada.
+- **O código da escolha continua no repositório,** com os seus testes `slow`, e os achados da revisão dos adaptadores que ficaram sem correção na fase 4 (estão na lista de pendências de 16/11) só valem com a chave ligada.
 - **O Vitest perde o ganho medido** (36 s para 15,5 s no projeto gerado), como as outras pilhas deixam de pagar a perda.
 - **Nenhum veredito muda,** ligada ou desligada.
 
@@ -1617,14 +1184,6 @@ Ponto 1 da entrada anterior: desligar por padrão, com uma chave na política pa
 - Testes `slow` com a ferramenta de verdade, um comando de cada vez, com limite de tempo: Python (gate) 4 aprovados; Go 13; TypeScript 12; Java, Maven e Gradle, com o JDK 21, 17.
 - C#: 4 aprovados no modo padrão. **Os 10 testes com os testes por linha foram pulados:** o `dotnet-coverage` não está instalado nesta máquina (a instalação da fase 4 não ficou).
 - Não rodou: a mutação dos três arquivos de `src` tocados, que toma a máquina inteira; nenhuma medição de tempo com a chave desligada; a suíte completa com `slow`; Linux; macOS.
-
-### Pendências
-
-- Mutação de `checks/mutation.py`, `checks/specs.py` e `core/policy/config.py`, junto com a dos arquivos da fase 4.
-- Os testes de C# com os testes por linha, numa máquina com o `dotnet-coverage`.
-- Medir num projeto de verdade, com testes que demoram, só se o dono quiser reabrir a escolha.
-- **Para o dono:** se a fase 5 (script) e as medições que faltam (Maven, Jest gerado) continuam na fila ou são encerradas.
-- As demais pendências da entrada anterior continuam.
 
 ## 15/11/2026 — a leva de desempenho da mutação está encerrada
 
@@ -1753,3 +1312,108 @@ Feito em fila: o núcleo, depois Vitest, depois Jest, cada um provado antes do s
 - Continua como estava: `thresholds.javascript` é aceito, mas os gates que medem pelo adaptador leem `typescript`; num projeto de JavaScript o limite vale em `thresholds.typescript`. Com `line_tests` ligado, o relator do Jest para os testes da linha pede o pacote `typescript`, e num projeto de JavaScript nada é escolhido.
 - Os três itens que restam na fila: formato e lint em Java e TypeScript só com a ferramenta declarada; instalar dependência nova só para PyPI; `red_green` só reconhece o erro do próprio teste em Python.
 - As demais pendências da entrada anterior continuam.
+
+## 16/11/2026 — o diário foi enxugado, e as pendências abertas ficam numa lista só
+
+### Decisão do dono
+
+Tirar do diário o que uma entrada posterior superou e juntar as pendências abertas numa lista só. Saíram os cortes que a revisão do diário deu como sem risco; o que tinha risco ficou.
+
+### O que foi feito
+
+Só este arquivo mudou.
+
+- **Entradas e trechos superados:** a entrada "sugestão de implementação para os três pontos de atenção" (13/11), inteira, e a lista "Pontos de atenção a endereçar", as duas tratadas na entrada "os três pontos de atenção tratados", que ganhou o resumo dos três pontos e as duas razões da sugestão do ponto 1; o texto das fases e os "Pontos para o dono" do plano da leva de desempenho (14/11), de que ficaram o que foi lido, o que foi conferido e a tabela de fases; a tabela dos hashes reescritos, que virou uma linha.
+- **Entradas reduzidas:** "as três rodadas longas" (13/11) virou um parágrafo, e as quatro rodadas de mutação da fase 1 viraram três linhas.
+- **Seções "Pendências"** de todas as entradas anteriores à que encerra a leva de desempenho (15/11), menos as duas de 14/11 citadas abaixo. O que estava aberto nelas está na lista desta entrada.
+- **Linhas soltas:** estado de momento e conclusões que uma entrada posterior resolveu (o que tinha sido conferido no código antes da leva de desempenho, as rodadas interrompidas do item 12, o que "ficou de fora" nos itens 33, 36 e 40, os modelos de C# e de TypeScript sem cobertura, os três caminhos para a escolha dos testes), a limpeza de disco de 13/11, os tropeços de sessão sem lição nova e os textos repetidos.
+- **Referências ajustadas** onde uma entrada citava texto que saiu.
+- O arquivo tinha 1755 linhas e ficou com 1419, com esta entrada. O texto cortado está no histórico do git, em `31ca368`.
+
+### O que ficou
+
+- As medições que são a única prova de uma decisão do dono: o gate com a máquina em uso (fases 0 e 1), as medições por pilha da fase 3 e as da fase 4.
+- As duas seções "Para retomar" e as medições intermediárias com número que só existe ali: item 41, fase 0, o gate com a máquina parada e a fase 2.
+- As pendências das duas entradas de 14/11 ("as decisões abertas do dono..." e "o pull request 1..."), que as entradas de 15/11 citam, e as das três últimas entradas de 15/11. Estão todas repetidas na lista abaixo.
+
+### Verificação
+
+Só documentação mudou. Nada rodou.
+
+### Pendências abertas
+
+Esta lista substitui a corrente "as demais pendências da entrada anterior continuam" das entradas anteriores. Cada item está como a entrada de origem o escreveu; nenhum estado foi conferido de novo nesta sessão.
+
+**Fila do suporte por linguagem** (da entrada de 15/11 sobre o suporte por linguagem; o agente rodar testes e lint em todas as linguagens e o JavaScript sem `tsconfig.json` estão feitos)
+
+1. Formato e lint em Java e em TypeScript só rodam se o projeto declara a ferramenta.
+2. Instalar dependência nova só existe para PyPI.
+3. `red_green` só reconhece o erro do próprio teste em Python.
+
+**Decidido pelo dono em 14/11, a fazer, com mudança em `src`**
+
+- Item 5: ligar `authorize()`; ligar o `SentPackageStore` (gravar o pacote enviado ao agente, ADR 0009); artefato inválido refaz a etapa sozinho.
+- Item 12: exigir a nota de mutação da função para aprovar a etapa de caracterização. Hoje a etapa é aprovada quando os testes passam.
+- Item 6, resto: lista de permissão de opções por subcomando na fachada de git e `protocol.ext.allow=never`.
+- Item 2, resto: o `pip` ainda resolve as dependências do wheel do Semgrep sem `--require-hashes`; pede um arquivo de travas com hashes por plataforma, gerado com rede.
+- Item 34: rodar a própria Forja sobre as 21 funções com CCN acima de 15 (`prepare`, CCN 48, primeiro), o que entrega também o E2E com agente real. A versão fica `0.0.0` até essa primeira execução com agente real.
+- Item 30 (CI): adiado. Até haver GitHub, a suíte completa com `slow` na ponta fecha cada leva; a última rodada inteira registrada é a de `c4ff3ab`, em 14/11.
+
+**Pontos para o dono**
+
+- A CLI do agente não recebe o ambiente das ferramentas (`JAVA_HOME`, `GOPATH`, `GOROOT`, `DOTNET_ROOT`, `NUGET_PACKAGES`, `MAVEN_HOME` e as demais que os adaptadores pedem para os gates). Sugestão, não implementada: a Forja acrescentar ao ambiente da CLI, para todas as CLIs, as variáveis que os adaptadores das linguagens do repositório declaram.
+- `FORJA_AGENT_PYTHON` só passa pelo Claude Code. A sugestão acima resolve os dois.
+- Projeto dentro de projeto da mesma linguagem roda mais de uma vez, nos gates e na fachada: a `.sln` e cada `.csproj`, os módulos do Maven e a raiz de um monorepo de JavaScript.
+- O `build` de JavaScript pelo `node --check`, com o limite do JSX em arquivo `.js`.
+- A regra do executor de testes: projeto de JavaScript com outro executor (mocha, `node:test`) continua recusado.
+- `forja criar` não tem modelo de JavaScript.
+- A pergunta dos pilares de teste contra o gate de mutação: hoje o gate cobra toda linha tocada, seja qual for a complexidade ciclomática. Comparar com o que o `unclebob/mutator` faz, lendo a implementação dele, e decidir junto com o dono. Nada muda até essa análise.
+
+**Mutações e verificações que não rodaram**
+
+- Mutação dos arquivos de `src` da fase 4 da leva de desempenho.
+- Mutação da chave `line_tests`: `checks/mutation.py`, `checks/specs.py` e `core/policy/config.py`.
+- Mutação da fachada do agente: `cli/facade.py`, `cli/main.py` e `core/adapters/registry.py`.
+- Mutação do JavaScript sem `tsconfig.json`: `languages/typescript/adapter.py` e `parsers.py`, `cli/detect.py` e `cli/prepare.py`.
+- Mutação do que o pull request 1 mudou em `src`.
+- Mutações antigas, da lista de 14/11: os `parsers.py` de C# e Java, `cli/session.py`, `cli/detect.py`, `testing/workspace.py`, `testing/repo.py`, e `languages/java/adapter.py` depois de `17d06c6`. `core/adapters/common.py` e `checks/mutation.py`, da mesma lista, rodaram sem sobrevivente na fase 1 da leva de desempenho.
+- Os testes de C# com os testes por linha, numa máquina com o `dotnet-coverage`.
+- O efeito do defeito do Gradle (o projeto recebia uma instância do adaptador que não tinha visto o manifesto) nos gates de uma execução real, e um teste do pipeline que registre os adaptadores com fábrica, como a sessão faz.
+
+**Defeitos e limites conhecidos, sem correção**
+
+- O veredito instável do código antigo no Gradle: na medição da fase 4, o mutante de `Calc.java:59` sobreviveu numa rodada e contou como morto na outra. A causa não foi investigada.
+- `thresholds.javascript` é aceito, mas os gates que medem pelo adaptador leem `typescript`; num projeto de JavaScript o limite vale em `thresholds.typescript`.
+- Com `line_tests` ligado, o relator do Jest para os testes da linha pede o pacote `typescript`, e num projeto de JavaScript nada é escolhido.
+- Achados da revisão dos adaptadores na fase 4, que só valem com `line_tests` ligado: em Maven e Gradle de vários módulos a pasta dos dados por teste é relativa ao módulo, e pode ficar lixo fora da raiz; no Jest, `--setupFilesAfterEnv` pela linha de comando substitui o do projeto na execução dos testes por linha, e o relator dela quebra sem `tsconfig.json` (nos dois casos nada é escolhido); a configuração da Forja para o Vitest só carrega `vitest.config.*`; em C#, id com `\\` não casa no filtro, e o índice dos snapshots não foi provado com mais de um projeto de teste; a pasta raiz do cache do lançador de Java só é restringida quando é criada.
+- O `doctor` não lista o `dotnet-coverage`.
+- O gate de escopo não procura teste pulado em TypeScript (`it.skip`), Java (`@Disabled`), C# (`Skip =`) e Python (`pytest.mark.skip`).
+- A Forja não passa nos próprios testes em Python 3.13: o teste de painéis (`tests/ui/test_panels_exact.py`).
+- Item 40, resto: `ruff format --check .` acusa `scripts/capturas/terminal.py` e um bloco de código de `docs/guia/documentacao-gerada.md`; na fase 2 da leva de desempenho, acusava dois arquivos em `scripts/capturas`.
+- Achados da fase 3 fora das três perguntas, registrados e não tratados: o coverage no Python 3.14, o JaCoCo do Gradle sem versão fixada, o `skipAfterFailureCount` do Surefire, a linha `not ok <arquivo>` do Vitest com `--bail` e o limite da linha de comando do Windows. O texto está na entrada da fase 3.
+- Os pontos "apontados pelas leituras, não conferidos por mim" da entrada de 15/11 sobre o suporte por linguagem continuam sem conferência.
+
+**Linux, WSL e macOS**
+
+- `tests/mutation/test_mutate_script.py::test_each_line_gets_the_test_files_that_ran_it` falha no Linux desde `8b61fbe`: compara um caminho com barra invertida com um caminho com barra. Não é da leva de desempenho e não foi corrigido.
+- Na fase 4, o WSL tinha Python 3.10 e a Forja não importava lá; só o driver de Go rodou. A suíte inteira nunca rodou no Linux.
+- macOS nunca foi provado: não há máquina.
+
+**Pull request 1**
+
+- Segue aberto no GitHub até `correcoes-p0` chegar a `main`.
+- Falta a prova de vida com o Cursor 2026.11 de verdade, para conferir as partes 2 e 3.
+- Os quatro testes que o autor viu falhar no Linux em `main` (`test_snapshot.py`, `test_repository.py`, `test_adapter.py` de Python, `test_e2e.py`) não foram investigados.
+
+**Lixo em disco e material fora do repositório**
+
+- Dez pastas `forja-captura-*` no `%TEMP%`. Pelo nome vêm de `scripts/capturas/terminal.py`; o conteúdo não foi conferido.
+- `~/forja-fase3` no WSL (as ferramentas do levantamento, 1,7 GB; desfaz com `rm -rf ~/forja-fase3`) e `%LOCALAPPDATA%\forja-fase3` (o material do levantamento). Ficavam até a fase 4 ser decidida.
+- `%LOCALAPPDATA%\forja-fase4`: os scripts de medição, `final.jsonl` e a árvore do "antes" da fase 4.
+
+**Não conferido se ainda vale**
+
+- Os históricos da versão 1 em `.metrics/mutate` do checkout `%LOCALAPPDATA%\forja-verif`: a rodada seguinte lá roda todos os mutantes de cada arquivo. Na fase 4 o checkout estava em `c180ea5`.
+- Para o dono decidir, se quiser (fases 1 e 2 da leva de desempenho): o padrão de um worker por núcleo, dado o custo de memória medido; e se o script deve mostrar o teste que falhou na base.
+- A diferença entre os 1477 s da fase 1 e os 2103 s da fase 2 em `measurer.py`, sem causa conferida.
+- O que está no GitHub: a entrada do pull request 1 diz que a branch foi enviada ao remoto, e as das fases 1 e 2 da leva de desempenho dizem que os commits estavam em `correcoes-p0`, só na máquina.
