@@ -1647,3 +1647,56 @@ A leva termina aqui. Saem da fila, sem serem feitas:
 
 - **O próximo é o ponto 1 da entrada de 15/11 sobre o suporte por linguagem:** o agente só roda testes e lint em Python (`cli/facade.py`).
 - Continuam: a mutação dos arquivos de `src` da fase 4 e da chave `line_tests`; os testes de C# com os testes por linha numa máquina com o `dotnet-coverage`; o veredito instável do código antigo no Gradle; a pergunta dos pilares de teste contra o gate de mutação; os quatro itens novos da fila; as pendências com mudança em `src` de 14/11 (item 5, item 12, restos dos itens 6 e 2, item 34).
+
+## 15/11/2026 — o agente roda os testes e o lint do projeto em todas as linguagens
+
+Ponto 1 da entrada de 15/11 sobre o suporte por linguagem: `forja agente testar` e `forja agente lint` chamavam pytest e ruff, fosse qual fosse a linguagem do projeto.
+
+### O que foi lido
+
+`cli/facade.py` e os testes dele por mim. Os cinco adaptadores (comando de testes e de lint, formato da saída, o que o leitor devolve, variáveis de ambiente) por um agente de leitura, com arquivo e linha em cada fato; as linhas em que a implementação se apoia foram abertas por mim.
+
+### O que foi feito
+
+| Mudança | Arquivos | Teste novo | Commit |
+| --- | --- | --- | --- |
+| A fachada roda o comando que o adaptador de cada projeto da cópia planeja, o mesmo dos gates: `Operation.TEST` com parada no primeiro teste que falha, e `Operation.LINT`. Roda como os gates rodam (`build_spec` e `ProcessRunner`): ambiente filtrado, e a árvore inteira de processos encerrada no limite de 600 s. Nada nela distingue uma linguagem de outra. `medir` continua o `lizard`. | `cli/facade.py`, `cli/main.py` | `tests/cli/test_facade.py`, reescrito, 42 casos | `b1f56f1` |
+| Depois da saída da ferramenta vem o que o adaptador leu nela: `falhou: <teste>` ou `<arquivo>: <regra> (<quantas>)`, até 20 linhas. O código de saída é o da ferramenta, ou `1` quando ela termina bem e o leitor achou falha (o lint do Maven roda com `failOnViolation=false`). | `cli/facade.py` | os mesmos | `b1f56f1` |
+| Prova com a ferramenta de verdade em cada pilha: testes que passam, teste que falha nomeado, e o lint. | `tests/languages/{go,typescript,java,csharp}/test_agent_facade.py` (novos, `slow`) | 18 casos | `b1f56f1` |
+| Guia: o que cada subcomando roda em cada linguagem, o que vem depois da saída, e os códigos. | `docs/guia/comandos.md` | nenhum | `b1f56f1` |
+| **Defeito anterior, achado pelo teste de Gradle:** o registro acha os projetos com o adaptador registrado e dá a cada projeto uma instância nova. O adaptador de Java aprende em `detect` se o projeto é Maven ou Gradle, e a instância nova nunca via o manifesto. Numa execução real, a saída de um projeto Gradle era lida como a do Maven. `AdapterRegistry.projects` passou a mostrar a cada instância o manifesto do seu projeto. | `core/adapters/registry.py` | um em `tests/core/adapters/test_scoped.py` | `79dd1dd` |
+
+Feito em fila, uma pilha de cada vez, cada uma provada antes da seguinte: o núcleo com Python, Go, TypeScript (Vitest e Jest), Java (Maven e Gradle), C#.
+
+### Conclusões
+
+- **O defeito do Gradle valia para os gates, não só para a fachada.** `cli/session.py` registra `JavaAdapter` com fábrica, e `PipelineMeasurer._active` usa `registry.projects`. Os testes não viam: `registry_of`, em `tests/checks/support.py`, registra sem fábrica, e o projeto usa a mesma instância que o achou. Com um teste de Gradle que falha, o leitor devolvia "maven reported a failure in a form this parser does not know". O que isso fazia com cada gate numa execução real não foi reproduzido.
+- **Um defeito meu, pego ao rodar o `forja` de verdade:** a primeira versão chamava `asyncio.run` dentro do laço que `cli/main.py` já roda, e os testes, que chamavam a função direto, passavam. A fachada passou a ser assíncrona.
+- **Em Go a saída é a de `go test -json`,** uma linha de JSON por evento. O texto da falha está lá, e a linha `falhou:` diz o teste. Não ficou bonito; ficou o que o gate vê.
+- **O caminho dado restringe os testes só em Python.** Os outros adaptadores recusam filtro por arquivo; a fachada então roda o projeto inteiro. A instrução ao agente já manda chamar sem nada depois do subcomando.
+- **Operação que a linguagem não oferece para o projeto não conta como falha,** como no gate: lint em Java e em TypeScript sem ferramenta declarada, Go sem `golangci-lint`. A fachada diz o motivo.
+- **Numa solução de C#, a `.sln` e cada `.csproj` são um projeto para o registro.** `testar` roda `dotnet test` três vezes na solução de exemplo, e os gates fazem o mesmo. Vale para qualquer projeto dentro de outro da mesma linguagem (módulos do Maven, por exemplo). Não mexi: a fachada mostra o que os gates veem.
+- **Pasta sem manifesto de linguagem conhecida:** a fachada sai com `2`. Antes rodava pytest e ruff em qualquer pasta.
+- **Os testes de Python pela fachada ganharam `-rA`** e as outras opções do gate; a saída é maior que a de `pytest -q -x`, e as 80 últimas linhas continuam valendo.
+
+### Verificação
+
+- `ruff check .`, `ruff format --check src tests scripts/mutate.py` e `mypy` strict: limpos, 652 arquivos.
+- `pytest -m "not slow" -n 8`, Windows: 10107 aprovados, 41 pulados, 282 s.
+- Com a ferramenta de verdade, um comando de cada vez: Go 3 aprovados (com `golangci-lint`), TypeScript 6 (Vitest e Jest), Java 6 (Maven e Gradle, JDK 21), C# 3.
+- O executável `forja agente testar` e `forja agente lint`, numa pasta com um projeto Go: saída e códigos conferidos à mão.
+- Não rodou: a mutação dos arquivos de `src` tocados (`cli/facade.py`, `cli/main.py`, `core/adapters/registry.py`); a suíte completa com `slow`; o lint com ESLint, Checkstyle, PMD e SpotBugs de verdade pela fachada (os projetos de exemplo não declaram nenhum); nenhuma execução com agente real; Linux e macOS.
+
+### Pontos para o dono
+
+1. **A CLI do agente não recebe o ambiente das ferramentas.** A Forja entrega à CLI só `PATH`, `HOME`, `TEMP` e as variáveis da própria CLI. `JAVA_HOME`, `GOPATH`, `GOROOT`, `DOTNET_ROOT`, `NUGET_PACKAGES`, `MAVEN_HOME` e as demais que os adaptadores pedem para os gates não chegam, e a fachada roda dentro da CLI. Nesta máquina, com o Java 8 no `PATH` e o JDK 21 só em `JAVA_HOME`, o agente não conseguiria rodar os testes de Java. Sugestão: a Forja acrescentar ao ambiente da CLI, para todas as CLIs, as variáveis que os adaptadores das linguagens do repositório declaram. Muda o que a garantia "ambiente filtrado para a CLI do agente" deixa passar, e por isso é decisão do dono. Não implementado.
+2. **`FORJA_AGENT_PYTHON` só passa pelo Claude Code.** Está na lista de variáveis dele e de nenhuma outra CLI (`executors/*.py`). Com Cursor, Codex, Gemini, Grok e a CLI genérica, a fachada usa o Python que roda a Forja, não o do repositório. A sugestão do ponto 1 resolve os dois.
+3. **Projeto dentro de projeto da mesma linguagem roda mais de uma vez,** nos gates e agora na fachada (a solução de C# acima).
+
+### Pendências
+
+- Os três pontos acima.
+- Mutação dos três arquivos de `src` tocados, junto com as que já esperam.
+- O efeito do defeito do Gradle nos gates de uma execução real, e um teste do pipeline que registre os adaptadores com fábrica, como a sessão faz.
+- Os quatro itens novos da fila continuam: JavaScript sem `tsconfig.json`; formato e lint em Java e TypeScript só com a ferramenta declarada; instalar dependência nova só para PyPI; `red_green` só reconhece o erro do próprio teste em Python.
+- As demais pendências da entrada anterior continuam.
