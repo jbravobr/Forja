@@ -1,4 +1,4 @@
-"""Makes the tools the Forja installed visible to the processes it launches (ADR 0037).
+"""Makes the tools the Forja installed visible to the processes it launches.
 
 The folder of each installed tool goes in front of the ``PATH`` the Forja hands to its children;
 the user's own ``PATH`` is never changed. A tool that lives in a virtual environment (a wheel)

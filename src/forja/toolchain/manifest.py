@@ -1,6 +1,6 @@
 """The manifest of external tools: what the Forja installs and where each platform gets it.
 
-One entry per tool (ADR 0037); per platform, the exact artifact of the tool's own release, its
+One entry per tool; per platform, the exact artifact of the tool's own release, its
 size and its checksum. The Forja installs nothing that is not listed here, and what is listed is
 checked for completeness before anything is downloaded. Git is not in the manifest: the user
 installs it.

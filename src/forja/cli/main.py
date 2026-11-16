@@ -159,7 +159,7 @@ async def _install_offered(
     *,
     automatic: bool,
 ) -> Mapping[str, str]:
-    """Install what the person just confirmed (ADR 0037). Without a terminal, only when the
+    """Install what the person just confirmed. Without a terminal, only when the
     ``execucao.toml`` asks; the Forja never installs on its own."""
     if not tools:
         return environ

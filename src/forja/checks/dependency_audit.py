@@ -4,7 +4,7 @@ Only the files OSV-Scanner reads (lockfiles, and the manifests it understands) a
 only when one of them changed. The old version is audited from the parent commit's text in a
 private copy of the worktree, and what was already there never reproves: a vulnerability counts
 per (package, version, advisory), a license per (package, version, license). The forbidden
-licenses are the repository's own list (ADR 0024); without one only vulnerabilities are audited.
+licenses are the repository's own list; without one only vulnerabilities are audited.
 A tool that cannot run, or a package whose license is unknown, is inconclusive, never a pass.
 """
 

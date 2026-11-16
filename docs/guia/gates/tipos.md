@@ -72,7 +72,7 @@ O check nasce em `observation`: mede e reporta, e não reprova até o repositór
 ```
 
 - **`--python-executable`** é o interpretador do repositório, o mesmo que roda os testes. A Forja usa o do `.venv` ou do `venv` do repositório, se existir; senão, o primeiro `python` ou `python3` do `PATH`; senão, o Python que roda a própria Forja. Se a execução precisar instalar dependências novas, ela cria um ambiente virtual próprio, e o `mypy` passa a olhar esse. Assim os pacotes instalados no ambiente resolvem.
-- **A configuração do repositório vale, por uma cópia.** A Forja lê a primeira de `mypy.ini`, `.mypy.ini`, `pyproject.toml` (`[tool.mypy]`) e `setup.cfg` (`[mypy]`) que tiver configuração, grava uma cópia fora da worktree e a passa em `--config-file`. A cópia não leva `plugins`, que é código do repositório que o `mypy` executaria, nem as chaves que gravam relatório (`*_report`, `junit_xml`). Sem configuração, o `mypy` roda com `--config-file=` e os padrões dele. A base e a tentativa leem a mesma configuração. A decisão está no ADR 0041.
+- **A configuração do repositório vale, por uma cópia.** A Forja lê a primeira de `mypy.ini`, `.mypy.ini`, `pyproject.toml` (`[tool.mypy]`) e `setup.cfg` (`[mypy]`) que tiver configuração, grava uma cópia fora da worktree e a passa em `--config-file`. A cópia não leva `plugins`, que é código do repositório que o `mypy` executaria, nem as chaves que gravam relatório (`*_report`, `junit_xml`). Sem configuração, o `mypy` roda com `--config-file=` e os padrões dele. A base e a tentativa leem a mesma configuração.
 - **Sem cache.** A base e a tentativa não se contaminam e nada cai na worktree.
 - O `mypy` é procurado no `PATH`. `forja instalar` o instala quando detecta Python no repositório (veja `..\instalacao.md`).
 

@@ -4,7 +4,7 @@ agent's manifest declares on top of what that interpreter already has.
 The environment is a directory the Forja creates inside the run's own working directory. The
 packages of the repository's interpreter stay visible through a ``.pth`` file, behind the ones
 installed here, so a dependency the agent adds never reaches the repository's environment or the
-Forja's own. Installing a package runs code of the package (ADR 0018: no sandbox); the caller
+Forja's own. Installing a package runs code of the package (there is no sandbox); the caller
 checks that each name exists in the registry first.
 """
 

@@ -1,4 +1,4 @@
-"""The rules Semgrep runs with are the user's, never the Forja's (ADR 0024).
+"""The rules Semgrep runs with are the user's, never the Forja's.
 
 They come from ``--semgrep-config`` or ``execucao.toml``, else from ``.semgrep.yml`` or
 ``.semgrep/`` in the base commit. A registry reference is refused, since the rules would then

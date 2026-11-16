@@ -5,8 +5,8 @@
     scripts/mutate.py src/forja/checks/changes.py
     scripts/mutate.py --max-workers 4   # at most four runs at once (default: one per processor)
 
-It runs the Forja's own mutator (``forja.mutation``, the rules of unclebob/mutator on tree-sitter,
-ADR 0021) on the Forja's own source, the way the mutator runs on any project: the coverage report
+It runs the Forja's own mutator (``forja.mutation``, the rules of unclebob/mutator on
+tree-sitter) on the Forja's own source, the way the mutator runs on any project: the coverage report
 decides which sites are run (a site no test reaches is reported as uncovered, not run), each mutant
 is judged by the test command, and a failing or timed-out run kills it. The choice of tests is the
 script's: only those that exercise the file, found from a coverage run that records which test ran

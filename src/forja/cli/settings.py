@@ -92,7 +92,7 @@ class Execucao(BaseModel):
     linguagem: str = ""  # criar: the language of the new project
     nome: str = ""  # criar: its name (lower-case words joined by hyphens)
     fatos: str = ""  # the facts file the person keeps (see ``orchestrator.facts``); empty: none
-    instalar_ferramentas: bool = False  # without a terminal, install the missing tools (ADR 0037)
+    instalar_ferramentas: bool = False  # without a terminal, install the missing tools
     clis: dict[str, ModeloCli] = Field(default_factory=dict)  # the generic CLIs this run uses
     interface: Interface = Field(default_factory=Interface)
 

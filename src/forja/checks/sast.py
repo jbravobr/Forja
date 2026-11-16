@@ -4,7 +4,7 @@ Semgrep's own baseline mode needs a clean git tree, and the attempt's work is in
 so the old version is scanned instead: the parent commit's text of the changed files, in a private
 copy of the worktree. A finding is counted per file and rule, so moving code, or renaming the file,
 does not make an old finding look new. Without rules the check does not run: the user supplies
-them (ADR 0024), and "not applicable" is never a pass.
+them, and "not applicable" is never a pass.
 """
 
 import json

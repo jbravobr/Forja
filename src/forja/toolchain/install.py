@@ -1,4 +1,4 @@
-"""Installs one tool of the manifest into the Forja's own folder (ADR 0037).
+"""Installs one tool of the manifest into the Forja's own folder.
 
 Nothing leaves the folder: no administrator, no change to the user's PATH. The artifact is
 downloaded, its size and checksum are compared with the manifest, and only then it is unpacked.

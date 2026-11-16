@@ -1,4 +1,4 @@
-"""``forja instalar`` and the offer inside ``forja``: installs the tools the Forja needs (ADR 0037).
+"""``forja instalar`` and the offer inside ``forja``: installs the tools the Forja needs.
 
 The installer only reports what happens, as the events of ``ui.install_events``; the screen for the
 terminal (full, live line or plain text) draws them. A tool already on the PATH, or already
