@@ -1,7 +1,7 @@
 """One entry point per kind of report: pick the reader by format, and fail only with
 ``ReportError``, whatever the file holds."""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from forja.core.reports.coverage_readers import (
@@ -14,6 +14,7 @@ from forja.core.reports.coverage_readers import (
 from forja.core.reports.formats import ReportFormat
 from forja.core.reports.models import CoverageReport
 from forja.core.reports.reading import MAX_REPORT_CHARS, ReportError
+from forja.core.reports.test_lines import LineTests, read_index, read_test_lines_json, tests_by_line
 
 _COVERAGE: dict[ReportFormat, Callable[[str, Path, Sequence[str]], CoverageReport]] = {
     ReportFormat.COVERAGE_PY_JSON: read_coverage_py_json,
@@ -51,3 +52,31 @@ def read_coverage(
     if reader is None:
         raise ReportError(f"{report_format.value} is not a coverage format")
     return _guarded(report_format, reader, text, root, source_roots)
+
+
+def _index(text: str, _root: Path, _source_roots: Sequence[str]) -> dict[str, str]:
+    return read_index(text)
+
+
+def read_test_lines(
+    report_format: ReportFormat,
+    texts: Mapping[str, str],
+    root: Path,
+    source_roots: Sequence[str] = (),
+    index: str | None = None,
+) -> LineTests:
+    """The tests of each line, from the report files in ``texts`` (the text of each, by its file
+    name). Without ``index`` there is one file, in the format of the Forja. With it, the text of
+    the file that names the test of each report, every file is the coverage of that one test, in
+    ``report_format``; a report the index does not name belongs to no test and is not read."""
+    if index is None:
+        if report_format is not ReportFormat.TEST_LINES_JSON or len(texts) != 1:
+            raise ReportError(f"{report_format.value}: the tests of each line come in one file")
+        (text,) = texts.values()
+        return _guarded(report_format, read_test_lines_json, text, root, source_roots)
+    tests = _guarded(ReportFormat.TEST_LINES_JSON, _index, index, root, ())
+    return tests_by_line(
+        (tests[name], read_coverage(report_format, text, root, source_roots))
+        for name, text in sorted(texts.items())
+        if name in tests
+    )

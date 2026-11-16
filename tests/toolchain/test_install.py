@@ -66,7 +66,13 @@ def manifest_for(
     algorithm: str = "sha256",
     version: str = "1.2.3",
 ) -> Manifest:
-    suffixes = {"zip": ".zip", "tar.gz": ".tar.gz", "tar.xz": ".tar.xz", "wheel": ".whl"}
+    suffixes = {
+        "zip": ".zip",
+        "tar.gz": ".tar.gz",
+        "tar.xz": ".tar.xz",
+        "wheel": ".whl",
+        "nupkg": ".nupkg",
+    }
     suffix = suffixes.get(kind, "")
     name = "toolpkg-1.0-py3-none-any" if kind == "wheel" else "tool"
     digest = hashlib.new(algorithm, content).hexdigest()
@@ -122,6 +128,27 @@ def test_a_zip_is_unpacked_under_the_name_and_version(tmp_path: Path) -> None:
     assert (done.directory / "README").read_bytes() == b"read"
     assert (done.tool, done.version, done.already) == ("tool", "1.2.3", False)
     assert origin.calls == [URL + ".zip"]
+
+
+def test_a_nuget_package_is_unpacked_as_the_zip_it_is(tmp_path: Path) -> None:
+    content = zip_bytes({"tools/net8.0/any/tool.dll": b"assembly", "tool.nuspec": b"<package/>"})
+    manifest = manifest_for(content, "nupkg", "tools/net8.0/any/tool.dll")
+
+    done = run(manifest, "tool", tmp_path, target=HERE, fetch=Origin(content))
+
+    assert done.executable == done.directory / "tools" / "net8.0" / "any" / "tool.dll"
+    assert done.executable.read_bytes() == b"assembly"
+    assert (done.directory / "tool.nuspec").is_file()
+
+
+def test_a_nuget_package_that_would_write_outside_its_folder_is_refused(tmp_path: Path) -> None:
+    content = zip_bytes({"../escaped.dll": b"x", "tools/tool.dll": b"x"})
+    manifest = manifest_for(content, "nupkg", "tools/tool.dll")
+
+    with pytest.raises(InstallError, match="cannot unpack it"):
+        run(manifest, "tool", tmp_path, target=HERE, fetch=Origin(content))
+
+    assert not (tmp_path / "escaped.dll").exists()
 
 
 @pytest.mark.parametrize("kind, mode", [("tar.gz", "w:gz"), ("tar.xz", "w:xz")])

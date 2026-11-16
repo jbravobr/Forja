@@ -67,6 +67,33 @@ class CoverageReport:
         file = self.files.get(path)
         return file is not None and line in file.covered
 
+    @property
+    def names_tests(self) -> bool:
+        """Whether the report says, of any line, which tests run it."""
+        return any(file.tests for file in self.files.values())
+
+    def tests_of(self, path: str, lines: Iterable[int]) -> frozenset[str]:
+        """The tests that run any of ``lines`` of ``path``, as far as the report says."""
+        file = self.files.get(path)
+        if file is None:
+            return frozenset()
+        return frozenset().union(*(file.tests.get(line, frozenset()) for line in lines))
+
+    def with_tests(self, found: Mapping[str, Mapping[int, frozenset[str]]]) -> "CoverageReport":
+        """This report, with ``found`` added to the tests of each line. Only of the lines the
+        report has as covered: it is the report that says a test runs a line."""
+        files = dict(self.files)
+        for path, lines in found.items():
+            file = files.get(path)
+            if file is None:
+                continue
+            tests = {
+                line: file.tests.get(line, frozenset()) | lines.get(line, frozenset())
+                for line in (set(file.tests) | set(lines)) & file.covered
+            }
+            files[path] = FileCoverage(file.covered, file.missed, tests)
+        return CoverageReport(files)
+
 
 class MutantStatus(StrEnum):
     KILLED = "killed"  # a test failed: the change was noticed

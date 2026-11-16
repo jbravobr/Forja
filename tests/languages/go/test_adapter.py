@@ -55,7 +55,12 @@ def facts(result: object) -> list[tuple[str, str, object]]:
 def test_the_adapter_keeps_every_promise_of_the_interface(
     adapter: GoAdapter, project: Path, tmp_path: Path
 ) -> None:
-    assert language_problems(adapter, project, tmp_path / "scratch") == []
+    assert (
+        language_problems(
+            adapter, project, tmp_path / "scratch", test_id="example.com/calc/pkg/TestA"
+        )
+        == []
+    )
 
 
 # -- finding and classifying ----------------------------------------------------------------------
@@ -146,15 +151,17 @@ def test_a_mutant_is_first_judged_by_the_package_of_its_file_as_in_the_mutator(
     def tests(file: str) -> tuple[str, ...]:
         return argv(Operation.TEST, project, rerun=True, mutated=file)
 
-    assert tests("pkg/deep/calc.go") == ("g", "test", "-count=1", "-json", "./pkg/deep")
-    assert tests("main.go") == ("g", "test", "-count=1", "-json", ".")
+    assert tests("pkg/deep/calc.go") == (
+        "g", "test", "-count=1", "-json", "-failfast", "./pkg/deep",
+    )  # fmt: skip
+    assert tests("main.go") == ("g", "test", "-count=1", "-json", "-failfast", ".")
     # only the tests: the other commands are the same whatever file a mutant changed
     for operation in (Operation.BUILD, Operation.COVERAGE):
         assert argv(operation, project, mutated="pkg/calc.go") == argv(operation, project)
-    assert isinstance(
-        plan(ADAPTER, Operation.TEST, project, mutated="pkg/calc.go", tests=("TestA",)),
-        NotSupported,
-    )
+    # without a rerun the command is the one of the package, with no stop
+    assert argv(Operation.TEST, project, mutated="pkg/calc.go") == (
+        "g", "test", "-count=1", "-json", "./pkg",
+    )  # fmt: skip
 
 
 def test_coverage_measures_every_package_and_writes_a_go_profile(project: Path) -> None:
@@ -168,12 +175,14 @@ def test_coverage_measures_every_package_and_writes_a_go_profile(project: Path) 
     assert isinstance(ADAPTER.report(Operation.MUTATION), NotSupported)
 
 
-def test_the_tests_are_selected_by_package_so_no_filter_is_offered(project: Path) -> None:
+def test_no_file_filter_is_offered_and_coverage_runs_every_test(project: Path) -> None:
     for operation in (Operation.TEST, Operation.COVERAGE):
         assert isinstance(
             plan(ADAPTER, operation, project, test_files=("a_test.go",)), NotSupported
         )
-        assert isinstance(plan(ADAPTER, operation, project, tests=("TestA",)), NotSupported)
+    assert isinstance(
+        plan(ADAPTER, Operation.COVERAGE, project, tests=("example.com/calc/TestA",)), NotSupported
+    )
 
 
 def test_the_go_tool_chain_may_read_its_own_settings_from_the_environment(project: Path) -> None:

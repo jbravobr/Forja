@@ -135,6 +135,8 @@ from forja.orchestrator.summary import DIFFERENTIAL, differential_note
 BASE_FILE = "base.json"
 BASE_METRICS_FILE = "base-metrics.json"
 DIFFERENTIAL_DIRECTORY = "differential"
+# the test that killed each mutant, for the order of the tests in the next attempt
+MUTATION_HISTORY_FILE = "mutation/killers.json"
 STATIC_METRICS = (
     "lint_violations",
     "max_ccn",
@@ -732,6 +734,7 @@ class PipelineMeasurer:
                 self._env,
                 adapter.language,
                 share=shares[id(adapter)],
+                history=self._workdir / MUTATION_HISTORY_FILE,
             )
             try:
                 lines = {file: frozenset(range(span.first, span.last + 1))}
@@ -886,6 +889,7 @@ class PipelineMeasurer:
                 self._env,
                 a.language,
                 share=shares[id(a)],
+                history=self._workdir / MUTATION_HISTORY_FILE,
             ),
         )
         complexity = self._each(

@@ -28,7 +28,8 @@ def template(name: str) -> ProjectTemplate:
   }},
   "devDependencies": {{
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "vitest": "^5.0.5",
+    "@vitest/coverage-v8": "^5.0.5"
   }}
 }}
 """,

@@ -240,6 +240,34 @@ checksum_source = "https://builds.dotnet.microsoft.com/dotnet/release-metadata/1
 executable_path = "dotnet"
 
 [[tools]]
+name = "dotnet-coverage"
+executable = "dotnet-coverage"
+purpose = "Cobertura por teste em repositórios C#, para a mutação escolher os testes de cada linha."
+license = "MIT"
+version = "18.12.0"
+needed_by = ["csharp"]
+
+# One package for every platform: a .NET tool, run by `dotnet`. The license is the one GitHub
+# gives for the repository the package names (microsoft/codecoverage).
+[tools.artifacts.windows-x64]
+url = "https://api.nuget.org/v3-flatcontainer/dotnet-coverage/18.12.0/dotnet-coverage.18.12.0.nupkg"
+kind = "nupkg"
+size = 21663072
+algorithm = "sha512"
+checksum = "90fc939ad4f177d5a459ae4e1976667a0909dd7a3dcaf475a78a20d94e8db028acb6c1be2d4556eee2939595519ac8c286c81cb874d00ce9ab6b5f5209251397"
+checksum_source = "https://api.nuget.org/v3/catalog0/data/2026.10.06.14.42.41/dotnet-coverage.18.12.0.json"
+executable_path = "tools/net8.0/any/dotnet-coverage.dll"
+
+[tools.artifacts.linux-x64]
+url = "https://api.nuget.org/v3-flatcontainer/dotnet-coverage/18.12.0/dotnet-coverage.18.12.0.nupkg"
+kind = "nupkg"
+size = 21663072
+algorithm = "sha512"
+checksum = "90fc939ad4f177d5a459ae4e1976667a0909dd7a3dcaf475a78a20d94e8db028acb6c1be2d4556eee2939595519ac8c286c81cb874d00ce9ab6b5f5209251397"
+checksum_source = "https://api.nuget.org/v3/catalog0/data/2026.10.06.14.42.41/dotnet-coverage.18.12.0.json"
+executable_path = "tools/net8.0/any/dotnet-coverage.dll"
+
+[[tools]]
 name = "jdk"
 executable = "java"
 purpose = "JDK Temurin 21 (LTS), para repositórios Java."

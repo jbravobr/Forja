@@ -141,9 +141,10 @@ def test_format_apply_to_none_or_several_files_goes_through_the_project(
     assert argv == ("g", "--console", "plain", "spotlessApply")
 
 
-@pytest.mark.parametrize("operation", [Operation.TEST, Operation.COVERAGE])
-def test_filtering_tests_is_not_offered(tmp_path: Path, operation: Operation) -> None:
-    result = ADAPTER.plan(operation, OperationRequest(root=project(tmp_path), tests=("a.B.c",)))
+def test_filtering_coverage_is_not_offered(tmp_path: Path) -> None:
+    result = ADAPTER.plan(
+        Operation.COVERAGE, OperationRequest(root=project(tmp_path), tests=("a.B.c",))
+    )
     assert isinstance(result, NotSupported)
 
 

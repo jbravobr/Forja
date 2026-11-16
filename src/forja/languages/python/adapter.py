@@ -27,7 +27,7 @@ from forja.core.adapters import (
     Unparseable,
     VersionProbe,
 )
-from forja.core.adapters.common import PROPERTY_SEED
+from forja.core.adapters.common import PROPERTY_SEED, fits_command_line
 from forja.core.reports import ReportFormat, ReportSpec
 from forja.languages.python import mypy_config, parsers
 from forja.languages.python.manifest import (
@@ -79,6 +79,7 @@ class PythonAdapter:
     capabilities = frozenset(
         {
             LanguageCapability.TEST_FILTER_BY_FILE,
+            LanguageCapability.TEST_FILTER_BY_TEST,
             LanguageCapability.COVERAGE,
             LanguageCapability.STRUCTURAL_METERS,
         }
@@ -246,15 +247,19 @@ class PythonAdapter:
                     "--",
                     *targets,
                 )
-            case Operation.TEST if request.tests:
-                return NotSupported("test", "filtering by test name is not offered")
             case Operation.TEST:
+                # the ids of pytest name the file too, and run in the order given
+                chosen = (*request.test_files, *request.tests)
                 argv = (
                     *self._python,
                     *("-m", "pytest", "-p", "no:cacheprovider", "-q", "-rA", "--color=no"),
+                    # whoever runs the same copy again only asks whether a test fails
+                    *(("-x",) if request.rerun else ()),
                     *_seed(request.root),
-                    *(("--", *request.test_files) if request.test_files else ()),
+                    *(("--", *chosen) if chosen else ()),
                 )
+                if not fits_command_line(argv):
+                    return NotSupported("test", "more tests than fit in one command")
             case Operation.COVERAGE if request.tests:
                 return NotSupported("coverage", "filtering by test name is not offered")
             case Operation.COVERAGE:

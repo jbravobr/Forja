@@ -12,7 +12,7 @@ from forja.core.reports import (
     MutantStatus,
     ReportFormat,
 )
-from forja.core.reports.readers import read_coverage
+from forja.core.reports.readers import read_coverage, read_test_lines
 from forja.core.reports.reading import ReportError, resolve_path
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "reports"
@@ -193,3 +193,149 @@ def test_a_report_larger_than_the_cap_is_refused(
     monkeypatch.setattr("forja.core.reports.readers.MAX_REPORT_CHARS", 10)
     with pytest.raises(ReportError, match="larger than"):
         read_coverage(F.GO_COVERPROFILE, "mode: set\na.go:1.1,2.2 1 1\n", tmp_path)
+
+
+def test_the_test_of_a_context_keeps_a_bar_of_its_own_and_loses_only_the_phase(
+    tmp_path: Path,
+) -> None:
+    root = project(tmp_path, "a.py")
+    contexts = [
+        "tests/test_a.py::test_x[a|b]",
+        "tests/test_a.py::test_y|run",
+        "tests/test_a.py::test_z[run|setup]|teardown",
+        "",
+    ]
+    text = (
+        '{"files": {"a.py": {"executed_lines": [1, 2], "missing_lines": [],'
+        f' "contexts": {{"1": {contexts!r}, "2": [""]}}}}}}}}'
+    ).replace("'", '"')
+
+    report = read_coverage(F.COVERAGE_PY_JSON, text, root)
+
+    a = report.of("a.py")
+    assert a is not None
+    assert a.tests == {
+        1: frozenset(
+            {
+                "tests/test_a.py::test_x[a|b]",
+                "tests/test_a.py::test_y",
+                "tests/test_a.py::test_z[run|setup]",
+            }
+        )
+    }  # line 2 was run by no test
+
+
+# -- the tests of each line ----------------------------------------------------------------------
+
+
+def test_the_file_of_the_forja_gives_the_tests_of_each_line(tmp_path: Path) -> None:
+    root = project(tmp_path, "src/a.go", "src/b.go")
+    text = (
+        '{"src/a.go": {"3": ["p/TestA", "p/TestB/sub"], "4": ["p/TestA"]},'
+        f' "{(root / "src" / "b.go").as_posix()}": {{"9": ["q/TestC"]}}}}'
+    )
+
+    found = read_test_lines(F.TEST_LINES_JSON, {"lines.json": text}, root)
+
+    assert found == {
+        "src/a.go": {3: frozenset({"p/TestA", "p/TestB/sub"}), 4: frozenset({"p/TestA"})},
+        "src/b.go": {9: frozenset({"q/TestC"})},  # an absolute path becomes relative
+    }
+
+
+def test_a_file_named_twice_in_the_file_of_the_forja_adds_up(tmp_path: Path) -> None:
+    root = project(tmp_path, "src/main/java/p/A.java")
+    text = '{"p/A.java": {"3": ["t1"]}, "src/main/java/p/A.java": {"3": ["t2"], "5": ["t2"]}}'
+
+    found = read_test_lines(F.TEST_LINES_JSON, {"x.json": text}, root, ("src/main/java",))
+
+    assert found == {"src/main/java/p/A.java": {3: frozenset({"t1", "t2"}), 5: frozenset({"t2"})}}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "[]",
+        '{"a.go": []}',
+        '{"a.go": {"x": ["t"]}}',
+        '{"a.go": {"0": ["t"]}}',
+        '{"a.go": {"99999999999": ["t"]}}',
+        '{"a.go": {"1": "t"}}',
+        '{"a.go": {"1": [3]}}',
+        '{"a.go": {"1": [""]}}',
+        '{"../a.go": {"1": ["t"]}}',
+        "not json",
+    ],
+)
+def test_a_file_of_the_forja_of_the_wrong_shape_is_a_report_error(
+    tmp_path: Path, text: str
+) -> None:
+    with pytest.raises(ReportError):
+        read_test_lines(F.TEST_LINES_JSON, {"x.json": text}, tmp_path)
+
+
+def test_without_an_index_the_tests_of_each_line_come_in_one_file_of_the_forja(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ReportError, match="one file"):
+        read_test_lines(F.TEST_LINES_JSON, {"a.json": "{}", "b.json": "{}"}, tmp_path)
+    with pytest.raises(ReportError, match="one file"):
+        read_test_lines(F.TEST_LINES_JSON, {}, tmp_path)
+    with pytest.raises(ReportError, match="go_coverprofile"):
+        read_test_lines(F.GO_COVERPROFILE, {"a.out": "mode: set\n"}, tmp_path)
+    assert read_test_lines(F.TEST_LINES_JSON, {"a.json": "{}"}, tmp_path) == {}
+
+
+def test_a_coverage_report_for_each_test_gives_the_tests_of_each_line(tmp_path: Path) -> None:
+    root = project(tmp_path, "calc.go", "other.go")
+    texts = {
+        "0.out": "mode: set\nm/calc.go:3.1,4.2 1 1\nm/calc.go:7.1,7.9 1 0\n",
+        "1.out": "mode: set\nm/calc.go:4.1,4.9 1 1\nm/other.go:2.1,2.9 1 1\n",
+        "2.out": "mode: set\nm/calc.go:9.1,9.9 1 1\n",  # of no test: the index does not name it
+    }
+    index = '{"0.out": "m/TestA", "1.out": "m/TestB/sub one"}'
+
+    found = read_test_lines(F.GO_COVERPROFILE, texts, root, index=index)
+
+    assert found == {
+        "calc.go": {3: frozenset({"m/TestA"}), 4: frozenset({"m/TestA", "m/TestB/sub one"})},
+        "other.go": {2: frozenset({"m/TestB/sub one"})},
+    }  # line 7 was not run by the test, and line 9 has no test
+
+
+def test_two_reports_of_the_same_test_add_up(tmp_path: Path) -> None:
+    root = project(tmp_path, "calc.go")
+    texts = {
+        "a.out": "mode: set\nm/calc.go:3.1,3.2 1 1\n",
+        "b.out": "mode: set\nm/calc.go:5.1,5.2 1 1\n",
+    }
+
+    found = read_test_lines(F.GO_COVERPROFILE, texts, root, index='{"a.out": "T", "b.out": "T"}')
+
+    assert found == {"calc.go": {3: frozenset({"T"}), 5: frozenset({"T"})}}
+
+
+@pytest.mark.parametrize("index", ["[]", '{"0.out": 3}', '{"0.out": ""}', "not json"])
+def test_an_index_of_the_wrong_shape_is_a_report_error(tmp_path: Path, index: str) -> None:
+    with pytest.raises(ReportError):
+        read_test_lines(F.GO_COVERPROFILE, {"0.out": "mode: set\n"}, tmp_path, index=index)
+
+
+def test_a_report_of_a_test_that_cannot_be_read_is_a_report_error(tmp_path: Path) -> None:
+    with pytest.raises(ReportError, match="mode"):
+        read_test_lines(F.GO_COVERPROFILE, {"0.out": "garbage"}, tmp_path, index='{"0.out": "T"}')
+    with pytest.raises(ReportError, match="not a coverage format"):
+        read_test_lines(F.TEST_LINES_JSON, {"0.out": "{}"}, tmp_path, index='{"0.out": "T"}')
+
+
+def test_an_index_larger_than_the_cap_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("forja.core.reports.readers.MAX_REPORT_CHARS", 10)
+
+    with pytest.raises(ReportError, match="larger than"):
+        read_test_lines(
+            F.GO_COVERPROFILE, {"0.out": "mode: set\n"}, tmp_path, index='{"0.out": "TestA"}'
+        )
+    with pytest.raises(ReportError, match="larger than"):
+        read_test_lines(F.TEST_LINES_JSON, {"x.json": '{"a.go": {"1": ["t"]}}'}, tmp_path)

@@ -476,8 +476,9 @@ def test_the_operations_the_policy_accepts_are_the_ones_the_adapters_have() -> N
     from forja.core.adapters import Operation
     from forja.core.policy.config import ADAPTER_OPERATIONS
 
+    own = {Operation.MUTATION, Operation.TEST_LINES}
     assert {
-        operation.value for operation in Operation if operation is not Operation.MUTATION
+        operation.value for operation in Operation if operation not in own
     } == ADAPTER_OPERATIONS
 
 

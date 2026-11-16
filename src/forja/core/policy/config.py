@@ -43,7 +43,8 @@ _CHECK_KEYS = {"mode", "on_inconclusive", "promotion", "thresholds", "commands",
 NEVER_BLOCKING = frozenset({"voice", "comments"})
 # Kept in step with adapters.language.Operation (a test compares them); importing it here would
 # make the two packages import each other. ``mutation`` is left out: no adapter plans it and the
-# mutation gate runs its own executor, so a command for it would never be read.
+# mutation gate runs its own executor, so a command for it would never be read. So is
+# ``test_lines``: its command only works with the piece the Forja puts in the run of the tests.
 ADAPTER_OPERATIONS = frozenset(
     {"format", "lint", "lint_fix", "types", "build", "test", "coverage", "e2e"}
 )

@@ -28,6 +28,8 @@ class Operation(StrEnum):
     BUILD = "build"
     TEST = "test"
     COVERAGE = "coverage"
+    # which tests run each line: for a tool whose coverage report does not say it, a run of its own
+    TEST_LINES = "test_lines"
     MUTATION = "mutation"
     E2E = "e2e"
 
@@ -40,6 +42,7 @@ class LanguageCapability(StrEnum):
     TEST_FILTER_BY_FILE = "test_filter_by_file"
     TEST_FILTER_BY_TEST = "test_filter_by_test"
     COVERAGE = "coverage"
+    TEST_LINES = "test_lines"
     MUTATION = "mutation"
     MUTATION_INCREMENTAL = "mutation_incremental"
     E2E = "e2e"
@@ -51,6 +54,7 @@ class LanguageCapability(StrEnum):
 # A capability that implies an operation can be planned.
 CAPABILITY_OPERATION: Mapping[LanguageCapability, Operation] = {
     LanguageCapability.COVERAGE: Operation.COVERAGE,
+    LanguageCapability.TEST_LINES: Operation.TEST_LINES,
     LanguageCapability.MUTATION: Operation.MUTATION,
     LanguageCapability.E2E: Operation.E2E,
 }
@@ -97,12 +101,17 @@ class OperationRequest:
     root: Path
     files: tuple[str, ...] = ()  # limit format and lint to these repository-relative files
     test_files: tuple[str, ...] = ()
+    # the tests to run and no other, by the ids the adapter's own reports give them (the tests of
+    # a line, the test that failed). They run one at a time and in this order, as far as the tool
+    # can order them
     tests: tuple[str, ...] = ()
     changed_files: tuple[str, ...] = ()
     incremental: bool = False
     check_only: bool = False  # format: verify without rewriting
-    # tests: the same copy is tested again and again, and nobody reads a report of the run. A
-    # hint, not a filter: an adapter with nothing to save by it plans the same command
+    # tests: the same copy is tested again and again, and nobody reads a report of the run: all
+    # that is asked is whether a test fails, so an adapter whose tool can stop at the first test
+    # that fails plans that. A hint, not a filter: an adapter with nothing to save by it plans
+    # the same command
     rerun: bool = False
     # tests: the one file a mutant changed in this copy. A hint, not a filter: an adapter whose
     # tool has a smaller run for that file plans it (in Go the package of the file, as in the

@@ -49,8 +49,11 @@ def test_typescript_wants_node(tmp_path: Path, environ: dict[str, str]) -> None:
     assert names(environ, found(tmp_path, typescript=True)) == [*ALWAYS, "node"]
 
 
-def test_csharp_wants_the_dotnet_sdk(tmp_path: Path, environ: dict[str, str]) -> None:
-    assert names(environ, found(tmp_path, csharp=True)) == [*ALWAYS, "dotnet-sdk"]
+def test_csharp_wants_the_dotnet_sdk_and_dotnet_coverage(
+    tmp_path: Path, environ: dict[str, str]
+) -> None:
+    wanted = [*ALWAYS, "dotnet-sdk", "dotnet-coverage"]
+    assert names(environ, found(tmp_path, csharp=True)) == wanted
 
 
 def test_java_with_maven_wants_the_jdk_and_maven_only(

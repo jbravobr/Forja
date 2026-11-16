@@ -24,7 +24,7 @@ from forja.core.adapters import (
 )
 from forja.core.reports import ReportFormat, ReportSpec
 from forja.core.reports.readers import read_coverage
-from forja.languages.java import JavaAdapter, parsers
+from forja.languages.java import JavaAdapter, parsers, probe
 from forja.languages.java.adapter import COVERAGE_REPORT, JACOCO, SOURCE_ROOTS
 from forja.languages.java.parsers import MAX_LINE
 from tests.core.adapters.conformance import language_problems
@@ -72,7 +72,10 @@ def localize(text: str, root: Path) -> str:
 def test_the_adapter_keeps_every_promise_of_the_interface(
     adapter: JavaAdapter, project: Path, tmp_path: Path
 ) -> None:
-    assert language_problems(adapter, project, tmp_path / "scratch") == []
+    problems = language_problems(
+        adapter, project, tmp_path / "scratch", test_id="com.acme.CalcTest.adds"
+    )
+    assert problems == []
 
 
 # -- finding and classifying ----------------------------------------------------------------------
@@ -159,8 +162,9 @@ def test_build_and_tests_start_from_a_clean_target(project: Path) -> None:
 
 
 def test_tests_run_again_in_the_same_copy_do_not_start_over_and_nothing_else_changes(
-    project: Path,
+    project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(probe, "classpath", lambda repository: None)  # no probe: the plain run
     assert argv(Operation.TEST, project, rerun=True) == ("m", "-B", "-ntp", "test")
     assert argv(Operation.BUILD, project, rerun=True) == argv(Operation.BUILD, project)
     assert argv(Operation.COVERAGE, project, rerun=True) == argv(Operation.COVERAGE, project)
@@ -177,9 +181,9 @@ def test_coverage_names_the_jacoco_goals_in_full_so_the_pom_needs_nothing(projec
     assert isinstance(ADAPTER.report(Operation.MUTATION), NotSupported)
 
 
-def test_no_filter_of_the_tests_is_offered(project: Path) -> None:
+def test_no_filter_of_the_tests_by_file_or_for_coverage_is_offered(project: Path) -> None:
+    assert isinstance(plan(Operation.COVERAGE, project, tests=("a.B.c",)), NotSupported)
     for operation in (Operation.TEST, Operation.COVERAGE):
-        assert isinstance(plan(operation, project, tests=("adds",)), NotSupported)
         assert isinstance(plan(operation, project, test_files=("A.java",)), NotSupported)
 
 

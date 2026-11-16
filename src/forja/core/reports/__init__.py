@@ -2,6 +2,8 @@
 
 from forja.core.reports.formats import (
     COVERAGE_FORMATS,
+    TEST_LINES_DIRECTORY,
+    TEST_LINES_FORMATS,
     ReportFormat,
     ReportingAdapter,
     ReportSpec,
@@ -25,5 +27,7 @@ __all__ = [
     "ReportFormat",
     "ReportSpec",
     "ReportingAdapter",
+    "TEST_LINES_DIRECTORY",
+    "TEST_LINES_FORMATS",
     "formats_of",
 ]

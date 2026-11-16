@@ -9,9 +9,21 @@ command and the coverage report of its language. Where the adapter has a smaller
 file of a mutant (in Go the package of the file, as in the mutator), that one judges the mutant
 first; the whole command judges whoever survives it, because the coverage that says a test runs
 the line is measured over every package.
+
+Unlike the mutator, which runs the whole command for every mutant, a mutant is judged first by
+the tests that run its lines, where the adapter can say which they are and can run only those:
+one at a time, the one that killed the same mutant the last time ahead of the others, stopping
+at the first that fails. Those tests have to pass by themselves on the unchanged copy before
+they judge anybody; if they do not, the whole command judges the mutant. Killed by them, the
+mutant is killed. One that survives them is judged by the whole command before it counts, so no
+verdict depends on the choice. Which test killed each mutant is kept from one attempt to the
+next, and serves that order and nothing else: every mutant is run every time.
 """
 
+import asyncio
+import contextlib
 import itertools
+import json
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -20,7 +32,7 @@ from typing import ClassVar
 
 from forja.checks.base import Undecided, decided, rejected
 from forja.checks.changes import Changes, added_lines
-from forja.checks.coverage import CoverageShare, run_coverage
+from forja.checks.coverage import CoverageShare, run_coverage, run_line_tests
 from forja.checks.structure import dialect_of
 from forja.checks.tooling import Tools
 from forja.core.adapters import (
@@ -28,8 +40,12 @@ from forja.core.adapters import (
     NotSupported,
     Operation,
     OperationRequest,
+    Parsed,
+    ToolOutput,
     build_spec,
 )
+from forja.core.adapters.scoped import ScopedAdapter
+from forja.core.atomic import atomic_write_bytes
 from forja.core.gates import (
     Approved,
     Finding,
@@ -49,6 +65,7 @@ from forja.mutation.executor import (
     TestVerdict,
     run_mutants,
 )
+from forja.mutation.model import Site
 from forja.mutation.sites import discover, function_spans
 
 DEFAULT_MIN_SCORE = 0.80
@@ -139,9 +156,58 @@ def build_mutants(
             mutated = apply_site(source, site).encode("utf-8")
             covered = any(coverage.is_covered(path, line) for line in site.lines)
             mutants.append(
-                Mutant(path, site.line, site.description, site.function, mutated, covered)
+                Mutant(
+                    path,
+                    site.line,
+                    site.description,
+                    site.function,
+                    mutated,
+                    covered,
+                    id=mutant_id(path, site),
+                    lines=site.lines,
+                )
             )
     return mutants
+
+
+def mutant_id(path: str, site: Site) -> str:
+    """What names a mutant from one attempt to the next: the file, the function, where the token
+    is and the change (the id the mutator gives it)."""
+    return json.dumps(
+        [path, site.function, site.start, site.end, site.original, site.mutant],
+        separators=(",", ":"),
+    )
+
+
+HISTORY_VERSION = 1
+
+
+def load_killers(path: Path | None) -> dict[str, str]:
+    """The test that killed each mutant the last time, by the id of the mutant. A file that is
+    not there, or cannot be read, is no history: it only orders the tests."""
+    if path is None:
+        return {}
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return {}
+    killers = document.get("killers") if isinstance(document, dict) else None
+    if not isinstance(killers, dict) or document.get("version") != HISTORY_VERSION:
+        return {}
+    return {
+        mutant: test
+        for mutant, test in killers.items()
+        if isinstance(mutant, str) and isinstance(test, str) and test
+    }
+
+
+def save_killers(path: Path | None, killers: Mapping[str, str]) -> None:
+    if path is None:
+        return
+    document = {"version": HISTORY_VERSION, "killers": dict(sorted(killers.items()))}
+    # unwritten, the next attempt runs the tests in the order of their ids, and nothing else changes
+    with contextlib.suppress(OSError):
+        atomic_write_bytes(path, json.dumps(document, indent=1).encode("utf-8"))
 
 
 def untested_lines(
@@ -175,10 +241,47 @@ class _Quiet:
         pass
 
 
-@dataclass(frozen=True, eq=False)  # the executor keeps a baseline for each runner, by identity
+FAILED = ("failed", "error")
+
+
+@dataclass
+class Killer:
+    """The test that failed in the last run of a runner made for one mutant, when it is known."""
+
+    test: str | None = None
+
+
+def failed_test(adapter: LanguageAdapter, output: ToolOutput, asked: tuple[str, ...]) -> str | None:
+    """The first of the tests ``asked`` for that the output of their run shows as failed, or
+    ``None`` when it shows none of them (the code did not build, the output cannot be read).
+
+    The ids the tests were asked by are those of the project, so the output is read by the
+    adapter of the project itself. Where the tool reports a test by an id it cannot be asked
+    by (a case of a parametrized test, in a tool that only runs the whole method), the adapter
+    says with ``selector`` which id asks for it."""
+    inner = adapter.inner if isinstance(adapter, ScopedAdapter) else adapter
+    parsed = inner.parse(Operation.TEST, output)
+    if not isinstance(parsed, Parsed):
+        return None
+    selector = getattr(inner, "selector", None)
+    failed = {
+        str(selector(draft.target.id)) if callable(selector) else draft.target.id
+        for draft in parsed.drafts
+        if draft.measurement == "test.outcome" and draft.value in FAILED
+    }
+    return next((test for test in asked if test in failed), None)
+
+
+@dataclass(frozen=True, eq=False)
 class AdapterRunner:
-    """Runs the adapter's test command in a copy of the repository: the whole one, or with
-    ``mutated`` the one the adapter has for a mutant of that file."""
+    """Runs the adapter's test command in a copy of the repository: the whole one, with
+    ``mutated`` the one the adapter has for a mutant of that file, or with ``tests`` those tests
+    and no other. A runner with ``tests`` is made for one mutant, and leaves in ``killer`` the
+    test that failed.
+
+    The executor keeps one baseline for the runners that are equal. Two are equal when they ask
+    the same adapter for the same thing, so the mutants of a file that the same tests judge, in
+    the same order, share the baseline though each has its runner."""
 
     __test__: ClassVar[bool] = False  # not a test class, whatever its name says to pytest
 
@@ -187,6 +290,17 @@ class AdapterRunner:
     logs: Path
     ids: "itertools.count[int]" = field(default_factory=itertools.count)
     mutated: str | None = None
+    tests: tuple[str, ...] = ()
+    killer: Killer = field(default_factory=Killer)
+
+    def _asked(self) -> tuple[int, str | None, tuple[str, ...]]:
+        return (id(self.adapter), self.mutated, self.tests)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, AdapterRunner) and self._asked() == other._asked()
+
+    def __hash__(self) -> int:
+        return hash(self._asked())
 
     def command(self, root: Path) -> tuple[str, ...] | None:
         """What would run in ``root``; ``None`` when the adapter cannot plan it."""
@@ -194,7 +308,7 @@ class AdapterRunner:
         return None if isinstance(plan, NotSupported) else plan.argv
 
     def _request(self, root: Path) -> OperationRequest:
-        return OperationRequest(root=root, rerun=True, mutated=self.mutated)
+        return OperationRequest(root=root, rerun=True, mutated=self.mutated, tests=self.tests)
 
     async def __call__(self, root: Path, timeout: float | None) -> TestVerdict:
         plan = self.adapter.plan(Operation.TEST, self._request(root))
@@ -212,29 +326,94 @@ class AdapterRunner:
         self.logs.mkdir(parents=True, exist_ok=True)
         try:
             result = await ProcessRunner(_Quiet()).run(f"mutant:{number}", spec, log)
+            failed = result.outcome is Outcome.EXITED and result.exit_code != 0
+            if self.tests:
+                output = ToolOutput(result.exit_code, log, plan.cwd)
+                found = failed_test(self.adapter, output, self.tests) if failed else None
+                self.killer.test = found
         finally:
             log.unlink(missing_ok=True)
         if result.outcome is Outcome.TIMED_OUT:
             return TestVerdict.TIMED_OUT
         if result.outcome is not Outcome.EXITED:
             raise TestsDidNotRun(result.outcome.value)
-        return TestVerdict.PASSED if result.exit_code == 0 else TestVerdict.FAILED
+        return TestVerdict.FAILED if failed else TestVerdict.PASSED
 
 
-def judged_first(runner: AdapterRunner, worktree: Path, mutants: list[Mutant]) -> list[Mutant]:
-    """``mutants``, each with the runner of the smaller command the adapter has for its file,
-    where it has one: mutants whose files get the same command share the runner, and with it
-    the baseline. A mutant whose file gets the whole command is left as it is."""
+def in_order(tests: frozenset[str], killer: str | None) -> tuple[str, ...]:
+    """``tests`` in the order they are asked to run: the one that killed the mutant the last
+    time ahead, the others by their ids, so the same request gives the same command."""
+    ahead = (killer,) if killer is not None and killer in tests else ()
+    return (*ahead, *sorted(tests - set(ahead)))
+
+
+def _by_its_tests(
+    runner: AdapterRunner,
+    worktree: Path,
+    mutant: Mutant,
+    coverage: CoverageReport,
+    killers: Mapping[str, str],
+    whole: tuple[str, ...] | None,
+) -> Mutant | None:
+    """``mutant`` judged first by the tests that run its lines; ``None`` where the report names
+    no test for them, or the adapter cannot run only those (it has no such filter, or they are
+    too many for one command)."""
+    tests = coverage.tests_of(mutant.file, mutant.lines) if mutant.covered else frozenset()
+    # the ids come from a report of the project and go into a command line and its environment:
+    # one with a control character in it (a line break, a NUL) is not handed to any tool
+    if not tests or any(ord(character) < 32 for test in tests for character in test):
+        return None
+    asked = in_order(tests, killers.get(mutant.id))
+    aimed = replace(runner, mutated=mutant.file, tests=asked, killer=Killer())
+    command = aimed.command(worktree)
+    if command is None or command == whole:
+        return None
+    return replace(mutant, first=aimed)
+
+
+def judged_first(
+    runner: AdapterRunner,
+    worktree: Path,
+    mutants: list[Mutant],
+    coverage: CoverageReport | None = None,
+    killers: Mapping[str, str] | None = None,
+) -> list[Mutant]:
+    """``mutants``, each with the runner that judges it first, where there is one.
+
+    With a ``coverage`` that names the tests of the lines of a mutant, and an adapter that can
+    run only those, they judge it first, in the order of ``in_order``, each mutant with a runner
+    of its own (equal runners share the baseline). Any other mutant gets the runner of the
+    smaller command the adapter has for its file, where it has one: mutants whose files get the
+    same command share the runner, and with it the baseline. A mutant whose file gets the whole
+    command is left as it is."""
     whole = runner.command(worktree)
     smaller: dict[tuple[str, ...], AdapterRunner] = {}
     found = []
     for mutant in mutants:
+        by_tests = (
+            None
+            if coverage is None
+            else _by_its_tests(runner, worktree, mutant, coverage, killers or {}, whole)
+        )
+        if by_tests is not None:
+            found.append(by_tests)
+            continue
         aimed = replace(runner, mutated=mutant.file)
         command = aimed.command(worktree)
         if command is None or command == whole:
             found.append(mutant)
         else:
             found.append(replace(mutant, first=smaller.setdefault(command, aimed)))
+    return found
+
+
+def killers_of(mutants: list[Mutant]) -> dict[str, str]:
+    """After the run, the test that killed each mutant judged first by the tests of its lines."""
+    found = {}
+    for mutant in mutants:
+        first = mutant.first
+        if isinstance(first, AdapterRunner) and first.tests and first.killer.test is not None:
+            found[mutant.id] = first.killer.test
     return found
 
 
@@ -255,6 +434,9 @@ class MutationCheck:
     gate: int = 7
     requires: frozenset[str] = frozenset({"coverage"})
     share: CoverageShare | None = None
+    # where the test that killed each mutant is kept from one attempt to the next; ``None`` keeps
+    # none
+    history: Path | None = None
 
     async def evaluate(self, data: GateInput) -> GateResult:
         return await decided(self._judge(data))
@@ -263,7 +445,8 @@ class MutationCheck:
         lines = changed_lines(self.changes, of_language(self.language, self.files))
         if not lines:
             return Approved()
-        coverage = await run_coverage(self.tools, self.adapter, self.worktree, data, self.share)
+        share = self._share()
+        coverage = await run_coverage(self.tools, self.adapter, self.worktree, data, share)
         mutants = build_mutants(self.worktree, lines, coverage)
         # a line the attempt did not write is not its to cover: its mutant is only not run
         written = [m for m in mutants if m.line in lines.get(m.file, frozenset())]
@@ -272,30 +455,50 @@ class MutationCheck:
             return self._unprotected(untested)
         if not mutants:
             return Approved()
-        report = await self._run(data, mutants)
+        report = await self._run(data, mutants, share)
         return self._verdict(report, min_score(data, self.language))
+
+    def _share(self) -> CoverageShare:
+        """Where the coverage of this judgment is kept: the one shared with the other checks, or
+        one of its own, so the tests are not measured again to learn the tests of each line."""
+        return self.share if self.share is not None else CoverageShare()
+
+    async def _named(
+        self, data: GateInput, mutants: list[Mutant], share: CoverageShare
+    ) -> CoverageReport | None:
+        """The coverage that names the tests of each line, measured only when a mutant will run;
+        ``None`` when none will."""
+        if not any(mutant.covered for mutant in mutants):
+            return None
+        return await run_line_tests(self.tools, self.adapter, self.worktree, data, share)
 
     async def protects(self, data: GateInput, lines: Mapping[str, frozenset[int]]) -> bool:
         """Whether the tests protect ``lines`` as the gate asks of the lines an attempt adds: a
         test runs every one of them and the score of their mutants reaches the limit. The planner
         asks it of code nobody changed yet. Raises ``Undecided`` where the gate is inconclusive."""
-        coverage = await run_coverage(self.tools, self.adapter, self.worktree, data, self.share)
+        share = self._share()
+        coverage = await run_coverage(self.tools, self.adapter, self.worktree, data, share)
         mutants = build_mutants(self.worktree, lines, coverage, whole_functions=False)
         if untested_lines(lines, mutants, coverage):
             return False
         if not mutants:
             return True
-        score = (await self._run(data, mutants)).score
+        score = (await self._run(data, mutants, share)).score
         return score is None or score >= min_score(data, self.language)
 
-    async def _run(self, data: GateInput, mutants: list[Mutant]) -> MutationReport:
+    async def _run(
+        self, data: GateInput, mutants: list[Mutant], share: CoverageShare
+    ) -> MutationReport:
+        named = await self._named(data, mutants, share)
+        killers = load_killers(self.history)
         with tempfile.TemporaryDirectory(prefix="forja-mutants-", ignore_cleanup_errors=True) as d:
             runner = AdapterRunner(self.adapter, self.host_env, Path(d) / "logs")
+            judged = judged_first(runner, self.worktree, mutants, named, killers)
             try:
                 report, _ = await run_mutants(
                     self.worktree,
                     Path(d) / "copies",
-                    judged_first(runner, self.worktree, mutants),
+                    judged,
                     runner,
                     workers=worker_count(data),
                     baseline_timeout=BASELINE_TIMEOUT,
@@ -304,6 +507,9 @@ class MutationCheck:
                 raise _failed("mutation: the tests do not pass on the unchanged copy") from None
             except TestsDidNotRun as error:
                 raise _failed(f"mutation: the tests could not run ({error})") from None
+            found = killers_of(judged)
+            if found:
+                await asyncio.to_thread(save_killers, self.history, {**killers, **found})
             return report
 
     def _unprotected(self, untested: Mapping[str, list[int]]) -> GateResult:

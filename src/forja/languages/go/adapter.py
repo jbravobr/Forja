@@ -7,6 +7,7 @@ and nothing pretends otherwise: the adapter says the lint cannot be measured (``
 which the lint check answers as inconclusive, and ``forja doctor`` says the tool is missing.
 """
 
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -27,12 +28,13 @@ from forja.core.adapters import (
     Unparseable,
     VersionProbe,
 )
-from forja.core.adapters.common import PROPERTY_SEED
+from forja.core.adapters.common import PROPERTY_SEED, fits_command_line
 from forja.core.adapters.executor import locate_in_path
 from forja.core.adapters.ownership import says
-from forja.core.reports import ReportFormat, ReportSpec
+from forja.core.reports import TEST_LINES_DIRECTORY, ReportFormat, ReportSpec
 from forja.languages.go import parsers
 from forja.languages.go.manifest import declared_dependencies
+from forja.languages.go.selection import module_of, selection
 from forja.languages.go.template import template
 
 MANIFEST = "go.mod"
@@ -48,6 +50,9 @@ CONFIG_FILES = (
 # ``go test`` cannot create the directory of its profile, so it lands at the root and is removed
 # once read.
 COVERAGE_REPORT = ".forja-cover.out"
+# the test run of each line: one profile per test, and the index that names the test of each
+LINE_DRIVER = Path(__file__).with_name("line_driver.py")
+LINE_INDEX = f"{TEST_LINES_DIRECTORY}/index.json"
 # rapid reads these when the test binary starts. Its flags exist only in a package that imports
 # rapid, so a flag on ``go test ./...`` would fail every other package; the variables are harmless
 # there.
@@ -79,6 +84,20 @@ def _packages(files: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(sorted("." if d == "." else f"./{d}" for d in directories))
 
 
+def _selected(root: Path, tests: tuple[str, ...]) -> tuple[tuple[str, ...], str] | None:
+    """The package arguments and the ``-run`` pattern of ``tests``; ``None`` when the module of
+    the project cannot be read or a test id is not one of its packages."""
+    try:
+        module = module_of((root / MANIFEST).read_text(encoding="utf-8"))
+    except OSError:
+        return None
+    return None if module is None else selection(tests, module)
+
+
+def _stop_at_first_failure(rerun: bool) -> tuple[str, ...]:
+    return ("-failfast",) if rerun else ()
+
+
 def find_golangci_lint(environ: Mapping[str, str] | None = None) -> tuple[str, ...] | None:
     """The golangci-lint on the PATH, or ``None`` when there is none."""
     path = (environ or {}).get("PATH")
@@ -93,7 +112,14 @@ class GoAdapter:
     grammar = "go"
     # what switches the linter off in a line, and what skips a test
     suppressions = (r"//\s*nolint", r"\.Skip(?:f|Now)?\(")
-    capabilities = frozenset({LanguageCapability.COVERAGE, LanguageCapability.STRUCTURAL_METERS})
+    capabilities = frozenset(
+        {
+            LanguageCapability.COVERAGE,
+            LanguageCapability.STRUCTURAL_METERS,
+            LanguageCapability.TEST_FILTER_BY_TEST,
+            LanguageCapability.TEST_LINES,
+        }
+    )
 
     def __init__(
         self,
@@ -101,10 +127,12 @@ class GoAdapter:
         go: tuple[str, ...] = ("go",),
         gofmt: tuple[str, ...] = ("gofmt",),
         golangci_lint: tuple[str, ...] | None = None,
+        python: tuple[str, ...] = (sys.executable,),
     ) -> None:
         self._go = go
         self._gofmt = gofmt
         self._lint = golangci_lint
+        self._python = python
 
     # -- finding and classifying ---------------------------------------------------------------
 
@@ -155,7 +183,7 @@ class GoAdapter:
             case Operation.LINT | Operation.LINT_FIX if self._lint is not None:
                 lint = VersionProbe(self._plan(here, (*self._lint, "--version")), _LINT_VERSION)
                 return ToolInfo("golangci-lint", lint, "go", go)
-            case Operation.BUILD | Operation.TEST | Operation.COVERAGE:
+            case Operation.BUILD | Operation.TEST | Operation.COVERAGE | Operation.TEST_LINES:
                 return ToolInfo("go", go, "go", go)
         return NotSupported(operation.value, "the Go adapter does not offer it")
 
@@ -173,14 +201,42 @@ class GoAdapter:
                 argv = (*self._lint, "run", "--color=never", *fix, *_packages(request.files))
             case Operation.BUILD:
                 argv = (*self._go, "build", "./...")
-            case Operation.TEST | Operation.COVERAGE if request.test_files or request.tests:
-                return NotSupported(operation.value, "Go tests are selected by package, not file")
+            case Operation.TEST | Operation.COVERAGE if request.test_files:
+                return NotSupported(operation.value, "Go tests are selected by name, not by file")
+            case Operation.COVERAGE if request.tests:
+                return NotSupported(operation.value, "the coverage runs every test")
+            case Operation.TEST if request.tests:
+                chosen = _selected(request.root, request.tests)
+                if chosen is None:
+                    return NotSupported(operation.value, "a test is not one of this module's")
+                packages, pattern = chosen
+                # one package after the other, in the order of the ids: the stop is then exact
+                argv = (
+                    *self._go,
+                    "test",
+                    "-count=1",
+                    "-json",
+                    *_stop_at_first_failure(request.rerun),
+                    "-p",
+                    "1",
+                    "-run",
+                    pattern,
+                    *packages,
+                )
+                if not fits_command_line(argv):
+                    return NotSupported(operation.value, "more tests than fit in one command")
             case Operation.TEST if request.mutated is not None:
                 # as in the mutator, a mutant is first judged by the package of its file
                 package = _packages((request.mutated,))
-                argv = (*self._go, "test", "-count=1", "-json", *package)
+                stop = _stop_at_first_failure(request.rerun)
+                argv = (*self._go, "test", "-count=1", "-json", *stop, *package)
             case Operation.TEST:
-                argv = (*self._go, "test", "-count=1", "-json", "./...")
+                stop = _stop_at_first_failure(request.rerun)
+                argv = (*self._go, "test", "-count=1", "-json", *stop, "./...")
+            case Operation.TEST_LINES:
+                # the piece of the Forja runs the tests one at a time; it is not a command of the
+                # project, so nothing of the project changes
+                argv = (*self._python, str(LINE_DRIVER), TEST_LINES_DIRECTORY, *self._go)
             case Operation.COVERAGE:
                 argv = (
                     *self._go,
@@ -198,6 +254,12 @@ class GoAdapter:
     def report(self, operation: Operation) -> ReportSpec | NotSupported:
         if operation is Operation.COVERAGE:
             return ReportSpec(ReportFormat.GO_COVERPROFILE, COVERAGE_REPORT)
+        if operation is Operation.TEST_LINES:
+            return ReportSpec(
+                ReportFormat.GO_COVERPROFILE,
+                f"{TEST_LINES_DIRECTORY}/*.out",
+                index=LINE_INDEX,
+            )
         return NotSupported(operation.value, "the Go adapter writes no such report")
 
     @staticmethod

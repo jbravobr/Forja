@@ -71,7 +71,10 @@ def facts(result: object) -> list[tuple[str, str, object]]:
 def test_the_adapter_keeps_every_promise_of_the_interface(
     adapter: TypeScriptAdapter, project: Path, tmp_path: Path
 ) -> None:
-    assert language_problems(adapter, project, tmp_path / "scratch") == []
+    problems = language_problems(
+        adapter, project, tmp_path / "scratch", test_id="src/calc.test.ts > calc > adds"
+    )
+    assert problems == []
 
 
 # -- finding and classifying ----------------------------------------------------------------------
@@ -197,10 +200,12 @@ def test_vitest_wins_when_a_project_depends_on_both(tmp_path: Path) -> None:
     assert "node_modules/vitest/vitest.mjs" in argv(Operation.TEST, both)
 
 
-def test_no_filter_of_the_tests_is_offered(project: Path) -> None:
+def test_no_filter_of_the_tests_by_file_or_for_coverage_is_offered(project: Path) -> None:
     for operation in (Operation.TEST, Operation.COVERAGE):
-        assert isinstance(plan(operation, project, tests=("adds",)), NotSupported)
         assert isinstance(plan(operation, project, test_files=("src/a.test.ts",)), NotSupported)
+    assert isinstance(
+        plan(Operation.COVERAGE, project, tests=("src/a.test.ts > adds",)), NotSupported
+    )
 
 
 def test_node_may_read_its_own_settings_from_the_environment(project: Path) -> None:

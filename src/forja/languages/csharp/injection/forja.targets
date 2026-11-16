@@ -1,0 +1,38 @@
+<Project>
+  <!-- The Forja's pieces for one run of a test project; the project's own files are not changed.
+       Only the test projects take them (IsTestProject). -->
+  <ItemGroup Condition="'$(IsTestProject)' == 'true'">
+    <None Include="$(ForjaInjectDir)/$(ForjaRunner)" Link="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(IsTestProject)' == 'true' and '$(ForjaOrder)' == 'true'">
+    <Compile Include="$(ForjaInjectDir)/ForjaOrder.cs" Link="ForjaOrder.cs" />
+  </ItemGroup>
+
+  <!-- The attributes name the test assembly, which only the build knows. -->
+  <Target Name="ForjaOrderAttributes" BeforeTargets="CoreCompile"
+          Condition="'$(IsTestProject)' == 'true' and '$(ForjaOrder)' == 'true'">
+    <PropertyGroup>
+      <ForjaOrderFile>$(IntermediateOutputPath)ForjaOrder.g.cs</ForjaOrderFile>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(ForjaOrderFile)" Overwrite="true" Lines="[assembly: Xunit.TestCollectionOrderer(&quot;Forja.Order.CollectionOrderer&quot;, &quot;$(AssemblyName)&quot;)];;[assembly: Xunit.TestCaseOrderer(&quot;Forja.Order.CaseOrderer&quot;, &quot;$(AssemblyName)&quot;)]" />
+    <ItemGroup>
+      <Compile Include="$(ForjaOrderFile)" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup Condition="'$(IsTestProject)' == 'true' and '$(ForjaSnap)' == 'true'">
+    <Compile Include="$(ForjaInjectDir)/ForjaSnap.cs" Link="ForjaSnap.cs" />
+  </ItemGroup>
+
+  <Target Name="ForjaSnapAttributes" BeforeTargets="CoreCompile"
+          Condition="'$(IsTestProject)' == 'true' and '$(ForjaSnap)' == 'true'">
+    <PropertyGroup>
+      <ForjaSnapFile>$(IntermediateOutputPath)ForjaSnap.g.cs</ForjaSnapFile>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(ForjaSnapFile)" Overwrite="true" Lines="[assembly: Xunit.TestFramework(&quot;Forja.Snap.SnapFramework&quot;, &quot;$(AssemblyName)&quot;)]" />
+    <ItemGroup>
+      <Compile Include="$(ForjaSnapFile)" />
+    </ItemGroup>
+  </Target>
+</Project>

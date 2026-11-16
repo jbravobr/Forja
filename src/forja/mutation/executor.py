@@ -9,8 +9,10 @@ copy still passes within that same time: on a machine too busy for that the run 
 verdict (``MachineTooBusy``).
 
 A mutant may name a smaller run that judges it first (``Mutant.first``): in Go the package of the
-file, as in the mutator. Killed by it, the mutant is killed by the whole command, which holds that
-run. One that survives it is not yet a survivor: the whole command judges it before it counts.
+file, as in the mutator, or the tests that run its lines. Killed by it, the mutant is killed by
+the whole command, which holds that run. One that survives it is not yet a survivor: the whole
+command judges it before it counts. A smaller run judges nobody unless it passes on the unchanged
+copy: tests chosen out of the whole command may fail by themselves, whatever the code is.
 """
 
 import asyncio
@@ -48,7 +50,9 @@ LEFT_OUT = frozenset(
 # a run writes there. A coverage report alone can weigh gigabytes, and no test reads it. ``dist``,
 # ``build`` and ``out`` stay, unlike in the mutator: the test command the Forja is given may run
 # what was built there.
-ROOT_LEFT_OUT = frozenset({"target", "coverage", ".metrics", ".forja-coverage", ".forja-cover.out"})
+ROOT_LEFT_OUT = frozenset(
+    {"target", "coverage", ".metrics", ".forja-coverage", ".forja-cover.out", ".forja-test-lines"}
+)
 MIN_TIMEOUT = 2.0
 TIMEOUT_FACTOR = 10.0
 
@@ -82,8 +86,14 @@ class Mutant:
     mutated: bytes  # the whole file as the mutant has it
     covered: bool  # a test runs the line; if not the mutant is not run
     # a run smaller than the whole command, and held by it, that judges the mutant first. Mutants
-    # that share the runner share its baseline
+    # whose runners are equal share the baseline
     first: TestRunner | None = None
+    # what names the mutant from one run to the next (the id the mutator gives it), for a caller
+    # that keeps a history
+    id: str = ""
+    # the lines whose coverage counts for it (its own, and the one its statement starts on), for
+    # a caller that chooses the first run by the tests that run them
+    lines: tuple[int, ...] = ()
 
 
 class BaselineFailed(Exception):
@@ -215,19 +225,55 @@ async def baseline(
 class _Limits:
     """The time a run of each runner is given: the limit the caller measured, or ten times the
     baseline of the runner, never below two seconds. A baseline is run in ``root`` with nothing
-    else running, once for each runner, the first time its limit is asked for."""
+    else running, once for each runner (and for the runners equal to it), the first time its
+    limit is asked for."""
 
     def __init__(self, root: Path, baseline_timeout: float | None, given: float | None) -> None:
         self._root, self._baseline_timeout, self._given = root, baseline_timeout, given
-        self._measured: dict[int, float] = {}
+        self._measured: dict[TestRunner, float | None] = {}
+
+    async def _measure(self, runner: TestRunner, root: Path) -> None:
+        self._measured[runner] = None  # until it passes
+        with contextlib.suppress(BaselineFailed):
+            seconds = await _seconds(runner, root, self._baseline_timeout)
+            self._measured[runner] = max(MIN_TIMEOUT, TIMEOUT_FACTOR * seconds)
 
     async def of(self, runner: TestRunner) -> float:
         if self._given is not None:
             return self._given
-        if id(runner) not in self._measured:
-            seconds = await _seconds(runner, self._root, self._baseline_timeout)
-            self._measured[id(runner)] = max(MIN_TIMEOUT, TIMEOUT_FACTOR * seconds)
-        return self._measured[id(runner)]
+        if runner not in self._measured:
+            await self._measure(runner, self._root)
+        limit = self._measured[runner]
+        if limit is None:
+            raise BaselineFailed("the tests do not pass on the unchanged copy")
+        return limit
+
+    async def passing(
+        self, runners: Sequence[TestRunner], roots: Sequence[Path]
+    ) -> set[TestRunner]:
+        """Those of ``runners`` that pass on the unchanged copy, and so may judge a mutant.
+
+        Their baselines are run side by side, one in each of ``roots``: the smaller runs may be
+        as many as the mutants, and one after the other they would take longer than the mutants
+        themselves. A baseline timed beside others is longer than one timed alone, so the limit
+        that comes of it is longer too: a mutant is only given more time."""
+        if self._given is not None:
+            return set(runners)
+        queue: asyncio.Queue[TestRunner] = asyncio.Queue()
+        for runner in dict.fromkeys(runners):
+            if runner not in self._measured:
+                queue.put_nowait(runner)
+
+        async def work(root: Path) -> None:
+            while True:
+                try:
+                    runner = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                await self._measure(runner, root)
+
+        await asyncio.gather(*(work(root) for root in roots[: queue.qsize()]))
+        return {runner for runner in runners if self._measured[runner] is not None}
 
 
 async def run_mutants(
@@ -247,8 +293,10 @@ async def run_mutants(
     one, and by ``runner`` when it has none or survived the first: those are the ones judged
     twice. As in the mutator each command has its baseline, run on the unchanged copy before the
     first mutant it judges: it must pass, and its duration sets the timeout of those mutants at
-    ten times that, but never below two seconds. A caller that measured the baseline hands over
-    ``timeout``, the limit of every run, and no baseline is run here.
+    ten times that, but never below two seconds. A ``first`` runner that does not pass on the
+    unchanged copy judges nobody: its mutants are judged by ``runner`` alone. A caller that
+    measured the baseline hands over ``timeout``, the limit of every run, and no baseline is run
+    here.
 
     With more than one worker, a mutant that timed out is judged once more with nothing else
     running. A timeout with nothing else running is final only if the unchanged copy, run right
@@ -267,11 +315,17 @@ async def run_mutants(
         # longer than many a run of mutants
         await asyncio.gather(*(asyncio.to_thread(_fresh_copy, worktree, root) for root in roots))
         limits = _Limits(roots[0], baseline_timeout, timeout)
-        judges = [(i, m, runner if m.first is None else m.first) for i, m in to_run]
-        await _make([(i, m, by, await limits.of(by)) for i, m, by in judges], results, roots)
-        twice = [
-            i for i, m in to_run if m.first is not None and results[i] is MutantStatus.SURVIVED
-        ]
+        # a smaller run that does not pass on the unchanged copy would kill for no reason
+        passing = await limits.passing([m.first for _, m in to_run if m.first is not None], roots)
+        runs, smaller = [], set()
+        for i, m in to_run:
+            by = runner
+            if m.first is not None and m.first in passing:
+                by = m.first
+                smaller.add(i)
+            runs.append((i, m, by, await limits.of(by)))
+        await _make(runs, results, roots)
+        twice = [i for i, _ in to_run if i in smaller and results[i] is MutantStatus.SURVIVED]
         if twice:
             limit = await limits.of(runner)
             await _make([(i, mutants[i], runner, limit) for i in twice], results, roots)

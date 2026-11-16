@@ -19,11 +19,19 @@ Language = Literal["python", "java", "go", "csharp", "javascript", "typescript"]
 # ``binary``: the release is the executable itself, saved under ``executable_path``.
 # ``wheel``: a PyPI wheel installed in a virtual environment of its own; ``executable_path`` is
 # then relative to that environment.
-ArtifactKind = Literal["zip", "tar.gz", "tar.xz", "wheel", "binary"]
+# ``nupkg``: a NuGet package, which is a zip; ``executable_path`` is the assembly of a .NET tool,
+# which ``dotnet`` runs.
+ArtifactKind = Literal["zip", "tar.gz", "tar.xz", "wheel", "binary", "nupkg"]
 Algorithm = Literal["sha256", "sha512"]
 
 DIGEST_LENGTH: dict[Algorithm, int] = {"sha256": 64, "sha512": 128}
-_SUFFIX: dict[str, str] = {"zip": ".zip", "tar.gz": ".tar.gz", "tar.xz": ".tar.xz", "wheel": ".whl"}
+_SUFFIX: dict[str, str] = {
+    "zip": ".zip",
+    "tar.gz": ".tar.gz",
+    "tar.xz": ".tar.xz",
+    "wheel": ".whl",
+    "nupkg": ".nupkg",
+}
 _NAME = re.compile(r"^[a-z][a-z0-9-]*$")
 _SPDX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.+() -]*$")
 

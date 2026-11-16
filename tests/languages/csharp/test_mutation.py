@@ -111,7 +111,13 @@ def write(root: Path, name: str, text: str) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
-def judge(repo: Repo, tmp_path: Path, test_text: str) -> GateResult:
+def judge(
+    repo: Repo,
+    tmp_path: Path,
+    test_text: str,
+    adapter: CSharpAdapter | None = None,
+    history: Path | None = None,
+) -> GateResult:
     """Commit the base solution, then add ``Sub`` with the given test file and judge the change."""
     for name, text in BASE.items():
         write(repo.path, name, text)
@@ -140,12 +146,13 @@ def judge(repo: Repo, tmp_path: Path, test_text: str) -> GateResult:
     changes = asyncio.run(read_changes(repo.git.at(repo.path)))
     check = MutationCheck(
         tools,
-        CSharpAdapter(),
+        adapter or CSharpAdapter(),
         repo.path,
         changes,
         ("src/Calc/Calc.cs",),
         host_env,
         language="csharp",
+        history=history,
     )
     data = GateInput(Path("."), "c" * 40, "t", "s", "a", values={})
     return asyncio.run(check.evaluate(data))

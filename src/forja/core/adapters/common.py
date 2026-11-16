@@ -16,7 +16,7 @@ from forja.core.artifacts.llm_output import check_relative_path
 from forja.core.events.models import canonical_json
 from forja.core.evidence.models import Target
 from forja.core.isolation import filter_environment
-from forja.core.process import ProcessSpec
+from forja.core.process import ProcessSpec, UnsafeCommand, check_command_safety
 
 CONTRACT_VERSION = 1
 # The seed the Forja gives the property-testing libraries that take one from the command line or
@@ -80,6 +80,18 @@ def build_spec(
         stdin_file=plan.stdin_file,
         low_priority=low_priority,
     )
+
+
+def fits_command_line(argv: Sequence[str]) -> bool:
+    """Whether ``argv`` is a command the process runner takes: no argument too large, the whole of
+    it within what every system gives a command line, and nothing the shell could misread where
+    the program runs through one. An adapter asked for more tests than fit answers
+    ``NotSupported``, and whoever asked runs the whole command."""
+    try:
+        check_command_safety(argv)
+    except UnsafeCommand:
+        return False
+    return True
 
 
 def compute_config_hash(plan: CommandPlan, root: Path) -> str:

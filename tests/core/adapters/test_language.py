@@ -39,13 +39,15 @@ def log_with(tmp_path: Path, *lines: str) -> Path:
 
 
 def test_the_operations_match_the_ones_the_policy_accepts_for_overrides() -> None:
-    assert {op.value for op in Operation if op is not Operation.MUTATION} == ADAPTER_OPERATIONS
+    own = {Operation.MUTATION, Operation.TEST_LINES}  # no repository has a command for these
+    assert {op.value for op in Operation if op not in own} == ADAPTER_OPERATIONS
 
 
 def test_building_and_testing_are_the_required_operations() -> None:
     assert {Operation.BUILD, Operation.TEST} == REQUIRED_OPERATIONS
     assert set(CAPABILITY_OPERATION.values()) == {
         Operation.COVERAGE,
+        Operation.TEST_LINES,
         Operation.MUTATION,
         Operation.E2E,
     }

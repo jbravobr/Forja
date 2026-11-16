@@ -7,10 +7,15 @@ the one solution (or, failing that, the one project) at the root; with more than
 not supported, because choosing for the person would measure something they did not mean. Coverlet
 is the project's own dependency (``coverlet.collector``); a project without it gets no report, and
 the coverage gate is inconclusive rather than a pass.
+
+The tests of each line, the stop at the first failure and the order of the tests come from the
+Forja's own pieces (``injection/``), put beside the test projects for one run. ``dotnet-coverage``
+(a tool of the ecosystem, found on the PATH) takes a snapshot of the coverage after each test.
 """
 
 import hashlib
 import os
+import re
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -32,8 +37,10 @@ from forja.core.adapters import (
     Unparseable,
     VersionProbe,
 )
+from forja.core.adapters.common import fits_command_line
+from forja.core.adapters.executor import locate_in_path
 from forja.core.adapters.ownership import dotted_names, says
-from forja.core.reports import ReportFormat, ReportSpec
+from forja.core.reports import TEST_LINES_DIRECTORY, ReportFormat, ReportSpec
 from forja.languages.csharp import parsers
 from forja.languages.csharp.manifest import declared_dependencies
 from forja.languages.csharp.template import template
@@ -81,6 +88,17 @@ _TEST_SUFFIXES = ("Tests", "Test", "Specs")
 _FIXTURE_DIRECTORIES = frozenset({"testdata", "fixtures", "testassets"})
 _SKIPPED_DIRECTORIES = frozenset({"bin", "obj", ".vs", "packages"})
 _LOGGER = ("--logger", "console;verbosity=normal")  # one line per test, with its outcome
+# The pieces the Forja puts beside a test project for one run (see ``injection/``).
+INJECTION = Path(__file__).parent / "injection"
+TARGETS = str(INJECTION / "forja.targets")
+# The characters VSTest reads as its own syntax in a filter: each one is escaped.
+_FILTER_SPECIAL = re.compile(r'[|&=()"~!]')
+# The test ids that order the run: one per line, in the environment (a Windows variable holds
+# 32 767 characters at most).
+ORDER_VARIABLE = "FORJA_ORDER"
+_ORDER_LIMIT = 32767
+# The name of the session the snapshots are taken in, which is one per worktree.
+SNAPSHOT_SESSION = "forja"
 
 
 def _entry(root: Path) -> str | None:
@@ -94,6 +112,49 @@ def _entry(root: Path) -> str | None:
     return None
 
 
+COVERAGE_ASSEMBLY = "dotnet-coverage.dll"
+
+
+def find_dotnet_coverage(environ: Mapping[str, str] | None = None) -> tuple[str, ...] | None:
+    """How to run the dotnet-coverage on the PATH, or ``None`` when there is none: the command
+    itself, as ``dotnet tool install`` leaves it, or its assembly run by ``dotnet``, as the Forja
+    installs it (the folder of the assembly is then on the PATH)."""
+    path = (environ or {}).get("PATH")
+    found = locate_in_path("dotnet-coverage", path)
+    if found:
+        return (str(found),)
+    for directory in (os.environ.get("PATH", "") if path is None else path).split(os.pathsep):
+        # as ``locate_in_path``, never a folder that is not named whole
+        if os.path.isabs(directory) and (Path(directory) / COVERAGE_ASSEMBLY).is_file():
+            return ("dotnet", str(Path(directory) / COVERAGE_ASSEMBLY))
+    return None
+
+
+def _escaped(test_id: str) -> str:
+    return _FILTER_SPECIAL.sub(r"\\\g<0>", test_id)
+
+
+def filter_of(test_ids: tuple[str, ...]) -> str:
+    """The ``--filter`` expression that runs exactly the cases ``test_ids`` name: a
+    ``DisplayName`` for each id, joined by ``|``, each with its special characters escaped."""
+    return "|".join("DisplayName=" + _escaped(test) for test in test_ids)
+
+
+def _injection(runner: str, *, order: bool = False, snapshot: bool = False) -> tuple[str, ...]:
+    """The MSBuild properties that put the Forja's pieces beside the test projects, with the
+    runner file that sets how they run (``injection/runner-*.json``)."""
+    found = [
+        f"-p:CustomAfterMicrosoftCommonTargets={TARGETS}",
+        f"-p:ForjaInjectDir={INJECTION}",
+        f"-p:ForjaRunner={runner}",
+    ]
+    if order:
+        found.append("-p:ForjaOrder=true")
+    if snapshot:
+        found.append("-p:ForjaSnap=true")
+    return tuple(found)
+
+
 def artifacts_dir(root: Path) -> Path:
     """Where the build of the worktree at ``root`` writes ``obj`` and ``bin``: the user's own
     cache, one directory per worktree so two attempts never share a build."""
@@ -101,6 +162,15 @@ def artifacts_dir(root: Path) -> Path:
     cache = Path(base) if base else Path.home() / ".cache"
     key = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:16]
     return cache / "forja" / "dotnet" / key
+
+
+_CAPABILITIES = frozenset(
+    {
+        LanguageCapability.COVERAGE,
+        LanguageCapability.STRUCTURAL_METERS,
+        LanguageCapability.TEST_FILTER_BY_TEST,
+    }
+)
 
 
 class CSharpAdapter:
@@ -114,10 +184,19 @@ class CSharpAdapter:
         r"SuppressMessage",
         r"ExcludeFromCodeCoverage",
     )
-    capabilities = frozenset({LanguageCapability.COVERAGE, LanguageCapability.STRUCTURAL_METERS})
+    capabilities = _CAPABILITIES
 
-    def __init__(self, *, dotnet: tuple[str, ...] = ("dotnet",)) -> None:
+    def __init__(
+        self,
+        *,
+        dotnet: tuple[str, ...] = ("dotnet",),
+        dotnet_coverage: tuple[str, ...] | None = None,
+    ) -> None:
         self._dotnet = dotnet
+        self._coverage = dotnet_coverage
+        # the tests of each line need dotnet-coverage: without it the adapter does not offer them
+        if dotnet_coverage is not None:
+            self.capabilities = _CAPABILITIES | {LanguageCapability.TEST_LINES}
 
     # -- finding and classifying ---------------------------------------------------------------
 
@@ -190,10 +269,16 @@ class CSharpAdapter:
                 argv = (*dotnet, "format", "analyzers", entry, *check, *include)
             case Operation.BUILD:
                 argv = (*dotnet, "build", entry, "--nologo")
-            case Operation.TEST | Operation.COVERAGE if request.tests or request.test_files:
+            case Operation.COVERAGE if request.tests or request.test_files:
                 return NotSupported(operation.value, "filtering the tests is not offered")
+            case Operation.TEST if request.test_files:
+                return NotSupported(operation.value, "filtering the tests by file is not offered")
+            case Operation.TEST if request.tests:
+                return self._filtered(entry, request)
             case Operation.TEST:
                 argv = (*dotnet, "test", entry, "--nologo", *_LOGGER)
+                if request.rerun:  # stops at the first failure; the parallelism stays as it is
+                    argv = (*argv, *_injection("runner-stop.json"))
             case Operation.COVERAGE:
                 argv = (
                     *dotnet,
@@ -205,23 +290,90 @@ class CSharpAdapter:
                     "--results-directory",
                     COVERAGE_DIRECTORY,
                 )
+            case Operation.TEST_LINES:
+                return self._test_lines(entry, request.root)
             case _:
                 return NotSupported(operation.value, "the C# adapter does not offer it")
         return self._plan(request.root, argv, config_files=CONFIG_FILES)
 
+    def _filtered(self, entry: str, request: OperationRequest) -> CommandPlan | NotSupported:
+        """The tests named, one at a time and in their order, stopping at the first that fails."""
+        argv = (
+            *self._dotnet,
+            "test",
+            entry,
+            "--nologo",
+            *_LOGGER,
+            "--filter",
+            filter_of(request.tests),
+            *_injection("runner-serial-stop.json", order=True),
+        )
+        order = "\n".join(request.tests)
+        if not fits_command_line(argv) or len(order) > _ORDER_LIMIT:
+            return NotSupported("test", "the tests do not fit in one command line")
+        return self._plan(
+            request.root, argv, config_files=CONFIG_FILES, extra={ORDER_VARIABLE: order}
+        )
+
+    def _test_lines(self, entry: str, root: Path) -> CommandPlan | NotSupported:
+        """One run of the tests, one at a time, with a snapshot of the coverage after each: the
+        report of each test is Cobertura, and the index names the test of each report."""
+        if self._coverage is None:
+            return NotSupported("test_lines", "dotnet-coverage is not installed")
+        directory = root / TEST_LINES_DIRECTORY
+        key = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:16]
+        argv = (
+            *self._coverage,
+            "collect",
+            "--session-id",
+            f"{SNAPSHOT_SESSION}-{key}",
+            "--nologo",
+            "-o",
+            str(directory / "session.coverage"),
+            *self._dotnet,
+            "test",
+            entry,
+            "--nologo",
+            # one test project at a time: they all write the one index and share the session
+            "-m:1",
+            *_injection("runner-serial.json", snapshot=True),
+        )
+        if not fits_command_line(argv):
+            return NotSupported("test_lines", "the command does not fit in one command line")
+        extra = {
+            "FORJA_SNAP": str(directory),
+            # the program, and what comes before its own arguments (the assembly ``dotnet`` runs)
+            "FORJA_DCT": self._coverage[0],
+            "FORJA_DCT_HEAD": " ".join(f'"{part}"' for part in self._coverage[1:]),
+            "FORJA_SESSION": f"{SNAPSHOT_SESSION}-{key}",
+        }
+        return self._plan(root, argv, config_files=CONFIG_FILES, extra=extra)
+
     def report(self, operation: Operation) -> ReportSpec | NotSupported:
         if operation is Operation.COVERAGE:
             return ReportSpec(ReportFormat.COBERTURA_XML, COVERAGE_REPORT)
+        if operation is Operation.TEST_LINES and self._coverage is not None:
+            return ReportSpec(
+                ReportFormat.COBERTURA_XML,
+                f"{TEST_LINES_DIRECTORY}/*.xml",
+                index=f"{TEST_LINES_DIRECTORY}/index.json",
+            )
         return NotSupported(operation.value, "the C# adapter writes no such report")
 
     @staticmethod
-    def _plan(root: Path, argv: tuple[str, ...], config_files: tuple[str, ...] = ()) -> CommandPlan:
+    def _plan(
+        root: Path,
+        argv: tuple[str, ...],
+        config_files: tuple[str, ...] = (),
+        extra: Mapping[str, str] | None = None,
+    ) -> CommandPlan:
         # Build output goes to one place per worktree outside it: ``obj`` and ``bin`` ignored by
         # git would otherwise show as hidden files in the worktree (the scope gate rejects them).
         env: Mapping[str, str] = {
             **_ENVIRONMENT_SET,
             "UseArtifactsOutput": "true",
             "ArtifactsPath": str(artifacts_dir(root)),
+            **(extra or {}),
         }
         return CommandPlan(
             argv, root, env_allow=DOTNET_ENVIRONMENT, env_set=env, config_files=config_files

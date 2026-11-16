@@ -12,6 +12,7 @@ import pytest
 from forja.core.adapters import (
     CommandPlan,
     FileClass,
+    LanguageCapability,
     NotSupported,
     Operation,
     OperationRequest,
@@ -219,10 +220,71 @@ def test_what_the_adapter_does_not_offer_is_said_so(operation: Operation, projec
     assert isinstance(ADAPTER.tool_info(operation), NotSupported)
 
 
-def test_a_test_name_filter_is_refused_rather_than_ignored(project: Path) -> None:
-    answer = ADAPTER.plan(Operation.TEST, OperationRequest(root=project, tests=("a::b",)))
+def test_the_tests_asked_for_run_in_the_order_given_and_no_other(project: Path) -> None:
+    ids = ("tests/test_b.py::test_z[a b]", "tests/test_a.py::TestC::test_y")
 
-    assert isinstance(answer, NotSupported)
+    plan = ADAPTER.plan(Operation.TEST, OperationRequest(root=project, tests=ids))
+
+    assert isinstance(plan, CommandPlan)
+    assert plan.argv[-3:] == ("--", *ids)
+    assert "-x" not in plan.argv
+    assert LanguageCapability.TEST_FILTER_BY_TEST in ADAPTER.capabilities
+
+
+def test_files_and_tests_asked_for_together_both_run(project: Path) -> None:
+    request = OperationRequest(
+        root=project, test_files=("tests/test_a.py",), tests=("tests/test_b.py::test_z",)
+    )
+
+    plan = ADAPTER.plan(Operation.TEST, request)
+
+    assert isinstance(plan, CommandPlan)
+    assert plan.argv[-3:] == ("--", "tests/test_a.py", "tests/test_b.py::test_z")
+
+
+def test_a_copy_tested_again_stops_at_the_first_test_that_fails(project: Path) -> None:
+    plain = ADAPTER.plan(Operation.TEST, OperationRequest(root=project))
+    again = ADAPTER.plan(Operation.TEST, OperationRequest(root=project, rerun=True))
+    chosen = ADAPTER.plan(
+        Operation.TEST, OperationRequest(root=project, rerun=True, tests=("tests/test_a.py::t",))
+    )
+
+    assert isinstance(plain, CommandPlan) and isinstance(again, CommandPlan)
+    assert isinstance(chosen, CommandPlan)
+    assert "-x" not in plain.argv  # whoever reads the report wants every test in it
+    assert [part for part in again.argv if part not in plain.argv] == ["-x"]
+    assert chosen.argv.index("-x") < chosen.argv.index("--")  # an option, not a test
+    assert chosen.argv[-2:] == ("--", "tests/test_a.py::t") and "-x" in chosen.argv
+    # the file a mutant changed says nothing to pytest
+    assert again == ADAPTER.plan(
+        Operation.TEST, OperationRequest(root=project, rerun=True, mutated="src/a.py")
+    )
+
+
+def test_more_tests_than_fit_in_one_command_are_refused_rather_than_cut(project: Path) -> None:
+    ids = tuple(f"tests/test_a.py::test_{number:04}" for number in range(1500))
+
+    answer = ADAPTER.plan(Operation.TEST, OperationRequest(root=project, tests=ids))
+    fitting = ADAPTER.plan(Operation.TEST, OperationRequest(root=project, tests=ids[:500]))
+
+    assert answer == NotSupported("test", "more tests than fit in one command")
+    assert isinstance(fitting, CommandPlan) and fitting.argv[-500:] == ids[:500]
+
+
+def test_coverage_of_only_some_tests_is_refused_rather_than_ignored(project: Path) -> None:
+    answer = ADAPTER.plan(Operation.COVERAGE, OperationRequest(root=project, tests=("a::b",)))
+
+    assert answer == NotSupported("coverage", "filtering by test name is not offered")
+
+
+def test_the_tests_of_each_line_come_in_the_coverage_report_and_need_no_run_of_their_own(
+    project: Path,
+) -> None:
+    assert LanguageCapability.TEST_LINES not in ADAPTER.capabilities
+    assert isinstance(
+        ADAPTER.plan(Operation.TEST_LINES, OperationRequest(root=project)), NotSupported
+    )
+    assert isinstance(ADAPTER.report(Operation.TEST_LINES), NotSupported)
 
 
 def test_each_operation_names_its_tool_and_how_to_ask_its_version() -> None:

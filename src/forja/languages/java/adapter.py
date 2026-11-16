@@ -10,6 +10,7 @@ with a ``pom.xml`` is a Maven project even if it also has a Gradle build file; o
 ``build.gradle[.kts]`` makes it a Gradle one (``forja.languages.java.gradle``).
 """
 
+import os
 import re
 from pathlib import Path
 
@@ -30,10 +31,11 @@ from forja.core.adapters import (
     Unparseable,
     VersionProbe,
 )
+from forja.core.adapters.common import fits_command_line
 from forja.core.adapters.executor import locate_in_path
 from forja.core.adapters.ownership import dotted_names, says
 from forja.core.reports import ReportFormat, ReportSpec
-from forja.languages.java import gradle, parsers
+from forja.languages.java import gradle, parsers, probe, selection
 from forja.languages.java.manifest import declared_dependencies
 from forja.languages.java.template import template
 
@@ -88,6 +90,17 @@ def find_maven() -> tuple[str, ...]:
     return (str(found),) if found else ("mvn",)
 
 
+def _java() -> str:
+    """The JDK's launcher, which runs the probe's source file: the JDK Maven runs with (its
+    ``JAVA_HOME``), else the first ``java`` on the PATH."""
+    home = os.environ.get("JAVA_HOME")
+    for name in ("java.exe", "java"):
+        if home and (Path(home) / "bin" / name).is_file():
+            return str(Path(home) / "bin" / name)
+    found = locate_in_path("java")
+    return str(found) if found else "java"
+
+
 def _pom(root: Path) -> str | None:
     try:
         return (root / MANIFEST).read_text(encoding="utf-8")
@@ -107,13 +120,25 @@ class JavaAdapter:
         r"CHECKSTYLE[:.]\s*OFF",
         r"spotless:off",
     )
-    capabilities = frozenset({LanguageCapability.COVERAGE, LanguageCapability.STRUCTURAL_METERS})
+    capabilities = frozenset(
+        {
+            LanguageCapability.COVERAGE,
+            LanguageCapability.STRUCTURAL_METERS,
+            LanguageCapability.TEST_FILTER_BY_TEST,
+            LanguageCapability.TEST_LINES,
+        }
+    )
 
     def __init__(
-        self, *, maven: tuple[str, ...] | None = None, gradle: tuple[str, ...] | None = None
+        self,
+        *,
+        maven: tuple[str, ...] | None = None,
+        gradle: tuple[str, ...] | None = None,
+        cache_dir: Path | None = None,
     ) -> None:
         self._maven = maven or find_maven()
         self._gradle = gradle
+        self._cache = cache_dir or probe.default_cache_dir()
         self._uses_gradle = False  # what ``detect`` last found: ``tool_info`` has no root
 
     # -- finding and classifying ---------------------------------------------------------------
@@ -132,6 +157,10 @@ class JavaAdapter:
 
     def _gradle_for(self, root: Path) -> tuple[str, ...]:
         return self._gradle or gradle.find_gradle(root)
+
+    def selector(self, test_id: str) -> str:
+        """The method that runs the test a report gives as ``test_id``: a case is its method."""
+        return selection.selector(test_id)
 
     def owns_test(self, test_id: str, path: str, text: str) -> bool:
         """The ids (``pkg.Class.method``) do not carry the file: its class and method are in it."""
@@ -165,7 +194,7 @@ class JavaAdapter:
                 return ToolInfo("spotless", maven, "maven", maven)
             case Operation.LINT:
                 return ToolInfo("checkstyle, pmd, spotbugs", maven, "maven", maven)
-            case Operation.BUILD | Operation.TEST:
+            case Operation.BUILD | Operation.TEST | Operation.TEST_LINES:
                 return ToolInfo("maven", maven, "maven", maven)
             case Operation.COVERAGE:
                 return ToolInfo("jacoco", maven, "maven", maven)
@@ -179,7 +208,7 @@ class JavaAdapter:
                 return ToolInfo("spotless", probe, "gradle", probe)
             case Operation.LINT:
                 return ToolInfo("checkstyle, pmd, spotbugs", probe, "gradle", probe)
-            case Operation.BUILD | Operation.TEST:
+            case Operation.BUILD | Operation.TEST | Operation.TEST_LINES:
                 return ToolInfo("gradle", probe, "gradle", probe)
             case Operation.COVERAGE:
                 return ToolInfo("jacoco", probe, "gradle", probe)
@@ -202,14 +231,24 @@ class JavaAdapter:
                 argv = (*mvn, "clean", "compile", *self._linters(pom), *_NO_FAILURE)
             case Operation.BUILD:
                 argv = (*mvn, "clean", "test-compile")
-            case Operation.TEST | Operation.COVERAGE if request.tests or request.test_files:
-                return NotSupported(operation.value, "filtering the tests is not offered")
-            case Operation.TEST if request.rerun:
+            case Operation.TEST if request.test_files:
+                return NotSupported(operation.value, "filtering the tests by file is not offered")
+            case Operation.TEST:
                 # mutant after mutant in one copy, as the mutator runs them: the compiler sees
                 # the file that changed, and no report of an earlier run is read
-                argv = (*mvn, "test")
-            case Operation.TEST:
-                argv = (*mvn, "clean", "test")
+                goals = ("test",) if request.rerun else ("clean", "test")
+                return self._maven_tests(
+                    operation, request, goals, selected=request.tests, stop=request.rerun
+                )
+            case Operation.TEST_LINES:
+                return self._maven_tests(
+                    operation,
+                    request,
+                    ("clean", f"{JACOCO}:prepare-agent", "test"),
+                    lines=True,
+                )
+            case Operation.COVERAGE if request.tests or request.test_files:
+                return NotSupported(operation.value, "filtering the tests is not offered")
             case Operation.COVERAGE:
                 argv = (
                     *mvn,
@@ -232,6 +271,9 @@ class JavaAdapter:
             return NotSupported(operation.value, "the root has no pom.xml or build.gradle")
         tool = self._gradle_for(request.root)
         tasks = gradle.linter_tasks(build)
+        # the probe is JUnit 5's: in a build that does not run the JUnit Platform it would not
+        # compile, and the tests of a project that passed until now would stop passing
+        platform = gradle.runs_junit_platform(build)
         match operation:
             case Operation.FORMAT if gradle.declares_spotless(build):
                 argv = gradle.format_argv(tool, request.root, request.files, request.check_only)
@@ -239,16 +281,30 @@ class JavaAdapter:
                 argv = gradle.lint_argv(tool, tasks)
             case Operation.BUILD:
                 argv = gradle.build_argv(tool)
-            case Operation.TEST | Operation.COVERAGE if request.tests or request.test_files:
-                return NotSupported(operation.value, "filtering the tests is not offered")
+            case Operation.TEST if request.test_files:
+                return NotSupported(operation.value, "filtering the tests by file is not offered")
+            case Operation.TEST | Operation.TEST_LINES if not platform and (
+                request.tests or operation is Operation.TEST_LINES
+            ):
+                return NotSupported(operation.value, "the build does not run the JUnit Platform")
+            case Operation.TEST if request.tests:
+                if not selection.all_methods(request.tests):
+                    return NotSupported(operation.value, "the test ids are not methods")
+                argv = gradle.selected_argv(tool, request.tests, stop=request.rerun)
             case Operation.TEST:
-                argv = gradle.test_argv(tool)
+                argv = gradle.test_argv(tool, stop=request.rerun and platform)
+            case Operation.TEST_LINES:
+                argv = gradle.lines_argv(tool)
+            case Operation.COVERAGE if request.tests or request.test_files:
+                return NotSupported(operation.value, "filtering the tests is not offered")
             case Operation.COVERAGE:
                 argv = gradle.coverage_argv(tool)
             case Operation.FORMAT | Operation.LINT:
                 return NotSupported(operation.value, "the project does not declare that tool")
             case _:
                 return NotSupported(operation.value, "the Java adapter does not offer it")
+        if not fits_command_line(argv):
+            return NotSupported(operation.value, "the command line would not take these tests")
         env = JAVA_ENVIRONMENT | gradle.ENVIRONMENT
         return CommandPlan(
             argv,
@@ -256,6 +312,51 @@ class JavaAdapter:
             env_allow=env,
             env_set={"NO_COLOR": "1"},
             config_files=gradle.CONFIG_FILES,
+        )
+
+    def _maven_tests(
+        self,
+        operation: Operation,
+        request: OperationRequest,
+        goals: tuple[str, ...],
+        *,
+        selected: tuple[str, ...] = (),
+        stop: bool = False,
+        lines: bool = False,
+    ) -> CommandPlan | NotSupported:
+        """Maven's test run. The probe is compiled by the launcher, which runs Maven itself, so it
+        goes first; without the probe's jars (no test has run in this repository yet) a run keeps
+        its filter but not its order, its stop or its lines."""
+        if selected and not selection.all_methods(selected):
+            return NotSupported(operation.value, "the test ids are not methods")
+        classpath = probe.classpath(Path.home() / ".m2" / "repository")
+        if lines and classpath is None:
+            return NotSupported(
+                operation.value, "the probe's jars are not in the Maven repository yet"
+            )
+        flags: list[str] = []
+        if selected:
+            flags.append(f"-Dtest={selection.maven_filter(selected)}")
+        if classpath is not None and (selected or stop or lines):
+            flags.append("-Djunit.jupiter.extensions.autodetection.enabled=true")
+            flags.extend(selection.order_arguments(selected) if selected else ())
+            flags.extend(("-Dforja.parada=1",) if stop else ())
+            flags.extend((f"-Dforja.execdir={probe.EXECUTIONS}",) if lines else ())
+        argv: tuple[str, ...] = (*self._maven, *_BASE, *goals, *flags)
+        env: dict[str, str] = {"NO_COLOR": "1"}
+        if classpath is not None and (selected or stop or lines):
+            mode = "linhas" if lines else "testar"
+            launcher = (_java(), str(probe.LAUNCHER), str(probe.SOURCES), mode, str(self._cache))
+            argv = (*launcher, *argv)
+            env["FORJA_PROBE_CLASSPATH"] = classpath
+        if not fits_command_line(argv):
+            return NotSupported(operation.value, "the command line would not take these tests")
+        return CommandPlan(
+            argv,
+            request.root,
+            env_allow=JAVA_ENVIRONMENT,
+            env_set=env,
+            config_files=CONFIG_FILES,
         )
 
     def _through_cmd(self) -> bool:
@@ -284,6 +385,8 @@ class JavaAdapter:
         if operation is Operation.COVERAGE:
             path = gradle.COVERAGE_REPORT if self._uses_gradle else COVERAGE_REPORT
             return ReportSpec(ReportFormat.JACOCO_XML, path, SOURCE_ROOTS)
+        if operation is Operation.TEST_LINES:
+            return ReportSpec(ReportFormat.TEST_LINES_JSON, probe.LINES_JSON, SOURCE_ROOTS)
         return NotSupported(operation.value, "the Java adapter writes no such report")
 
     @staticmethod

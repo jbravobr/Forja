@@ -96,8 +96,8 @@ def test_what_is_not_offered_is_said_in_the_same_words_everywhere(tmp_path: Path
 
     assert ADAPTER.tool_info(Operation.MUTATION) == refusal
     assert ADAPTER.plan(Operation.MUTATION, OperationRequest(root=tmp_path)) == refusal
-    assert ADAPTER.plan(Operation.TEST, OperationRequest(root=tmp_path, tests=("a",))) == (
-        NotSupported("test", "filtering by test name is not offered")
+    assert ADAPTER.plan(Operation.COVERAGE, OperationRequest(root=tmp_path, tests=("a",))) == (
+        NotSupported("coverage", "filtering by test name is not offered")
     )
 
 

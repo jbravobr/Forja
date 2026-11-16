@@ -108,7 +108,7 @@ Por linguagem, só quando ela é detectada no repositório:
 | Python | `mypy` (pacote Python em ambiente virtual próprio) |
 | Go | `go`, `golangci-lint` |
 | JavaScript e TypeScript | `node` |
-| C# | `dotnet-sdk` (o SDK do .NET) |
+| C# | `dotnet-sdk` (o SDK do .NET) e `dotnet-coverage` (cobertura por teste, que a mutação usa para escolher os testes de cada linha) |
 | Java | `jdk` (Temurin), `maven` se o repositório usa Maven, `gradle` se usa Gradle |
 
 Regras:
@@ -147,7 +147,7 @@ Sem terminal (CI) ou com `--config`, a Forja não instala por conta própria. El
 ## O que continua por sua conta
 
 - **git**, **a CLI do agente** e o **login** dela.
-- Em Windows e Linux x64, as ferramentas de linguagem que a Forja instala (`go`, `node`, `dotnet-sdk`, `jdk`, `maven`, `gradle`) são opcionais: você pode usar as suas, desde que estejam no `PATH`. `golangci-lint` e `mypy` também.
+- Em Windows e Linux x64, as ferramentas de linguagem que a Forja instala (`go`, `node`, `dotnet-sdk`, `jdk`, `maven`, `gradle`) são opcionais: você pode usar as suas, desde que estejam no `PATH`. `golangci-lint`, `mypy` e `dotnet-coverage` também.
 - Em outras plataformas, todas as ferramentas externas: gitleaks, osv-scanner, jscpd, Semgrep, mais `go`, `node`, `dotnet`, JDK e Maven ou Gradle conforme as linguagens dos seus repositórios.
 - O ambiente do projeto alvo: o `pytest` precisa importar no Python do repositório (`forja doctor` confere), e as dependências de teste de cada linguagem são do projeto.
 - Em repositório Java com `gradlew`, o `doctor` usa o wrapper do repositório e não pede o `gradle`.

@@ -9,7 +9,7 @@ import pytest
 
 from forja.checks.mutation import MutationCheck
 from forja.core.artifacts.models import Producer
-from forja.core.gates import GateInput, Verdict
+from forja.core.gates import Approved, GateInput, Verdict
 from forja.orchestrator.ports import AttemptContext, TaskInfo
 from tests.checks.support import Scene, sinks
 from tests.checks.test_measurer import findings, ran
@@ -150,3 +150,31 @@ def test_a_function_the_tests_protect_is_not_weak(
 
     assert weak(scene, "add") == set()
     assert len(asked) == 1
+
+
+def test_the_measure_of_a_function_and_the_gate_keep_the_tests_that_killed_in_the_one_place(
+    scene: Scene, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kept = []
+
+    async def protects(
+        self: MutationCheck, data: GateInput, lines: Mapping[str, frozenset[int]]
+    ) -> bool:
+        kept.append(self.history)
+        return True
+
+    async def evaluate(self: MutationCheck, data: GateInput) -> Approved:
+        kept.append(self.history)
+        return Approved()
+
+    monkeypatch.setattr(MutationCheck, "protects", protects)
+    monkeypatch.setattr(MutationCheck, "evaluate", evaluate)
+    weak(scene, "add")
+    scene.write(MOD, THREE)
+
+    outcome = asyncio.run(scene.measurer.judge(scene.context(), sinks))
+
+    assert "mutation" in ran(outcome)
+    # in the folder of the run, outside the worktree, so it lasts from one attempt to the next
+    assert kept == [scene.work / "run" / "mutation" / "killers.json"] * 2
+    assert not scene.work.is_relative_to(scene.repo.path)

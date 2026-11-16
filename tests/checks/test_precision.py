@@ -329,7 +329,9 @@ def test_the_pipeline_gets_the_attempt_the_commit_and_what_the_adapter_can_do(
         scene.repo.path, "t1", "t1-s", "t1-a1",
     )  # fmt: skip
     assert data.commit == scene.repo.sh("rev-parse", "HEAD")
-    assert spy.capabilities == [{"test_filter_by_file", "coverage", "structural_meters"}]
+    assert spy.capabilities == [
+        {"test_filter_by_file", "test_filter_by_test", "coverage", "structural_meters"}
+    ]
     assert [c.id for c in spy.checks] == [
         "scope", "secrets", "format", "lint", "types", "build", "tests", "mutation", "complexity",
         "crap", "pass_through", "module_depth", "duplication", "dependency_cycles", "layer_rules",

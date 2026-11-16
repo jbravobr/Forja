@@ -116,6 +116,7 @@ class ScopedAdapter:
             files=kept["files"],
             test_files=kept["test_files"],
             changed_files=kept["changed_files"],
+            mutated=None if request.mutated is None else self.local(request.mutated),
         )
         plan = self._adapter.plan(operation, local)
         if isinstance(plan, NotSupported):
@@ -168,6 +169,7 @@ class ScopedAdapter:
             spec,
             path=self.repository(spec.path),
             source_roots=tuple(self.repository(root) for root in spec.source_roots),
+            index=None if spec.index is None else self.repository(spec.index),
         )
 
     def _owns_test(self, test_id: str, path: str, text: str) -> bool:

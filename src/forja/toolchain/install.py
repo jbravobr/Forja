@@ -137,7 +137,7 @@ def _untar(file: Path, destination: Path) -> None:
 
 
 def _unpack(file: Path, artifact: Artifact, destination: Path) -> None:
-    if artifact.kind == "zip":
+    if artifact.kind in ("zip", "nupkg"):
         _unzip(file, destination)
     elif artifact.kind in ("tar.gz", "tar.xz"):
         _untar(file, destination)

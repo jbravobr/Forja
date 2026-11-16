@@ -1,0 +1,83 @@
+// Injected from outside the project with -I, with -Dforja.probe=<the probe's directory>.
+// The probe (listener, orderers, fail-fast condition, line reader) is compiled with the tests of
+// each project, against what the build already resolves: JUnit's launcher on the test runtime
+// classpath, JaCoCo's agent and core from the plugin's own configurations. Nothing of the project
+// changes, and no binary is kept: Gradle's own up-to-date checks decide when it compiles again.
+def probeDir = System.getProperty('forja.probe')
+def forwarded = [
+        'forja.execdir', 'forja.parada', 'forja.ordem', 'forja.ordemMetodos',
+        'junit.jupiter.testclass.order.default', 'junit.jupiter.testmethod.order.default',
+        'junit.jupiter.execution.parallel.enabled', 'junit.jupiter.execution.parallel.mode.default',
+        'junit.jupiter.execution.parallel.mode.classes.default'
+]
+allprojects {
+    plugins.withId('java') {
+        if (probeDir != null) {
+            def probe = new File(probeDir)
+            project.plugins.apply('jacoco')
+            def jacocoVersion = project.extensions.getByType(
+                    org.gradle.testing.jacoco.plugins.JacocoPluginExtension).toolVersion
+            def jacocoCore = project.configurations.detachedConfiguration(
+                    project.dependencies.create("org.jacoco:org.jacoco.core:${jacocoVersion}"))
+            // the reader needs JaCoCo's core, which the tests' discovery must not load: its own set
+            sourceSets.test.java.srcDir(probe)
+            sourceSets.test.java.exclude('com/forja/probe/LinhasPorTeste.java')
+            sourceSets.create('forjaLinhas') { java.srcDir(probe); java.include('com/forja/probe/LinhasPorTeste.java') }
+            tasks.named('processTestResources') {
+                from(probe) { include 'META-INF/**' }
+            }
+            // empty when the test runtime already has the launcher, else the launcher of the JUnit
+            // Platform the project resolves (so that the probe compiles and runs, as the tests do)
+            // the JUnit the tests compile against, resolved apart from the probe's own classpaths
+            def junit = project.configurations.maybeCreate('forjaJUnit')
+            junit.canBeResolved = true
+            junit.extendsFrom(project.configurations.testImplementation)
+            def launcher = {
+                if (project.configurations.testRuntimeClasspath.dependencies.any {
+                    it.name == 'junit-platform-launcher'
+                }) {
+                    return []
+                }
+                def commons = junit.files.find {
+                    it.name.startsWith('junit-platform-commons-')
+                }
+                def version = (commons.name =~ /junit-platform-commons-(.+)\.jar/)[0][1]
+                project.configurations.detachedConfiguration(project.dependencies.create(
+                        "org.junit.platform:junit-platform-launcher:${version}")).files
+            }
+            def jacocoAgent = project.configurations.detachedConfiguration(
+                    project.dependencies.create("org.jacoco:org.jacoco.agent:${jacocoVersion}:runtime"))
+            dependencies {
+                // the launcher: a project that does not declare it gets the one of its JUnit
+                testCompileOnly project.files({ launcher() })
+                testRuntimeOnly project.files({ launcher() })
+                testCompileOnly project.files({ jacocoAgent.files })
+                // the agent runtime (org.jacoco.agent.rt.RT) must be visible to the listener
+                testRuntimeOnly project.files({ jacocoAgent.files })
+                testCompileOnly project.files({ jacocoCore.files })
+                forjaLinhasCompileOnly project.files({ jacocoCore.files })
+            }
+            tasks.register('forjaTestLines', JavaExec) {
+                dependsOn 'classes', 'forjaLinhasClasses'
+                mustRunAfter 'test'
+                classpath = project.files(jacocoCore, sourceSets.forjaLinhas.output)
+                mainClass = 'com.forja.probe.LinhasPorTeste'
+                args sourceSets.main.output.classesDirs.first().path, '.forja-test-lines/exec',
+                        'src/main/java', '.forja-test-lines/linhas.json'
+                workingDir = project.projectDir
+            }
+        }
+    }
+    tasks.withType(Test).configureEach { Test t ->
+        t.systemProperty 'junit.jupiter.extensions.autodetection.enabled', 'true'
+        t.systemProperty 'junit.platform.execution.listeners.autodetection.enabled', 'true'
+        if (System.getProperty('forja.execdir') != null) {
+            t.doFirst { project.file(System.getProperty('forja.execdir')).mkdirs() }
+        }
+        forwarded.each { key ->
+            if (System.getProperty(key) != null) {
+                t.systemProperty key, System.getProperty(key)
+            }
+        }
+    }
+}

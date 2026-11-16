@@ -103,8 +103,12 @@ def _command_problems(label: str, plan: CommandPlan) -> list[str]:
     return problems
 
 
-def language_problems(adapter: LanguageAdapter, project: Path, scratch: Path) -> list[str]:
-    """Everything wrong with a language adapter, judged on a project with its manifest present."""
+def language_problems(
+    adapter: LanguageAdapter, project: Path, scratch: Path, test_id: str = "test_a::case"
+) -> list[str]:
+    """Everything wrong with a language adapter, judged on a project with its manifest present.
+    ``test_id`` is the id of a test as the reports of the language give it: an adapter that
+    filters by test is asked for that one."""
     problems: list[str] = []
     if adapter.contract_version != CONTRACT_VERSION:
         problems.append(f"contract version {adapter.contract_version}, expected {CONTRACT_VERSION}")
@@ -143,7 +147,7 @@ def language_problems(adapter: LanguageAdapter, project: Path, scratch: Path) ->
         if capability not in adapter.capabilities and planned:
             problems.append(f"plans {operation.value} without declaring {capability.value}")
 
-    problems += _filter_problems(adapter, project)
+    problems += _filter_problems(adapter, project, test_id)
     problems += _report_problems(adapter)
 
     for text in _garbage_texts():
@@ -170,13 +174,13 @@ def language_problems(adapter: LanguageAdapter, project: Path, scratch: Path) ->
     return problems
 
 
-def _filter_problems(adapter: LanguageAdapter, project: Path) -> list[str]:
+def _filter_problems(adapter: LanguageAdapter, project: Path, test_id: str) -> list[str]:
     problems: list[str] = []
     plain = adapter.plan(Operation.TEST, OperationRequest(root=project))
     by_file = adapter.plan(
         Operation.TEST, OperationRequest(root=project, test_files=("tests/test_a.py",))
     )
-    by_test = adapter.plan(Operation.TEST, OperationRequest(root=project, tests=("test_a::case",)))
+    by_test = adapter.plan(Operation.TEST, OperationRequest(root=project, tests=(test_id,)))
     for capability, answer in (
         (LanguageCapability.TEST_FILTER_BY_FILE, by_file),
         (LanguageCapability.TEST_FILTER_BY_TEST, by_test),

@@ -56,6 +56,7 @@ from forja.languages import (
     PythonAdapter,
     TypeScriptAdapter,
 )
+from forja.languages.csharp.adapter import find_dotnet_coverage
 from forja.languages.go.adapter import find_golangci_lint
 from forja.languages.python.environment import RunEnvironment, VirtualEnvironment
 from forja.orchestrator.agent_runner import ExecutorAgentRunner
@@ -149,7 +150,13 @@ def languages(
     )
     registry.register_language(GoAdapter(golangci_lint=lint), lambda: GoAdapter(golangci_lint=lint))
     registry.register_language(TypeScriptAdapter(), TypeScriptAdapter)
-    registry.register_language(CSharpAdapter(), CSharpAdapter)
+    # not a tool the Forja installs (its license is not a free one): the user's own, when there
+    # is one, lets the adapter find the tests of each line
+    snapshots = find_dotnet_coverage()
+    registry.register_language(
+        CSharpAdapter(dotnet_coverage=snapshots),
+        lambda: CSharpAdapter(dotnet_coverage=snapshots),
+    )
     registry.register_language(JavaAdapter(), JavaAdapter)
     return registry
 

@@ -1,0 +1,4 @@
+TAP version 13
+1..2
+not ok 1 - test/b.test.ts > sign is one for positives
+ok 2 - test/b.test.ts > sign is minus one for negatives # SKIP

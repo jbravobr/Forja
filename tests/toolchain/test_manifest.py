@@ -131,6 +131,7 @@ def test_the_size_is_a_positive_integer(size: str) -> None:
         ("zip", "https://example.org/a.tar.gz"),
         ("tar.xz", "https://example.org/a.tar.gz"),
         ("wheel", "https://example.org/a.zip"),
+        ("nupkg", "https://example.org/a.zip"),
     ],
 )
 def test_the_kind_must_match_the_file(kind: str, url: str) -> None:
@@ -143,6 +144,11 @@ def test_the_kind_must_match_the_file(kind: str, url: str) -> None:
 def test_the_suffix_is_read_from_the_path_not_the_query() -> None:
     text = VALID.replace("gitleaks.zip", "gitleaks.bin?x=.zip")
     assert "is not a zip file" in problems(text)
+
+
+def test_a_nuget_package_is_named_as_one() -> None:
+    text = VALID.replace('kind = "zip"', 'kind = "nupkg"').replace("gitleaks.zip", "tool.1.0.nupkg")
+    assert parse_manifest(text).tools[0].artifacts["windows-x64"].kind == "nupkg"
 
 
 def test_a_binary_may_have_any_name() -> None:
@@ -270,12 +276,12 @@ LANGUAGE_TOOLS = {
     "go": {"go", "golangci-lint"},
     "javascript": {"node"},
     "typescript": {"node"},
-    "csharp": {"dotnet-sdk"},
+    "csharp": {"dotnet-sdk", "dotnet-coverage"},
     "java": {"jdk", "maven", "gradle"},
 }
 
 
-def test_the_shipped_manifest_lists_the_twelve_tools() -> None:
+def test_the_shipped_manifest_lists_the_thirteen_tools() -> None:
     assert sorted(tool.name for tool in load_manifest().tools) == sorted(
         [
             "gitleaks",
@@ -287,6 +293,7 @@ def test_the_shipped_manifest_lists_the_twelve_tools() -> None:
             "golangci-lint",
             "node",
             "dotnet-sdk",
+            "dotnet-coverage",
             "jdk",
             "maven",
             "gradle",
@@ -343,3 +350,14 @@ def test_the_manifest_cannot_be_changed_after_it_is_read() -> None:
     ):
         with pytest.raises(ValidationError):
             setattr(target, field, 2)
+
+
+def test_dotnet_coverage_is_one_package_for_both_platforms_run_by_dotnet() -> None:
+    (tool,) = [tool for tool in load_manifest().tools if tool.name == "dotnet-coverage"]
+    windows, linux = tool.artifacts["windows-x64"], tool.artifacts["linux-x64"]
+
+    assert windows == linux
+    assert (windows.kind, windows.algorithm) == ("nupkg", "sha512")
+    assert windows.url.endswith(f"/dotnet-coverage.{tool.version}.nupkg")
+    assert windows.executable_path.endswith("/dotnet-coverage.dll")  # an assembly: dotnet runs it
+    assert tool.license == "MIT"  # what GitHub gives for the repository the package names

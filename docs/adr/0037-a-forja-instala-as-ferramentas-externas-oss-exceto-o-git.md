@@ -31,3 +31,14 @@ A linha do ADR 0017 "`forja doctor` verifica e explica; não instala" e a frase 
 - **Exige rede** na instalação; sem rede, falha com mensagem clara e sem instalação parcial.
 - **Licenças copyleft** (golangci-lint GPL-3.0, semgrep LGPL-2.1, Temurin GPLv2 com Classpath Exception): a Forja baixa e executa os binários, não os redistribui nem os empacota.
 - **Semgrep só existe como pacote Python** (leitura do passo 0): fica em ambiente virtual próprio, criado com o Python da Forja.
+
+## Adendo de 15/11/2026: ferramentas oficiais do ecossistema .NET, e como conferir a licença
+
+Decisão do dono em 15/11/2026, ao tratar do `dotnet-coverage`:
+
+- **O ecossistema oficial da Microsoft para o .NET é de código aberto, e a Forja usa as ferramentas oficiais dele.** Nenhuma ferramenta oficial da Microsoft para o .NET fica de fora por causa da licença.
+- **Antes de incluir uma ferramenta nova, a licença é conferida no GitHub**, no repositório que a ferramenta indica. Se a licença é de código aberto e a ferramenta é necessária, ela entra no manifesto.
+
+Com isso entrou o `dotnet-coverage` (necessário à mutação em C#, para saber que testes executam cada linha). O pacote indica o repositório `microsoft/codecoverage`, que o GitHub dá como MIT. O pacote NuGet traz também um `License.txt` próprio (Microsoft Software License Terms) e pede aceite de licença; fica registrado.
+
+O manifesto ganhou o tipo de artefato `nupkg`: um pacote NuGet, que é um zip, cujo executável é a montagem de uma ferramenta .NET, rodada pelo `dotnet`.

@@ -10,6 +10,7 @@ from forja.core.adapters import (
     extract_version,
     read_output_lines,
 )
+from forja.core.adapters.common import fits_command_line
 from forja.core.process import UnsafeCommand
 
 
@@ -148,3 +149,14 @@ def test_output_lines_lose_the_channel_prefix_and_survive_bad_files(tmp_path: Pa
     assert lines[:3] == ["first", "second", "no prefix"]
     assert lines[3].startswith("bad ")
     assert read_output_lines(tmp_path / "missing.log") == []
+
+
+def test_a_command_fits_when_the_process_runner_would_take_it() -> None:
+    assert fits_command_line(("tool", "a", "b")) is True
+    assert fits_command_line(("tool", "x" * 8192)) is True
+    assert fits_command_line(("tool", "x" * 8193)) is False  # one argument too large
+    assert fits_command_line(("tool", *["x" * 99] * 299)) is True
+    assert fits_command_line(("tool", *["x" * 99] * 300)) is False  # the whole of it too long
+    assert fits_command_line(("tool.cmd", "^(a|b)$")) is False  # the shell would misread it
+    assert fits_command_line(("tool.exe", "^(a|b)$")) is True
+    assert fits_command_line(()) is False

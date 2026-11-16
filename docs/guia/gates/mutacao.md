@@ -74,17 +74,52 @@ A verificação só age se a tentativa acrescentou linhas em arquivo de produç�
 1. A Forja roda a cobertura de testes da linguagem, para saber quais linhas algum teste executa.
 2. Se alguma linha acrescentada com ponto de mutação não tem cobertura, o gate reprova nesse ponto, sem rodar mutantes (veja "Linha sem teste").
 3. A Forja confirma que os testes passam numa cópia do projeto sem alteração. Se falham, o resultado é inconclusivo.
-4. Cada mutante roda em cópia descartável: troca-se o arquivo, roda-se o comando de testes da linguagem, restaura-se o arquivo. O repositório e a cópia de trabalho da tentativa nunca são alterados.
+4. Cada mutante roda em cópia descartável: troca-se o arquivo, rodam-se os testes, restaura-se o arquivo. O repositório e a cópia de trabalho da tentativa nunca são alterados.
 
-Em Go, como no `unclebob/mutator`, o mutante é julgado primeiro pelos testes do pacote do seu arquivo (`go test` nesse pacote, no lugar de `./...`). Morto ali, está morto. O que sobrevive ali ainda não conta como sobrevivente: a cobertura é medida sobre todos os pacotes, e a linha pode ser exercitada só por teste de outro pacote. Por isso ele é julgado de novo pelo comando inteiro antes de entrar na nota. Nas demais linguagens o comando é um só, o inteiro.
+#### Os testes da linha primeiro
 
-Limites de tempo: cada comando que julga um mutante tem a sua verificação inicial na cópia sem alteração, que pode levar até 600 segundos. Em Go há uma por pacote com mutante, e a do comando inteiro só roda se algum mutante sobreviver ao seu pacote. Cada mutante tem como limite dez vezes a duração da verificação inicial do comando que o julga, nunca menos de 2 segundos. Estourar o limite mata o mutante.
+O `unclebob/mutator` roda o comando inteiro de testes para cada mutante. A Forja roda primeiro só os testes que executam as linhas do mutante, onde sabe quais são:
+
+- um de cada vez, sem o paralelismo da ferramenta;
+- na frente, o teste que matou o mesmo mutante na tentativa anterior;
+- parando no primeiro teste que falha.
+
+Morto por eles, o mutante está morto. O que sobrevive a eles ainda não conta como sobrevivente: é julgado de novo pelo comando inteiro antes de entrar na nota. Nenhum veredito depende da escolha dos testes; ela só muda o tempo.
+
+Antes de julgar qualquer mutante, os testes escolhidos têm de passar sozinhos na cópia sem alteração. Um teste que só passa junto dos outros (porque depende do que outro teste deixou) falharia sozinho com qualquer código, e mataria o mutante sem motivo. Se os testes escolhidos não passam sozinhos, a Forja não os usa: o mutante é julgado só pelo comando inteiro.
+
+Como a Forja sabe os testes de cada linha, em cada pilha:
+
+| Pilha | De onde vêm os testes de cada linha | Unidade | Ordem pedida | Parada no primeiro que falha |
+| --- | --- | --- | --- | --- |
+| Python (pytest) | do próprio relatório de cobertura (coverage.py, um contexto por teste); sem execução a mais | o caso | a pedida | `-x` |
+| Go | de uma execução própria: um binário de teste por pacote e uma chamada por teste | a função de teste ou o subteste | os pacotes na ordem pedida; dentro do pacote, a ordem de declaração | `-failfast` |
+| Java (Maven e Gradle, JUnit 5) | de uma execução própria, com o JaCoCo e um ouvinte do JUnit que a Forja põe na execução | o método (um caso de teste parametrizado não é escolhível) | classes e métodos na ordem pedida | uma extensão do JUnit que a Forja põe na execução |
+| C# (xUnit) | de uma execução própria com o `dotnet-coverage`, um instantâneo por teste | o caso | a pedida dentro da classe | `stopOnFail` do xUnit |
+| TypeScript e JavaScript (Vitest) | de uma execução própria, com a cobertura do V8 tirada a cada teste | o caso | os arquivos na ordem pedida; dentro do arquivo, a de definição | `--bail=1` |
+| TypeScript e JavaScript (Jest) | de uma execução própria, com os contadores do Istanbul lidos a cada teste | o caso | os arquivos na ordem pedida; dentro do arquivo, a de definição | `--bail`, que vale por arquivo |
+
+Nada do projeto é alterado. O que a Forja acrescenta entra pela linha de comando, por variável de ambiente ou por arquivo dela, fora do projeto. O que a execução própria grava fica em `.forja-test-lines/`, na pasta do projeto, e é apagado depois de lido.
+
+Quando o mutante não tem testes escolhidos, vale o que valia antes. Isso acontece se:
+
+- o relatório não diz que teste executa a linha (uma linha executada só na carga do módulo, por exemplo);
+- a execução própria falhou ou o relatório dela não pôde ser lido;
+- os testes são tantos que não cabem numa linha de comando;
+- em C#, o `dotnet-coverage` não está instalado (`forja instalar` o instala);
+- em Java com Maven, as bibliotecas de que as peças da Forja precisam (JUnit, JaCoCo) ainda não estão no repositório local do Maven.
+
+Nesses casos o mutante é julgado pelo comando inteiro. Em Go, como no `unclebob/mutator`, ele é julgado antes pelos testes do pacote do seu arquivo (`go test` nesse pacote, no lugar de `./...`), e o sobrevivente do pacote é julgado pelo comando inteiro, porque a cobertura é medida sobre todos os pacotes e a linha pode ser exercitada só por teste de outro pacote.
+
+O comando inteiro, quando roda para um mutante, também para no primeiro teste que falha: só interessa saber se algum falha. O paralelismo dele não muda.
+
+Limites de tempo: cada comando que julga um mutante tem a sua verificação inicial na cópia sem alteração, que pode levar até 600 segundos. Mutantes julgados pelos mesmos testes, na mesma ordem, dividem a verificação inicial. As verificações iniciais dos testes escolhidos rodam lado a lado, uma em cada cópia. A do comando inteiro só roda se algum mutante precisar dele. Cada mutante tem como limite dez vezes a duração da verificação inicial do comando que o julga, nunca menos de 2 segundos. Estourar o limite mata o mutante.
 
 Prioridade: a verificação inicial e os testes de cada mutante rodam na prioridade mais baixa do sistema (classe ociosa no Windows, `nice` 19 no Linux e no macOS), junto com tudo o que eles iniciam. A mutação usa todos os processadores, mas só o que o resto da máquina deixa livre: quem está no teclado vem primeiro. Com a máquina ocupada, a mutação demora mais.
 
 Estouro de tempo com a máquina ocupada: um mutante que estoura o tempo ao lado dos outros é julgado de novo sozinho. Se estoura de novo, a Forja roda em seguida os testes na cópia sem alteração, com o mesmo limite. Se eles passam, o mutante está morto. Se nem eles terminam a tempo, quem está lento é a máquina, não o mutante: a Forja não conta o mutante como morto e o resultado é inconclusivo. Nisto a Forja difere do `unclebob/mutator`, que conta todo estouro como morte.
 
-O comando de testes dos mutantes é o do adaptador da linguagem. Em projeto Maven ele é `mvn test`, sem o `clean` do gate de testes: os mutantes de um trabalhador rodam um depois do outro na mesma cópia, e o compilador refaz o que mudou. Um comando de teste trocado em `[checks.tests.commands]` não vale para a mutação, e a mutação não aceita `commands`.
+O comando de testes dos mutantes é o do adaptador da linguagem. Em projeto Maven ele é `mvn test`, sem o `clean` do gate de testes: os mutantes de um trabalhador rodam um depois do outro na mesma cópia, e o compilador refaz o que mudou. Um comando de teste trocado em `[checks.tests.commands]` não vale para a mutação, e a mutação não aceita `commands`. A execução própria que acha os testes de cada linha também não aceita comando trocado: ela só funciona com as peças da Forja.
 
 ### Mutação incremental
 
@@ -93,7 +128,7 @@ A Forja não muta o projeto todo, só o que a tentativa tocou. Entram:
 - todo ponto de mutação nas linhas que a tentativa acrescentou;
 - todo ponto de mutação dentro das funções que contêm alguma linha acrescentada, mesmo nas linhas antigas dessas funções.
 
-Uma função que a tentativa não tocou não entra, e um sobrevivente que já existia nela não é cobrado. A Forja também não guarda resultado de uma tentativa para a seguinte: cada tentativa vale por si. A regra é de catraca, não de faxina: o gate cobra o que a tentativa mexeu, não a dívida antiga.
+Uma função que a tentativa não tocou não entra, e um sobrevivente que já existia nela não é cobrado. A Forja também não aproveita veredito de uma tentativa para a seguinte: cada tentativa vale por si, e todo mutante roda de novo. A única coisa guardada entre tentativas da mesma execução é qual teste matou cada mutante, e ela só serve para pôr esse teste na frente da fila. A regra é de catraca, não de faxina: o gate cobra o que a tentativa mexeu, não a dívida antiga.
 
 | Situação | O que acontece |
 | --- | --- |

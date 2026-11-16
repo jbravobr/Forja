@@ -5,6 +5,7 @@ reports statements), the reader takes the reading that never invents coverage: a
 only if something that starts or spans there ran.
 """
 
+import re
 from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
@@ -49,6 +50,16 @@ def _report(files: dict[str, _Lines]) -> CoverageReport:
     return CoverageReport({path: lines.build() for path, lines in sorted(files.items())})
 
 
+_PHASE = re.compile(r"\|(setup|run|call|teardown)$")
+
+
+def _test_of_context(context: object) -> str:
+    """The test a coverage.py context names: ``tests/test_a.py::test_x``, or with the phase
+    pytest-cov adds, ``tests/test_a.py::test_x|run``. ``''`` is no test. Only that ending is
+    cut: the id of a parametrized test may hold a ``|`` of its own."""
+    return _PHASE.sub("", str(context))
+
+
 def read_coverage_py_json(
     text: str, root: Path, source_roots: Sequence[str] = ()
 ) -> CoverageReport:
@@ -68,8 +79,7 @@ def read_coverage_py_json(
         contexts = data.get("contexts", {})
         if isinstance(contexts, dict):
             for line, names in contexts.items():
-                # "tests/test_a.py::test_x|run": the part before '|' is the test; '' is no test
-                found = {str(n).split("|")[0] for n in names if str(n).split("|")[0]}
+                found = {test for test in map(_test_of_context, names) if test}
                 if found:
                     lines.tests[number(line, "context line")] |= found
     return _report(result)

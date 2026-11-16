@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -80,15 +81,50 @@ def link(packages: Path, project: Path) -> None:
         subprocess.run(["cmd", "/c", "mklink", "/J", str(target), str(packages)], check=True)
 
 
-def judge(repo: Repo, tmp_path: Path, packages: Path, test_text: str) -> GateResult:
+def judge(
+    repo: Repo,
+    tmp_path: Path,
+    packages: Path,
+    test_text: str,
+    adapter: TypeScriptAdapter | None = None,
+    history: Path | None = None,
+) -> GateResult:
     """Commit the base project, then add ``sub`` with the given test file and judge the change."""
-    for name, text in BASE.items():
+    changed = {"calc.ts": WITH_SUB, "calc.test.ts": test_text}
+    return judge_files(
+        repo,
+        tmp_path,
+        BASE,
+        changed,
+        ("calc.ts",),
+        adapter=adapter,
+        history=history,
+        prepare=lambda root: link(packages, root),
+    )
+
+
+def judge_files(
+    repo: Repo,
+    tmp_path: Path,
+    base: dict[str, str],
+    changed: dict[str, str],
+    production: tuple[str, ...],
+    adapter: TypeScriptAdapter | None = None,
+    history: Path | None = None,
+    prepare: Callable[[Path], None] | None = None,
+) -> GateResult:
+    """Commit ``base``, prepare the project (``prepare``, once the base is in), write ``changed``
+    and judge it as the gate does."""
+    for name, text in base.items():
+        (repo.path / name).parent.mkdir(parents=True, exist_ok=True)
         (repo.path / name).write_text(text, encoding="utf-8", newline="\n")
     repo.sh("add", "-A")
     repo.sh("commit", "-m", "project")
-    link(packages, repo.path)
-    (repo.path / "calc.ts").write_text(WITH_SUB, encoding="utf-8", newline="\n")
-    (repo.path / "calc.test.ts").write_text(test_text, encoding="utf-8", newline="\n")
+    if prepare is not None:
+        prepare(repo.path)
+    for name, text in changed.items():
+        (repo.path / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo.path / name).write_text(text, encoding="utf-8", newline="\n")
 
     log = EventLog.open(tmp_path / "events.jsonl", RUN, clock=FakeClock())
     log.append_transition(Level.EXECUTION, RUN, None, ExecutionState.PREPARING)
@@ -105,12 +141,13 @@ def judge(repo: Repo, tmp_path: Path, packages: Path, test_text: str) -> GateRes
     changes = asyncio.run(read_changes(repo.git.at(repo.path)))
     check = MutationCheck(
         tools,
-        TypeScriptAdapter(),
+        adapter or TypeScriptAdapter(),
         repo.path,
         changes,
-        ("calc.ts",),
+        production,
         host_env,
         language="typescript",
+        history=history,
     )
     data = GateInput(Path("."), "c" * 40, "t", "s", "a", values={})
     return asyncio.run(check.evaluate(data))

@@ -57,7 +57,11 @@ def facts(result: object) -> list[tuple[str, str, object]]:
 def test_the_adapter_keeps_every_promise_of_the_interface(
     adapter: CSharpAdapter, project: Path, tmp_path: Path
 ) -> None:
-    assert language_problems(adapter, project, tmp_path / "scratch") == []
+    problems = language_problems(
+        adapter, project, tmp_path / "scratch", test_id="Calc.Tests.CalculatorTests.Adds"
+    )
+
+    assert problems == []
 
 
 # -- finding and classifying ----------------------------------------------------------------------
@@ -166,10 +170,12 @@ def test_a_project_alone_is_enough(tmp_path: Path) -> None:
     assert isinstance(plan(Operation.BUILD, tmp_path / "nowhere"), NotSupported)
 
 
-def test_no_filter_of_the_tests_is_offered(project: Path) -> None:
-    for operation in (Operation.TEST, Operation.COVERAGE):
-        assert isinstance(plan(operation, project, tests=("Adds",)), NotSupported)
-        assert isinstance(plan(operation, project, test_files=("a.cs",)), NotSupported)
+def test_the_coverage_run_offers_no_filter_and_the_test_run_offers_no_file_filter(
+    project: Path,
+) -> None:
+    assert isinstance(plan(Operation.COVERAGE, project, tests=("Adds",)), NotSupported)
+    assert isinstance(plan(Operation.COVERAGE, project, test_files=("a.cs",)), NotSupported)
+    assert isinstance(plan(Operation.TEST, project, test_files=("a.cs",)), NotSupported)
 
 
 def test_dotnet_may_read_its_own_settings_from_the_environment(project: Path) -> None:

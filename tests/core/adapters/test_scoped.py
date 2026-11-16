@@ -174,6 +174,39 @@ def test_the_report_is_looked_for_under_the_project() -> None:
     assert spec == ReportSpec(ReportFormat.COVERAGE_PY_JSON, "web/cov.json", ("web/src",))
 
 
+def test_the_index_of_a_report_for_each_test_is_looked_for_under_the_project_too() -> None:
+    class Indexed(Recording):
+        def report(self, operation: Operation) -> ReportSpec | NotSupported:
+            return ReportSpec(ReportFormat.GO_COVERPROFILE, ".t/*.out", index=".t/index.json")
+
+    spec = ScopedAdapter(Indexed(), "web").report(Operation.TEST_LINES)
+
+    assert spec == ReportSpec(
+        ReportFormat.GO_COVERPROFILE, "web/.t/*.out", index="web/.t/index.json"
+    )
+    assert ScopedAdapter(Indexed(), ".").report(Operation.TEST_LINES) == Indexed().report(
+        Operation.TEST_LINES
+    )
+
+
+def test_the_inner_adapter_is_told_the_mutated_file_relative_to_the_project_and_the_tests_as_given(
+    tmp_path: Path,
+) -> None:
+    inner = Recording()
+    request = OperationRequest(
+        root=tmp_path, rerun=True, mutated="web/app/pkg/a.go", tests=("pkg/TestA", "pkg/TestB")
+    )
+
+    ScopedAdapter(inner, "web/app").plan(Operation.TEST, request)
+    ScopedAdapter(inner, "web/app").plan(Operation.TEST, OperationRequest(root=tmp_path))
+
+    told, plain = inner.requests
+    assert told.mutated == "pkg/a.go"
+    # the ids are those of the project, as its own reports give them: nothing to translate
+    assert (told.tests, told.rerun) == (("pkg/TestA", "pkg/TestB"), True)
+    assert plain.mutated is None
+
+
 def test_ownership_is_asked_with_paths_relative_to_the_project() -> None:
     scoped = ScopedAdapter(Recording(), "web")
 
