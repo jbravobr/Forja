@@ -1586,3 +1586,42 @@ Rodadas minhas, uma execução de cada vez, máquina parada, `MutationCheck.eval
 - O `doctor` não lista o `dotnet-coverage`.
 - O checkout de verificação (`%LOCALAPPDATA%\\forja-verif`) está em `c180ea5`. O material desta fase (scripts de medição, `final.jsonl`, a árvore do "antes") está em `%LOCALAPPDATA%\\forja-fase4`.
 - As pendências da entrada anterior continuam.
+
+## 15/11/2026 — a escolha dos testes da linha fica desligada por padrão
+
+### Decisão do dono
+
+Ponto 1 da entrada anterior: desligar por padrão, com uma chave na política para ligar. O dono registrou também que esta parte está custando mais do que devia: a Forja sabe testar e sabe rodar a mutação e o CRAP tirados do `unclebob`, e o trabalho não deveria ter chegado a este ponto de complicação.
+
+### O que foi feito
+
+| Mudança | Arquivos | Teste novo | Commit |
+| --- | --- | --- | --- |
+| Limite novo `line_tests` em `[checks.mutation.limits]`, inteiro, padrão `0`. Só com `1` ou mais o gate mede os testes de cada linha (`test_lines`) e julga cada mutante primeiro por eles. `line_tests_first` lê a chave; `MutationCheck._named` devolve `None` sem ela. | `checks/mutation.py`, `checks/specs.py`, `core/policy/config.py` | dois em `tests/checks/test_mutation.py`, um caso em `tests/core/policy/test_config.py`, um ajuste em `tests/checks/test_pieces.py` | `73998b4` |
+| Os testes `slow` que provam a escolha pedem a chave. Os três testes de Go do pacote primeiro provam os dois modos; desde a fase 4 só afirmavam o modo com a escolha. | `tests/languages/{go,java,csharp,typescript}`, `tests/checks/test_mutation.py` | os três de Go, nos dois modos | `73998b4` |
+| Guia: a seção "Os testes da linha primeiro" diz que vem desligada, por quê e como ligar; a chave entrou nas tabelas. | `docs/guia/gates/mutacao.md`, `docs/guia/forja-toml.md` | nenhum | `73998b4` |
+
+### O que muda com a chave desligada
+
+- **O gate volta a julgar como o mutator, nas seis linguagens:** o comando de testes para cada mutante; em Go, o pacote do arquivo primeiro (fase 2).
+- **Fica ligado o que não depende da escolha:** a parada no primeiro teste que falha quando o comando roda para um mutante, a prioridade baixa, um worker por núcleo e a guarda do estouro de tempo. A parada usa peças da Forja em C# (`runner-stop.json`) e no Maven (a extensão do JUnit); essas continuam em uso.
+- **Deixa de rodar:** a execução que descobre os testes de cada linha, a verificação inicial por conjunto de testes e a execução estreita em série. O `killers.json` não é mais gravado. O `dotnet-coverage` deixa de ser necessário para o gate.
+- **O código da escolha continua no repositório,** com os seus testes `slow`, e os achados de revisão sem correção da entrada anterior só valem com a chave ligada.
+- **O Vitest perde o ganho medido** (36 s para 15,5 s no projeto gerado), como as outras pilhas deixam de pagar a perda.
+- **Nenhum veredito muda,** ligada ou desligada.
+
+### Verificação
+
+- `ruff check .`, `ruff format --check src tests scripts/mutate.py` e `mypy` strict: limpos, 648 arquivos.
+- `pytest -m "not slow" -n 8`, Windows: 10086 aprovados, 41 pulados e 1 falha, `tests/checks/test_pieces.py`, que fixa os limites de cada check; ajustado, e o arquivo passou sozinho (33). A suíte inteira não rodou de novo depois do ajuste.
+- Testes `slow` com a ferramenta de verdade, um comando de cada vez, com limite de tempo: Python (gate) 4 aprovados; Go 13; TypeScript 12; Java, Maven e Gradle, com o JDK 21, 17.
+- C#: 4 aprovados no modo padrão. **Os 10 testes com os testes por linha foram pulados:** o `dotnet-coverage` não está instalado nesta máquina (a instalação da fase 4 não ficou).
+- Não rodou: a mutação dos três arquivos de `src` tocados, que toma a máquina inteira; nenhuma medição de tempo com a chave desligada; a suíte completa com `slow`; Linux; macOS.
+
+### Pendências
+
+- Mutação de `checks/mutation.py`, `checks/specs.py` e `core/policy/config.py`, junto com a dos arquivos da fase 4.
+- Os testes de C# com os testes por linha, numa máquina com o `dotnet-coverage`.
+- Medir num projeto de verdade, com testes que demoram, só se o dono quiser reabrir a escolha.
+- **Para o dono:** se a fase 5 (script) e as medições que faltam (Maven, Jest gerado) continuam na fila ou são encerradas.
+- As demais pendências da entrada anterior continuam.
