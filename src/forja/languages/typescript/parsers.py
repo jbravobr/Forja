@@ -20,6 +20,7 @@ _PRETTIER_ERROR = re.compile(rf"^\[error\] (?P<path>{_SOURCE}): ")
 _PRETTIER_FILE = re.compile(rf"^(?P<path>{_SOURCE})$")
 _LINT_LINE = re.compile(rf"^(?P<path>{_SOURCE}):\d+:\d+: .*\((?P<rule>[^()\s]+)\)$")
 _TSC_ERROR = re.compile(rf"^(?P<path>{_SOURCE})\(\d+,\d+\): error TS\d+: ")
+_SYNTAX_ERROR = re.compile(rf"^(?P<path>{_SOURCE}):\d+: \w*Error\b")  # Forja's ``js_syntax.cjs``
 _TAP_RESULT = re.compile(r"^(?P<not>not )?ok \d+ - (?P<rest>.*)$")
 _TAP_NOTE = re.compile(r" # (?P<note>SKIP|TODO|time=)\S*.*$")
 _LINT_OK = (0, 1)
@@ -81,12 +82,14 @@ def parse_lint(output: ToolOutput) -> ParseResult:
 
 
 def parse_build(output: ToolOutput) -> ParseResult:
-    """The files ``tsc`` could not compile."""
+    """The files ``tsc`` could not compile or, in plain JavaScript, Node could not parse."""
     if output.exit_code is None:
-        return Unparseable("tsc did not finish")
+        return Unparseable("the build did not finish")
     if output.exit_code == 0:
         return Parsed(())
-    paths = sorted({_path(m["path"]) for m in map(_TSC_ERROR.match, _lines(output)) if m})
+    lines = _lines(output)
+    found = [_TSC_ERROR.match(line) or _SYNTAX_ERROR.match(line) for line in lines]
+    paths = sorted({_path(m["path"]) for m in found if m})
     if not paths:
         return Parsed((_draft("build.failed", TargetKind.MODULE, "build", 1, "failures"),))
     return Parsed(

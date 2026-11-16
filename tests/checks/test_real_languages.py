@@ -242,6 +242,28 @@ TYPESCRIPT = Project(
     env=frozenset(NODE_ENVIRONMENT | {"TEMP", "TMP", "USERPROFILE", "SYSTEMROOT", "PATHEXT"}),
     adapter=lambda root: TypeScriptAdapter(),
 )
+JS_CALC = "export function add(a, b) {\n  return a - b;\n}\n"
+# No ``tsconfig.json`` and no compiler: the same adapter, and the tests are what loads the code.
+JAVASCRIPT = replace(
+    TYPESCRIPT,
+    base={
+        "package.json": json.dumps(
+            {
+                "name": "calc",
+                "type": "module",
+                "devDependencies": {k: v for k, v in TS_PACKAGES.items() if k != "typescript"},
+            }
+        ),
+        ".gitignore": "node_modules\n.forja-coverage/\n",
+        "calc.js": JS_CALC,
+        "zero.test.js": TS_TEST.format(name="zero", a=0, b=0, want=0),
+    },
+    tests={"add.test.js": TS_TEST.format(name="adds", a=2, b=3, want=5)},
+    declared=DeclaredTest(criterion_id=1, test_id="add.test.js > adds", path="add.test.js"),
+    fix={"calc.js": JS_CALC.replace("a - b", "a + b")},
+    scope=("calc.js",),
+    label="javascript",
+)
 PROJECTS = [GO, CSHARP, JAVA, GRADLE, TYPESCRIPT]
 
 
@@ -292,7 +314,7 @@ MIXED = [
         label="go-and-typescript-fixing-go",
     ),
 ]
-EVERY_PROJECT = [*PROJECTS, *IN_A_DIRECTORY, *MIXED]
+EVERY_PROJECT = [*PROJECTS, *IN_A_DIRECTORY, *MIXED, JAVASCRIPT]
 
 
 def name_of(project: Project) -> str:

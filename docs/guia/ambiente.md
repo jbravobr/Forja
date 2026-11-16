@@ -179,8 +179,11 @@ A auditoria de dependências lê os arquivos de trava que existirem: `requiremen
 | Java | `pom.xml`, `build.gradle` ou `build.gradle.kts` (Maven se houver `pom.xml`) |
 | C# | `*.sln` ou `*.csproj` |
 | TypeScript | `package.json` junto de `tsconfig.json` |
+| JavaScript | `package.json` sem `tsconfig.json`, que depende de `vitest` ou de `jest` |
 
 Sem nenhum deles, a Forja pede a linguagem e lista os arquivos aceitos.
+
+Um `package.json` sem `tsconfig.json` e sem `vitest` nem `jest` não é projeto para a Forja: é o manifesto das ferramentas do repositório (Prettier, commitlint, o site da documentação), e não há nele teste que ela possa rodar. Um repositório Python ou Go com um `package.json` assim continua sendo só Python ou Go.
 
 ## Prevenção de suspensão
 

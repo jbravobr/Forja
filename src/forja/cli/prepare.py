@@ -240,7 +240,8 @@ def check_repository(detection: Detection) -> Path:
     ):
         raise Refused(
             "Não encontrei nenhuma linguagem neste repositório (pyproject.toml, go.mod, "
-            "package.json com tsconfig.json, .sln ou .csproj, pom.xml ou build.gradle[.kts])."
+            "package.json com tsconfig.json ou com vitest ou jest, .sln ou .csproj, pom.xml ou "
+            "build.gradle[.kts])."
         )
     if detection.changed:
         sample = ", ".join(detection.changed[:3])

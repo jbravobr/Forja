@@ -333,7 +333,7 @@ Os objetivos que alteram um repositório existente (`refatorar`, `corrigir`, `in
 
 ### Repositório limpo
 
-Em `refatorar`, `corrigir` e `investigar`, a Forja recusa a execução se houver alterações não salvas no repositório, dizendo quantos arquivos e três exemplos. Faça commit ou stash antes: a Forja nunca mexe no que você ainda não salvou. As linguagens detectadas são Python (`pyproject.toml`), Go (`go.mod`), TypeScript (`package.json` com `tsconfig.json`), C# (`.sln` ou `.csproj`) e Java (`pom.xml` ou `build.gradle[.kts]`). Sem nenhuma delas, a execução recusa.
+Em `refatorar`, `corrigir` e `investigar`, a Forja recusa a execução se houver alterações não salvas no repositório, dizendo quantos arquivos e três exemplos. Faça commit ou stash antes: a Forja nunca mexe no que você ainda não salvou. As linguagens detectadas são Python (`pyproject.toml`), Go (`go.mod`), TypeScript (`package.json` com `tsconfig.json`), JavaScript (`package.json` sem `tsconfig.json`, que depende de `vitest` ou de `jest`), C# (`.sln` ou `.csproj`) e Java (`pom.xml` ou `build.gradle[.kts]`). Sem nenhuma delas, a execução recusa.
 
 ### Execução incompleta
 

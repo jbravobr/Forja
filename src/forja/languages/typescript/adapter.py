@@ -5,6 +5,9 @@ It only describes commands and reads their output; the core runs them. Every too
 project installed in its own ``node_modules``, started through ``node``: Forja installs none of
 them. A tool the project does not depend on makes its operations not supported, and nothing
 pretends otherwise.
+
+A project without ``tsconfig.json`` is plain JavaScript. It has no compiler, and its build is the
+syntax check of Node itself, file by file (``js_syntax.cjs``), as ``compileall`` is Python's.
 """
 
 import json
@@ -67,6 +70,7 @@ JEST_REPORTER = str(Path(__file__).with_name("jest_reporter.cjs"))
 JEST_SEQUENCER = str(Path(__file__).with_name("jest_sequencer.cjs"))
 JEST_LINES_SETUP = str(Path(__file__).with_name("jest_linhas_setup.cjs"))
 JEST_LINES_REPORTER = str(Path(__file__).with_name("jest_linhas_reporter.cjs"))
+JS_SYNTAX = str(Path(__file__).with_name("js_syntax.cjs"))
 VITEST_CONFIG = str(Path(__file__).with_name("vitest_forja.config.mjs"))
 VITEST_LINES = str(Path(__file__).with_name("vitest_linhas.mjs"))
 _VERSION = r"(\d+\.\d+\.\d+\S*)"
@@ -77,6 +81,7 @@ ESLINT = "node_modules/eslint/bin/eslint.js"
 TSC = "node_modules/typescript/bin/tsc"
 VITEST = "node_modules/vitest/vitest.mjs"
 JEST = "node_modules/jest/bin/jest.js"
+RUNNERS = frozenset({"vitest", "jest"})  # the packages of the test runners this adapter starts
 NODE_ENVIRONMENT = frozenset({"LOCALAPPDATA", "APPDATA", "NODE_PATH"})
 _SCRIPT_SUFFIXES = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
 _TEST_NAME = re.compile(r"\.(test|spec)\.[cm]?[jt]sx?$")
@@ -99,6 +104,16 @@ def _dependencies(root: Path) -> frozenset[str]:
         if isinstance(section, dict):
             names.update(str(name) for name in section)
     return frozenset(names)
+
+
+def is_project(root: Path) -> bool:
+    """Whether the directory holds a project of this adapter: a ``package.json`` beside a
+    ``tsconfig.json`` (TypeScript) or, without one, a ``package.json`` that depends on a test
+    runner (JavaScript). A ``package.json`` with neither is the manifest of a repository's
+    tooling: nothing in it could be built or tested."""
+    if not (root / MANIFEST).is_file():
+        return False
+    return (root / TSCONFIG).is_file() or bool(_dependencies(root) & RUNNERS)
 
 
 def _split_test_id(test_id: str) -> tuple[str, str] | None:
@@ -146,10 +161,13 @@ class TypeScriptAdapter:
     # -- finding and classifying ---------------------------------------------------------------
 
     def detect(self, root: Path) -> Detection | None:
-        if not ((root / MANIFEST).is_file() and (root / TSCONFIG).is_file()):
+        """TypeScript when a ``tsconfig.json`` sits beside the ``package.json``; without one,
+        JavaScript, if the package depends on a test runner."""
+        if not is_project(root):
             return None
+        manifests = (MANIFEST, TSCONFIG) if (root / TSCONFIG).is_file() else (MANIFEST,)
         probe = VersionProbe(self._plan(root, (*self._node, "--version")), _NODE_VERSION)
-        return Detection("typescript", (".",), (MANIFEST, TSCONFIG), probe)
+        return Detection("typescript", (".",), manifests, probe)
 
     def owns_test(self, test_id: str, path: str, text: str) -> bool:
         """The ids are ``file > suite > test`` with the file relative to the runner's root, which
@@ -207,6 +225,9 @@ class TypeScriptAdapter:
             case Operation.LINT | Operation.LINT_FIX if "eslint" in dependencies:
                 fix = ("--fix",) if operation is Operation.LINT_FIX else ()
                 argv = (*node, ESLINT, "-f", ESLINT_FORMATTER, *fix, "--", *targets)
+            case Operation.BUILD if not (request.root / TSCONFIG).is_file():
+                # plain JavaScript has nothing ``tsc`` could read: Node checks each file's syntax
+                argv = (*node, JS_SYNTAX, *sorted(_SKIPPED_DIRECTORIES))
             case Operation.BUILD if "typescript" in dependencies:
                 argv = (*node, TSC, "--noEmit", "--pretty", "false", "-p", ".")
             case Operation.TEST | Operation.COVERAGE if request.test_files:

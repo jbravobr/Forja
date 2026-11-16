@@ -227,6 +227,35 @@ def test_a_manifest_in_a_subfolder_counts_as_a_language(
     assert "Não encontrei nenhuma linguagem" not in talk.text
 
 
+def test_a_javascript_repository_without_a_tsconfig_is_not_refused(
+    repo: Path, tmp_path: Path, environ: dict[str, str]
+) -> None:
+    git(repo, "rm", "-q", "pyproject.toml")
+    manifest = '{"name": "calc", "devDependencies": {"vitest": "5"}}'
+    (repo / "package.json").write_text(manifest, encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "javascript")
+    criteria = tmp_path / "c.json"
+    criteria.write_text(CRITERIA, encoding="utf-8")
+    talk = Talk()
+    go(["corrigir", "x", "--criterios", str(criteria), "--plano"], talk, environ)
+    assert "Não encontrei nenhuma linguagem" not in talk.text
+
+
+def test_a_package_with_no_tsconfig_and_no_test_runner_is_no_language(
+    repo: Path, tmp_path: Path, environ: dict[str, str]
+) -> None:
+    git(repo, "rm", "-q", "pyproject.toml")
+    (repo / "package.json").write_text('{"devDependencies": {"prettier": "3"}}', encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "tooling only")
+    criteria = tmp_path / "c.json"
+    criteria.write_text(CRITERIA, encoding="utf-8")
+    talk = Talk()
+    assert go(["corrigir", "x", "--criterios", str(criteria), "--plano"], talk, environ) == 2
+    assert "Não encontrei nenhuma linguagem" in talk.text
+
+
 def test_a_repository_with_no_language_is_refused(
     repo: Path, tmp_path: Path, environ: dict[str, str]
 ) -> None:

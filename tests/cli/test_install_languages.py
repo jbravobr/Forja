@@ -118,7 +118,7 @@ def test_csharp_is_found_by_a_solution_or_a_project(tmp_path: Path, name: str) -
     ("files", "found"),
     [
         (("package.json", "tsconfig.json"), True),
-        (("package.json",), False),
+        (("package.json",), False),  # the manifest of the repository's tooling, not a project
         (("tsconfig.json",), False),
         ((), False),
     ],
@@ -130,3 +130,11 @@ def test_typescript_needs_both_the_package_and_its_tsconfig(
         (tmp_path / name).write_text("{}", encoding="utf-8")
 
     assert _languages_in(tmp_path)["typescript"] is found
+
+
+@pytest.mark.parametrize("runner", ["vitest", "jest"])
+def test_javascript_is_a_package_that_depends_on_a_test_runner(tmp_path: Path, runner: str) -> None:
+    manifest = f'{{"devDependencies": {{"{runner}": "1"}}}}'
+    (tmp_path / "package.json").write_text(manifest, encoding="utf-8")
+
+    assert _languages_in(tmp_path)["typescript"] is True

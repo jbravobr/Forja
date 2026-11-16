@@ -21,6 +21,7 @@ from forja.core.adapters.projects import project_directories
 from forja.core.idempotency.git import Git
 from forja.executors import adapter_for
 from forja.languages.java.gradle import MANIFESTS as GRADLE_MANIFESTS
+from forja.languages.typescript.adapter import is_project as is_node_project
 
 
 @dataclass(frozen=True)
@@ -100,8 +101,7 @@ def _languages_in(directory: Path) -> dict[str, bool]:
         "gradle": any((directory / name).is_file() for name in GRADLE_MANIFESTS)
         and not any((directory / name).is_file() for name in ("gradlew", "gradlew.bat")),
         "csharp": any(directory.glob("*.sln")) or any(directory.glob("*.csproj")),
-        "typescript": (directory / "package.json").is_file()
-        and (directory / "tsconfig.json").is_file(),
+        "typescript": is_node_project(directory),  # JavaScript too: one adapter
     }
 
 

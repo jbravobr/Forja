@@ -40,8 +40,8 @@ class ScaffoldError(Exception):
 
 
 def template_adapters() -> dict[str, LanguageAdapter]:
-    """The languages a new project can be made in, by name. JavaScript is not one of them: the
-    TypeScript adapter reads ``tsconfig.json``, and a project without it would not be seen."""
+    """The languages a new project can be made in, by name. JavaScript is not one of them: its
+    adapter is the TypeScript one, and the model that adapter has is a TypeScript project."""
     adapters: tuple[LanguageAdapter, ...] = (
         PythonAdapter(),
         GoAdapter(),

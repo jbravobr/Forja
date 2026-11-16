@@ -160,7 +160,8 @@ O gate 4 reprova a tentativa que deixa o projeto sem compilar. A verificação �
 | Linguagem | Comando | Quando existe |
 | --- | --- | --- |
 | Python | `python -m compileall` | sempre |
-| TypeScript | `tsc --noEmit -p .` | o `package.json` depende de `typescript` |
+| TypeScript | `tsc --noEmit -p .` | há `tsconfig.json` e o `package.json` depende de `typescript` |
+| JavaScript | `node --check` em cada arquivo `.js`, `.mjs` e `.cjs` | não há `tsconfig.json` |
 | Go | `go build ./...` | sempre |
 | Java | `mvn clean test-compile` ou `gradle compileJava compileTestJava` | há `pom.xml` ou `build.gradle` |
 | C# | `dotnet build` | há uma solução ou um projeto único na raiz |
@@ -174,3 +175,5 @@ build = ["npm", "run", "build"]
 ```
 
 Nas linguagens sem check de tipos, o `build` faz o papel da análise de tipos: `tsc`, `javac` (pelo Maven ou Gradle), `go build` e o compilador do C#.
+
+JavaScript não tem compilador. Num projeto sem `tsconfig.json`, o `build` é a conferência de sintaxe do próprio Node, arquivo por arquivo, como o `compileall` é a do Python: só vê sintaxe. Ficam de fora `node_modules`, `dist`, `build`, `coverage` e as pastas ocultas. Arquivo `.jsx` não é conferido, porque o Node não o lê. Se o projeto escreve JSX, ou outra sintaxe que só um transpilador entende, dentro de arquivo `.js`, o Node o recusa: declare em `[checks.build.commands]` o comando de build do repositório.

@@ -29,6 +29,7 @@ from forja.languages.typescript.adapter import (
     COVERAGE_REPORT,
     ESLINT_FORMATTER,
     JEST_REPORTER,
+    JS_SYNTAX,
 )
 from tests.core.adapters.conformance import language_problems
 
@@ -88,9 +89,43 @@ def test_a_project_is_found_by_its_manifest_and_its_tsconfig(project: Path, tmp_
     assert found.manifests == ("package.json", "tsconfig.json")
     assert found.toolchain_probe is not None
     assert found.toolchain_probe.plan.argv == ("n", "--version")
-    (project / "tsconfig.json").unlink()
-    assert ADAPTER.detect(project) is None
     assert ADAPTER.detect(tmp_path / "nowhere") is None
+
+
+def test_a_javascript_project_is_found_by_its_manifest_alone(project: Path) -> None:
+    (project / "tsconfig.json").unlink()
+
+    found = ADAPTER.detect(project)
+
+    assert found is not None
+    assert (found.language, found.roots) == ("typescript", (".",))
+    assert found.manifests == ("package.json",)
+    assert found.toolchain_probe is not None
+    assert found.toolchain_probe.plan.argv == ("n", "--version")
+
+
+@pytest.mark.parametrize(
+    ("manifest", "found"),
+    [
+        ('{"devDependencies": {"jest": "30"}}', True),
+        ('{"dependencies": {"vitest": "5"}}', True),
+        ('{"devDependencies": {"prettier": "3"}}', False),  # the repository's tooling
+        ('{"name": "bare"}', False),
+        ("not json", False),
+    ],
+)
+def test_without_a_tsconfig_a_package_is_a_project_only_with_a_test_runner(
+    tmp_path: Path, manifest: str, found: bool
+) -> None:
+    (tmp_path / "package.json").write_text(manifest, encoding="utf-8")
+
+    assert (ADAPTER.detect(tmp_path) is not None) is found
+
+
+def test_a_tsconfig_without_a_manifest_is_no_project(project: Path) -> None:
+    (project / "package.json").unlink()
+
+    assert ADAPTER.detect(project) is None
 
 
 @pytest.mark.parametrize(
@@ -166,6 +201,41 @@ def test_a_tool_the_project_does_not_depend_on_is_not_supported(tmp_path: Path) 
     for operation in (Operation.TEST, Operation.COVERAGE):
         assert isinstance(plan(operation, bare), NotSupported)
     assert isinstance(plan(Operation.TEST, tmp_path / "nowhere"), NotSupported)
+
+
+def test_the_build_of_plain_javascript_is_the_syntax_check_of_node(tmp_path: Path) -> None:
+    plain = make_project(tmp_path / "plain", vitest="5")
+    (plain / "package.json").write_text('{"devDependencies": {"vitest": "5"}}', encoding="utf-8")
+    (plain / "tsconfig.json").unlink()
+
+    assert argv(Operation.BUILD, plain) == (
+        "n", JS_SYNTAX, "build", "coverage", "dist", "node_modules",
+    )  # fmt: skip
+
+
+def test_without_a_tsconfig_the_compiler_the_project_depends_on_has_nothing_to_read(
+    project: Path,
+) -> None:
+    (project / "tsconfig.json").unlink()
+
+    assert argv(Operation.BUILD, project)[1] == JS_SYNTAX
+
+
+def test_the_files_node_could_not_parse_are_reported_one_by_one(tmp_path: Path) -> None:
+    log = tmp_path / "syntax.txt"
+    log.write_text(
+        "src/bad.js:2: SyntaxError: Unexpected token ';'\n"
+        "src/bad.js:9: SyntaxError: Unexpected token ')'\n"
+        "lib/worse.mjs:1: SyntaxError: Unexpected identifier 'x'\n"
+        "a line that names no file: 3: nothing\n",
+        encoding="utf-8",
+    )
+
+    assert facts(ADAPTER.parse(Operation.BUILD, ToolOutput(1, log))) == [
+        ("build.compile_error", "lib/worse.mjs", 1),
+        ("build.compile_error", "src/bad.js", 1),
+    ]
+    assert facts(ADAPTER.parse(Operation.BUILD, ToolOutput(0, log))) == []
 
 
 def test_vitest_prints_tap_and_writes_an_istanbul_report_for_coverage(project: Path) -> None:
