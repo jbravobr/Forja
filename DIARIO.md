@@ -1311,3 +1311,278 @@ O checkout de verificação (`%LOCALAPPDATA%\forja-verif`) está em `f0549a0`.
 - A diferença entre os 1477 s da fase 1 e os 2103 s de hoje em `measurer.py`, sem causa conferida.
 - O teste do Linux que falha desde `8b61fbe`.
 - Nada foi enviado ao GitHub: os commits estão em `correcoes-p0`, só na máquina.
+
+## 15/11/2026 — leva de desempenho, fase 3: filtro, parada, ordem e testes por linha nas sete pilhas
+
+Sessão de levantamento. Nenhum código de produção mudou; só este diário. A fase 4 espera a decisão do dono sobre o que está aqui.
+
+### O que foi feito
+
+Para cada pilha do requisito básico (Python com pytest, Go, Java com Maven, Java com Gradle, C# com xUnit, TypeScript com Vitest e com Jest), as três perguntas do plano foram respondidas pela documentação da ferramenta e por prova executada no Windows e no Linux (WSL, Ubuntu 22.04):
+
+- Um projeto pequeno por pilha, com os mesmos casos: três unidades de produção, três arquivos de teste, 14 a 17 testes, uma linha com testes de dois arquivos, um teste parametrizado, uma preparação compartilhada que executa código de produção, e uma linha sem teste.
+- Um `prove.sh` com cinco provas (filtro; parada; ordem; testes por linha; ida e volta do id entre o mapa e o filtro) e um `medir.sh` com quatro medidas (testes de hoje; cobertura de hoje; cobertura com testes por linha; um teste só pelo filtro).
+- O levantamento de cada linguagem foi feito por um agente, os cinco ao mesmo tempo, com o mesmo protocolo. C# teve duas rodadas a mais e Vitest uma, atrás de um caminho mais barato para os testes por linha.
+- As ferramentas e versões são as dos adaptadores e dos testes da Forja: pytest 9.2.0 e coverage 7.17.3 (7.16.2 no Linux); Go 1.27.4; Surefire 3.2.5, JUnit 5.10.2 e JaCoCo 0.8.13 no Maven; Gradle 9.9.1 com JaCoCo 0.8.15; SDK .NET 9.0.321 com `net8.0`, xUnit 2.9.2 e coverlet.collector 6.0.2; Vitest 5.0.5 com `@vitest/coverage-v8`; Jest 30.5.2 com ts-jest 29.4.15.
+- O WSL só tinha Python. Go, JDK 21, Maven, Gradle, Node e .NET foram postos em `~/forja-fase3/tools` (1,7 GB, sem `sudo`); entram no PATH com `. ~/forja-fase3/env.sh`. Para desfazer: `rm -rf ~/forja-fase3`.
+- O material (protocolo, projetos, scripts, logs, tempos e um `RESULTADO.md` por linguagem, com a marca de provado, documentado ou não conferido em cada afirmação) está em `%LOCALAPPDATA%\forja-fase3`, fora do repositório.
+
+### As três respostas
+
+| Pilha | (a) Filtro e unidade | (b) Parada | (b) Ordem | (c) Testes por linha |
+| --- | --- | --- | --- | --- |
+| Python | ids do pytest na linha de comando; a unidade é o caso parametrizado | `-x` | a dos argumentos, entre arquivos e dentro do arquivo | o driver da Forja como está, na mesma execução da cobertura |
+| Go | `-run` com uma expressão por nível; a unidade é a função ou o subteste; o mesmo `-run` vale para todos os pacotes pedidos | `-failfast`, que vale por pacote; com `-p 1` os pacotes seguintes não começam | numa invocação, só a de declaração; a ordem pedida exige o binário de teste do pacote (`go test -c`) e uma chamada por id | o binário de cada pacote com `-cover -coverpkg=./...`, e uma chamada por id com `-test.coverprofile` |
+| Java, Maven | `-Dtest=Classe#metodo,...`; a unidade é o método (o caso parametrizado não é escolhível) | `skipAfterFailureCount` não para nada com o JUnit 5 (17 rodaram, 5 falharam); para com uma extensão do JUnit posta de fora no classpath de teste | classe ordenadora do JUnit, posta de fora, ligada por `-D` | um ouvinte do JUnit, posto de fora, que zera e grava os dados do agente do JaCoCo a cada teste, na mesma execução; a leitura usa `org.jacoco.core` |
+| Java, Gradle | `--tests 'Classe.metodo'`; a unidade é o método | `failFast` do próprio Gradle, que vale também entre forks | a mesma classe ordenadora, entregue por um script de inicialização | o mesmo ouvinte, entregue pelo script de inicialização |
+| C# | `--filter`; por método com `FullyQualifiedName=`, por caso com `DisplayName=` e escape | `dotnet test` não tem; `stopOnFail` do xUnit, num `xunit.runner.json` posto de fora por um arquivo de targets do MSBuild | ordenadores do xUnit em código-fonte acrescentado ao projeto de teste pelo mesmo arquivo de targets | não há numa execução só com o coverlet; uma invocação por id com o coverlet, ou o `dotnet-coverage` com um snapshot por teste |
+| Vitest | arquivo mais `-t "^nome$"`; a unidade é o caso; `arquivo:linha` existe | `--bail=1`, exata sem paralelismo de arquivos | entre arquivos, um sequenciador numa configuração da Forja passada por `--config`, que carrega a do usuário; dentro do arquivo, não há | um arquivo de preparação na mesma configuração, que tira a cobertura do v8 a cada teste; tem de ser uma execução separada da do relatório de cobertura |
+| Jest | arquivo mais `-t "^nome$"`; a unidade é o caso | `--bail` vale por arquivo e não foi exata (de 9 a 14 testes começaram, sem causa achada); só um processo por teste para de fato | entre arquivos, `--testSequencer` pela linha de comando, com `-i`; dentro do arquivo, não há | `--setupFilesAfterEnv` pela linha de comando, que lê os contadores do istanbul a cada teste, na mesma execução da cobertura |
+
+Em todas, o id que sai do mapa de testes por linha voltou ao filtro sem edição manual e rodou exatamente os testes pedidos. Em nenhuma o projeto do usuário foi alterado: o que entra, entra pela linha de comando ou por arquivo da Forja fora do projeto.
+
+### Medições
+
+Mediana de três rodadas depois de uma de aquecimento, em segundos, Windows / Linux. Rodadas feitas por mim, um `medir.sh` de cada vez, com a máquina parada.
+
+| Pilha | Testes de hoje | Cobertura de hoje | Com testes por linha | Um teste pelo filtro |
+| --- | --- | --- | --- | --- |
+| Python | 0,34 / 0,17 | 0,65 / 0,26 | 0,73 / 0,29 | 0,34 / 0,15 |
+| Go (15 ids, 3 pacotes) | 0,62 / 0,15 | 0,67 / 0,16 | 3,65 / 0,81 | 0,58 / 0,14 |
+| Java, Maven | 4,78 / 3,44 | 5,39 / 3,86 | 5,43 / 3,92 | 4,11 / 2,91 |
+| Java, Gradle, com o daemon | 1,66 / 1,02 | 2,42 / 1,54 | 2,36 / 1,54 | 1,53 / 0,96 |
+| C# (17 ids) | 1,45 / 1,86 | 2,04 / 2,74 | 10,19 / 7,52 com snapshot; 21,89 / 18,17 com o coverlet pela DLL; 29,11 / 27,73 com o coverlet pela solução | 1,09 / 1,21; pela DLL, 0,63 / 0,66 |
+| Vitest | 0,38 / 0,27 | 0,47 / 0,33 | 0,74 / 0,50 numa execução; 6,71 / 5,16 com um processo por teste | 0,35 / 0,27 |
+| Jest | 0,98 / 0,86 | 1,19 / 0,96 | 1,42 / 1,15 | 0,92 / 0,84 |
+
+Quatro séries do Linux tiveram uma rodada fora da faixa, uma delas negativa: é o relógio do WSL. A mediana não muda.
+
+### Conclusões
+
+- **As sete pilhas têm as três respostas.** Pelo critério do plano, a técnica pode seguir para a fase 4. A qualidade das respostas não é a mesma em todas, e é isso que o dono decide.
+- **O filtro existe em todas.** A unidade é o caso em Python, Go, C#, Vitest e Jest, e o método em Java.
+- **A parada só é exata em série,** em todas: com o paralelismo da ferramenta ligado (xdist, JUnit em paralelo, coleções do xUnit, workers do Vitest e do Jest), os testes que já começaram terminam. A execução estreita do mutante teria de rodar em série.
+- **A parada é da própria ferramenta em Python, Go, Gradle e Vitest.** Em Maven e em C# exige uma peça posta de fora. Em Jest, só um processo por teste.
+- **A ordem pedida, teste a teste, só existe em Python, Java e C#.** Em Vitest e Jest a ordem é entre arquivos; dentro do arquivo vale a de definição. Em Go, a ordem pedida custa uma chamada do binário por teste.
+- **Os testes por linha saem numa execução em Python, Java, Jest e Vitest,** e custam pouco sobre a cobertura de hoje: de zero a 0,3 s nesses projetos. Em Go custam uma chamada por id: 0,2 s por id no Windows e 0,04 s no Linux. **C# é a pilha cara:** 0,6 s por id com o snapshot e 1,3 s por id com o coverlet, e nenhum caminho de uma execução só fechou. Os contadores do coverlet podem ser lidos em memória a cada teste, mas o coverlet não expõe a que linha cada contador pertence.
+- **O ganho não foi medido, e este levantamento não o mede.** Nos projetos pequenos, um teste pelo filtro custa quase o mesmo que a suíte inteira: o que pesa é a partida da ferramenta (4,1 s no Maven, 1,5 s no Gradle, 1,1 s no `dotnet test`). Esse é o piso de cada mutante. O ganho da execução estreita depende do tempo dos testes do projeto de verdade, e a fase 4 já prevê medir antes e depois em cada linguagem.
+- **A preparação compartilhada não é atribuída do mesmo jeito.** `@BeforeEach` e `beforeEach` entram na conta de cada teste. O fixture do pytest e o fixture de classe do xUnit, com o snapshot, entram só na do primeiro teste que os dispara. O `TestMain` do Go entra na de todos os testes do pacote. Linha executada na importação do módulo não tem teste nenhum, em Python e em TypeScript. Como o sobrevivente só conta depois do comando inteiro, uma atribuição incompleta custa tempo e não muda veredito.
+
+### Achados fora das três perguntas
+
+Registrados, não tratados.
+
+- **Projeto criado pelo modelo de TypeScript não mede cobertura.** O modelo pede `vitest ^2.1.0` sem `@vitest/coverage-v8`, e o comando de cobertura do adaptador sai com `MISSING DEPENDENCY`. Os testes da Forja usam Vitest 5.0.5 com o provedor. Na 2.1.9 com o provedor instalado, o filtro, a configuração injetada e a gravação por teste funcionam; a conversão para linhas não rodou.
+- **Projeto criado pelo modelo de C# também não:** falta o `coverlet.collector`. O adaptador já registra esse limite, e o gate de cobertura fica inconclusivo.
+- **No Python 3.14, o coverage perde testes por linha** com o núcleo padrão: uma linha executada por dois testes aparece com um só; com `COVERAGE_CORE=ctrace` aparecem os dois. Provado no Linux. Hoje só `scripts/mutate.py` escolhe testes por esse dado, e a Forja roda em 3.12.
+- **O JaCoCo do Gradle não tem versão fixada** pela Forja (veio a 0.8.15); o do Maven é 0.8.13.
+- **A documentação do Surefire diz que `skipAfterFailureCount` vale para o JUnit 5.** Na versão 3.2.5 não valeu.
+- **Com `--bail`, o Vitest escreve `not ok <arquivo>` para os arquivos que não rodaram.** Como o leitor da Forja trata essa linha não foi conferido.
+- **Limite da linha de comando do Windows:** cerca de 1050 ids do pytest e 700 do `dotnet test` cabem em 32 767 caracteres. O pytest aceita os ids por arquivo (`@arquivo`, 5000 ids).
+
+### Dificuldades
+
+- A medida de cada levantamento foi feita com os outros quatro rodando; por isso a tabela é da rodada refeita depois.
+- O primeiro levantamento do Vitest leu a ordem pelo relatório, que sai por arquivo, e concluiu errado; o complemento refez pela ordem de início dos testes.
+- O último complemento de C# parou antes de medir no Linux e de escrever a sua seção no `RESULTADO.md`. A medida foi feita por mim; a seção ficou sem escrever, e o que vale para o snapshot é esta entrada e `csharp/snapshot.sh`.
+
+### Verificação
+
+- Os sete `prove.sh` rodados de novo por mim no Windows: saída 0, e o mapa de testes por linha de cada pilha igual ao do levantamento. O de Maven é igual ao de Gradle, e o de Vitest igual ao de Jest.
+- `skipAfterFailureCount=1` conferido por mim numa cópia com a troca que faz cinco testes falharem: 17 rodaram, 5 falharam, nenhum pulado.
+- O mapa do snapshot de C# difere do mapa do coverlet em uma linha, a do fixture de classe, nos dois sistemas.
+- No Linux, as provas são as dos levantamentos; a medida foi refeita por mim.
+- Não rodou: a suíte da Forja (nenhum código mudou); macOS; projetos de tamanho real; Jest com outro transformador que não o ts-jest; a conversão por teste no Vitest 2.1; Surefire com forks e JUnit em paralelo com a cobertura por teste; Python 3.12 e 3.13 nos projetos pequenos (rodaram em 3.11 e 3.10).
+
+### Pontos para o dono
+
+1. **A técnica segue para a fase 4?** As sete pilhas têm as três respostas. O custo de medir é pequeno em seis; em C# é por teste.
+2. **C#: qual caminho.** O coverlet com uma invocação por id não acrescenta ferramenta e custa 1,3 s por teste. O `dotnet-coverage` com snapshot custa 0,6 s por teste, é uma ferramenta a mais que a Forja teria de instalar, e atribui o fixture de classe só ao primeiro teste.
+3. **O que a Forja passaria a pôr de fora na execução dos testes:** em Java, um jar com o ouvinte, a extensão de parada e os ordenadores (cerca de 190 linhas de Java, que alguém tem de compilar) e, no Gradle, um script de inicialização; em C#, um arquivo de targets, um `xunit.runner.json` e código-fonte acrescentado ao projeto de teste; em Vitest, uma configuração que embrulha a do usuário e um arquivo de preparação; em Jest, um arquivo de preparação e um sequenciador. Hoje ela já põe de fora o relator do Jest, o script de cobertura do Gradle e o JaCoCo do Maven.
+4. **Unidade e ordem não são iguais entre as pilhas.** A regra seria a mesma em todas (os testes da linha primeiro, quem matou na frente, parada no primeiro que falha), com a unidade e a ordem que cada ferramenta dá: por método em Java, por arquivo em Vitest e Jest. O veredito não muda com isso; muda o quanto se ganha.
+
+### Decisão do dono
+
+**Ponto 3: aceito.** Suportar uma linguagem é usar as ferramentas do ecossistema dela, e isso é esperado da Forja: ela precisa do `dotnet` para C#, do Maven e do Gradle para Java, e assim por diante. Python é só a linguagem em que a Forja é escrita. Ela é obrigada a cumprir o seu propósito de fábrica de software agêntica, com os gates e os gates de qualidade garantidos em todas as linguagens suportadas. Peças da Forja em Java, C# e JavaScript, postas na execução dos testes, fazem parte desse suporte.
+
+Eu tinha apresentado a manutenção dessas peças como a parte ruim do ponto. Não é objeção: é o trabalho de absorver a particularidade de cada linguagem, que a regra 7 já pede.
+
+### Pendências
+
+- **Fase 4:** espera os pontos 1, 2 e 4.
+- **Fase 5** (script: escolha por função de teste, e quem matou roda primeiro): depende só da fase 2 e pode começar. Antes, reler `metrics.py` do mutator.
+- Os achados fora das três perguntas, sem item na avaliação.
+- As ferramentas em `~/forja-fase3` no WSL e o material em `%LOCALAPPDATA%\forja-fase3` ficam até a fase 4 ser decidida.
+- As pendências da entrada anterior continuam.
+
+## 15/11/2026 — os pontos da fase 3 decididos, e o suporte por linguagem conferido por evidência
+
+Sessão de leitura. Nenhum código mudou; só este diário.
+
+### Decisões do dono
+
+| Ponto da entrada anterior | Decisão |
+| --- | --- |
+| 1. A técnica segue para a fase 4 | Sim. |
+| 2. C# | `dotnet-coverage` com um snapshot por teste. Ferramenta do ecossistema não é obstáculo (ponto 3). |
+| 4. Unidade e ordem | A mesma regra em todas, com a unidade e a ordem que cada ferramenta dá. |
+
+O dono pediu também a confirmação, por evidência, de que a Forja não funciona só para Python com as outras linguagens superficiais: Python é a linguagem em que ela é escrita, e o arcabouço de técnicas e de qualidade depende de ferramentas feitas dentro dela e de ferramentas consagradas, para todas as linguagens suportadas.
+
+### O que foi feito
+
+- Três leituras do código, cada uma por um agente, sem alterar nada: os adaptadores e o preparo do ambiente, operação por operação; os 34 gates, linguagem por linguagem; os testes e o processo (orquestrador, papéis, linha de comando).
+- As linhas críticas de cada achado foram abertas por mim; as que não abri estão marcadas abaixo.
+- Os testes com ferramenta de verdade rodaram no Windows: `pytest tests/checks/test_real_languages.py tests/languages`, com o JDK 21 em `JAVA_HOME`.
+
+### O que a evidência confirma
+
+- **466 aprovados, nenhum pulado, 1744 s.** Entram o reparo de ponta a ponta em Go, C#, Java com Maven, Java com Gradle e TypeScript (12 projetos, 24 casos, com formato, lint, build, testes, vermelho e verde e congelamento bloqueando), a mutação de verdade em Go, Java com Maven, C# e TypeScript, e os modelos de projeto novo.
+- **Dos 34 gates do registro (`checks/specs.py:14-88`), 22 atuam do mesmo jeito nas seis linguagens.** Os outros 12 têm "não" ou "parcial" em pelo menos uma: `dependency_install`, `format`, `lint`, `types`, `build`, `tests`, `red_green`, `e2e`, `mutation`, `package_metrics`, `dependency_audit` e `new_dependency`. Em quatro deles (`tests`, `e2e`, `mutation` e `package_metrics`) o que falta é só de JavaScript ou de o projeto declarar o executor de testes.
+- **Feito dentro da Forja:** a análise sobre tree-sitter, com regra própria para as seis (`core/structure`, `core/architecture`, `mutation/sites.py:61-76`, `checks/symbols.py:15-51`).
+- **Ferramentas consagradas, chamadas direto:** gitleaks, semgrep, osv-scanner, jscpd e lizard; e os registros PyPI, npm, Go, Maven e NuGet (`checks/registries.py`).
+- **Ferramentas de cada ecossistema, pelos adaptadores:** ruff, mypy, pytest e coverage.py; gofmt, golangci-lint e `go`; Spotless, Checkstyle, PMD, SpotBugs, JaCoCo, Maven e Gradle; `dotnet format`, `build` e `test` com coverlet; Prettier, ESLint, `tsc`, Vitest e Jest.
+- **A Forja instala, com versão e sha256 fixos,** Go, golangci-lint, Node, o SDK do .NET, o JDK, Maven e Gradle, além de gitleaks, osv-scanner, jscpd, semgrep e mypy (`toolchain/manifest.toml`).
+
+### Onde o suporte não é igual
+
+Conferido por mim no código:
+
+1. **O agente só roda testes e lint em Python.** `forja agente testar|lint|medir` chama pytest, ruff e lizard (`cli/facade.py:33-37` e `58-67`). O agente não tem shell próprio (`facade.py:3`): em Go, Java, C# e TypeScript ele entrega sem poder rodar os testes nem o lint.
+2. **JavaScript sem `tsconfig.json` é recusado** (`cli/prepare.py:234-244`; `languages/typescript/adapter.py:111`; `core/policy/config.py:494-495`). São cinco adaptadores; arquivo `.js` é medido dentro de um projeto TypeScript. O `README.md:134` lista JavaScript entre as linguagens que a Forja conduz.
+3. **Formato e lint em Java e em TypeScript só rodam se o projeto declara a ferramenta** (`languages/java/adapter.py:194-202`, `languages/typescript/adapter.py:166-171`). Sem ela o gate dá "não aplicável", que passa (`checks/layout.py:104-105`, `checks/base.py:71-72`). Os modelos de Java e de TypeScript não declaram nenhuma: projeto criado pela Forja nessas linguagens nasce sem os dois gates. Em Python o ruff vem da Forja; em Go, gofmt e golangci-lint vêm do preparo; em C#, do SDK.
+4. **Projeto criado em C# e em TypeScript não mede cobertura** (achado da entrada anterior): falta `coverlet.collector` e `@vitest/coverage-v8`. A mutação exige cobertura (`checks/mutation.py:256`).
+5. **Instalar dependência nova só existe para PyPI** (`checks/dependency_install.py:26`).
+6. **`red_green` só reconhece o erro do próprio teste em Python** (`NameError`, `checks/red_green.py:17`).
+
+Apontado pelas leituras, não conferido por mim:
+
+- `LINT_FIX` não é oferecido em Java (`languages/java/adapter.py:223-224`); a normalização do lint é pulada.
+- A semente dos testes de propriedade só é fixada em Python e em Go.
+- `doc_drift` só confere comandos de `make` e de `npm`, `yarn`, `pnpm` e `bun` (`checks/doc_drift.py:24`).
+- A auditoria de dependências não lê `go.sum`, `build.gradle` nem `.csproj` (`checks/dependency_audit.py:33-41`).
+- `new_dependency` fica inconclusivo em Go (o registro não dá idade nem uso) e não tem downloads em Maven.
+- Os descartáveis do gate de escopo são os de Python e `node_modules`; `target/`, `bin/` e `obj/` não estão na lista (`checks/scope.py:44-65`).
+- `thresholds.javascript` é aceito, mas os gates que medem pelo adaptador leem `typescript`.
+- O guia diz que as regras de mutação de C# são as do mutator; o mutator não tem C# (`mutation/sites.py:8-9`).
+- Não há modelo de projeto com Gradle, nem teste de mutação de verdade com Gradle. O gate `e2e` só tem teste com ferramenta de verdade em Python.
+
+Não é lacuna: o gate `types` só existe em Python porque nas outras linguagens o compilador confere os tipos no `build`; em Python o `build` é o `compileall`, que só vê sintaxe.
+
+### Conclusões
+
+- **A Forja não é só Python.** O processo inteiro roda, com as ferramentas de verdade, em cinco ecossistemas, e a maior parte dos gates é igual nas seis linguagens.
+- **O suporte ainda não é igual,** e os seis pontos conferidos ferem a regra 7. O primeiro é de processo: o agente trabalha sem ver o resultado dos gates em quatro das linguagens.
+- **O ponto 4 toca a fase 4:** os testes por linha dependem da cobertura, que projeto criado pela Forja em C# e em TypeScript não mede.
+
+### Verificação
+
+- `pytest tests/checks/test_real_languages.py tests/languages`, Windows: 466 aprovados em 1744 s.
+- Não rodou: a suíte inteira; Linux; nada foi medido de novo.
+
+### Pendências
+
+- **Ordem do trabalho, para o dono:** a fase 4 está autorizada. Os seis pontos conferidos não têm item na avaliação; falta dizer se algum passa à frente da fase 4. O ponto 4 tem de estar resolvido para a fase 4 valer em projeto criado pela Forja.
+- **Fase 4,** com as três decisões acima. Antes, reler `metrics.py` do mutator.
+- **Fase 5,** que depende só da fase 2.
+- As pendências da entrada anterior continuam.
+
+## 15/11/2026 — leva de desempenho, fase 4: os testes da linha primeiro nas seis linguagens; medido, só o Vitest ganha
+
+### Decisões do dono
+
+- **Ordem do trabalho:** o ponto 4 da entrada anterior (projeto criado em C# e em TypeScript não mede cobertura) entra na fase 4; o ponto 1 (o agente só roda testes e lint em Python) vem logo depois dela; os outros quatro entram na fila como itens novos.
+- **Ferramentas do .NET:** o ecossistema oficial da Microsoft para o .NET é de código aberto, e nenhuma ferramenta oficial dele fica fora da Forja. Antes de incluir uma ferramenta nova, a licença é conferida no GitHub; se é de código aberto e a ferramenta é necessária, entra sempre. Registrado como adendo no ADR 0037.
+- **Regras inegociáveis de condução,** depois dos travamentos e do custo desta sessão. Estão no `CLAUDE.md` global do dono (`~/.claude/CLAUDE.md`) e valem em toda sessão. A que muda o trabalho na Forja: o que vale para várias linguagens ou frameworks continua sendo entregue para todas (regra 7), mas vira uma tarefa por linguagem ou framework, cada uma com o seu plano, concluídas uma a uma, em fila, cada uma medida antes de a seguinte começar. Subagentes em paralelo só para leitura e pesquisa.
+- **Teste segue complexidade, não tamanho, e o esforço segue Pareto.** São pilares do dono para como se testa. Os gates da Forja não mudam por causa deles agora.
+
+### O que foi lido
+
+- `metrics.py` do mutator em `830ec7e`, por inteiro. O histórico dele guarda o hash de cada função e o que foi de cada mutante (`killed` ou `survived`), pelo id do mutante. Não guarda que teste matou, e nada nele ordena testes. O histórico do gate usa o mesmo id de mutante e guarda só o teste que matou.
+- O material da fase 3 de cada pilha (`RESULTADO.md` e as peças provadas).
+
+### O que foi feito
+
+| Parte | Mudança |
+| --- | --- |
+| Núcleo | Operação nova `test_lines` (quais testes executam cada linha) e o seu relatório, em duas formas: um arquivo da Forja (`{"arquivo": {"linha": ["id"]}}`) ou um relatório de cobertura por teste mais um índice. `run_line_tests` roda essa operação uma vez por julgamento, só quando há mutante a rodar, e junta os testes à cobertura. Se ela falha ou o relatório não pode ser lido, nada é escolhido. Tudo o que ela grava fica em `.forja-test-lines/` e é apagado. |
+| Gate | Cada mutante é julgado primeiro pelos testes das suas linhas (o teste que o matou da última vez na frente, os outros pela ordem do id), e o sobrevivente pelo comando inteiro. O teste que matou fica em `<pasta da execução>/measure/mutation/killers.json` e só serve à ordem. Mutante sem testes escolhidos é julgado como antes (em Go, o pacote primeiro). |
+| Executor | A execução estreita tem a sua verificação inicial na cópia sem alteração, uma por comando distinto, e elas rodam lado a lado nas cópias dos workers. Se ela não passa, não julga ninguém: o mutante vai ao comando inteiro. |
+| Adaptadores | Nas seis linguagens: filtro por teste, em série, na ordem pedida até onde a ferramenta ordena, com parada no primeiro que falha; parada também no comando inteiro quando é para mutante; e a execução própria dos testes por linha (Python já tinha os testes por linha na cobertura). A tabela por pilha está em `docs/guia/gates/mutacao.md`. |
+| Peças da Forja na execução dos testes | Go: `line_driver.py` (Python, biblioteca padrão). Java: `probe/` (ouvinte, extensão de parada, ordenadores, leitor e um lançador de arquivo único que compila as peças num cache por usuário) e `probe.init.gradle`. C#: `injection/` (targets do MSBuild, ordenadores, o gancho dos snapshots). TypeScript: configuração e preparação do Vitest, sequenciador e preparação do Jest. Nenhum binário no git. |
+| Ponto 4 | O modelo de C# declara `coverlet.collector` 6.0.2. O de TypeScript passou a `vitest` e `@vitest/coverage-v8` `^5.0.5` (na 2.1 a conversão por teste não existe). Um teste `slow` em cada um prova que o projeto criado mede cobertura e passa pelo gate. |
+| `dotnet-coverage` | Entrou no manifesto (18.12.0, sha512 conferido contra o catálogo do NuGet e contra o arquivo baixado), com o tipo de artefato novo `nupkg`. O adaptador acha o comando no PATH ou a montagem que a Forja instala, rodada pelo `dotnet`. |
+| Conformidade | `language_problems` recebe o id de um teste na forma da linguagem. |
+| Guias | `gates/mutacao.md` ("Os testes da linha primeiro", limites de tempo, o que se guarda entre tentativas) e `instalacao.md`. |
+
+Como foi feito: o núcleo e Python por mim; Go, Java, C# e TypeScript cada um por um agente, com um contrato comum; C# fechado por mim, porque o agente parou sem concluir. Duas revisões independentes, só de leitura.
+
+O que as revisões acharam e foi corrigido:
+
+- **Os testes escolhidos nunca rodavam na cópia sem alteração.** Um teste que só passa junto dos outros falharia sozinho e mataria todo mutante da linha. Daí a verificação inicial da execução estreita. O plano dizia "o tempo-limite continua o de dez vezes a base do comando inteiro"; com a verificação inicial própria, o limite passou a ser dez vezes a dela, como em todo comando que julga mutante.
+- O leitor do coverage.py cortava o id no primeiro `|`; passou a cortar só a fase que o pytest-cov acrescenta.
+- Sem lugar para dividir a cobertura, o gate media a cobertura duas vezes.
+- Relatório que não é texto, arquivo preso por outro programa e execução interrompida derrubavam a leitura dos testes por linha em vez de só custar tempo.
+- Java: o cache das classes compiladas ficava em pasta previsível no `tmp` compartilhado (achado da revisão de segurança); passou à casa da Forja, por usuário, com dono e permissões conferidos. Projeto Gradle que não liga a JUnit Platform recebia as peças de JUnit 5 e deixaria de passar; agora roda como antes.
+- Id de teste com caractere de controle não é entregue a ferramenta nenhuma; id de Go com `..` e arquivo de teste com nome de opção são recusados.
+
+### Medições
+
+Rodadas minhas, uma execução de cada vez, máquina parada, `MutationCheck.evaluate` em segundos, duas rodadas. "Antes" é `c180ea5`. Pequeno: o projeto dos testes `slow` de mutação da pilha (um caso aprovado mais um rejeitado). Gerado: 12 funções novas com um `if` e dois retornos, 300 testes em 30 arquivos, 36 deles nas funções novas, três funções só chamadas.
+
+| Pilha | Pequeno, antes | Pequeno, depois | Gerado, antes | Gerado, depois |
+| --- | --- | --- | --- | --- |
+| Python | 6,3 / 6,2 | 7,4 / 6,9 | 9,5 / 9,1 | 11,7 / 11,6 |
+| Go | 6,0 / 5,8 | 9,9 / 10,0 | 11,1 / 11,2 | 26,0 / 26,4 |
+| Vitest | 3,4 / 3,3 | 6,0 / 6,0 | 35,9 / 40,7 | 15,5 / 15,7 |
+| Java, Gradle | 12,7 / 42,6 | 24,3 / 81,8 | 125,9 / 101,2 | 241,7 / 257,9 |
+| C# | 25,2 / 24,3 | 43,5 / 43,1 | 36,0 / 38,2 | 179,2 / 190,7 |
+| Jest | 12,4 | 19,2 | 356,3 | não medido |
+| Java, Maven | não medido | não medido | não medido | não medido |
+
+- Vereditos iguais antes e depois em todos os casos medidos, achado a achado.
+- A medição parou no Jest gerado, a pedido do dono: tomava todos os núcleos. Uma prova do agente de TypeScript, com a máquina dividida, deu 204 s no Jest gerado depois da mudança; uma do agente de Java deu 190 s contra 30 s no Maven pequeno. Nenhuma das duas é medição.
+- **No Gradle gerado, o código antigo deu veredito diferente entre as suas duas rodadas:** o mutante de `Calc.java:59` sobreviveu na primeira e contou como morto na segunda. O código novo deu o mesmo nas duas. A causa não foi investigada.
+- Os tempos por fase não foram tirados com a máquina parada. O tempo da execução dos testes por linha sozinha só tem números soltos, com a máquina dividida: 10,9 s em Go e 2,0 s no Vitest, no projeto gerado.
+
+### Conclusões
+
+- **A fase não entregou o ganho que prometia.** Em projeto de testes triviais, a mutação ficou mais lenta em cinco das seis pilhas medidas e mais rápida só no Vitest. Em C# o projeto gerado ficou cinco vezes mais lento.
+- **O que pesa, pelo desenho:** cada mutante paga a partida da ferramenta de qualquer jeito, e com testes de milissegundos rodar três testes custa o mesmo que rodar trezentos. Por cima disso entram a execução dos testes por linha (uma chamada por teste em Go, dois processos por teste em C#), uma verificação inicial por conjunto de testes, e a execução estreita em série. No Maven, cada execução estreita passa ainda pelo lançador. Quanto cada parte pesa não foi medido.
+- **O ganho, se existe, está em projeto cujos testes demoram.** Nenhum foi medido. A fase 3 já dizia que o ganho dependia do tempo dos testes do projeto de verdade; os dois projetos desta medição não dizem nada sobre esse caso.
+- **Nenhum veredito mudou,** e a regra que garante isso está no executor: o sobrevivente só conta depois do comando inteiro, e a execução estreita só julga se passa sozinha na cópia sem alteração.
+- **O ponto 4 está resolvido** e não depende do resto: projeto criado em C# e em TypeScript mede cobertura.
+
+### Dificuldades
+
+- **Custo da sessão, por erro meu.** Pedi medição aos quatro agentes com a máquina dividida; os números variaram de 11 s a 66 s no mesmo comando e não serviram. Refiz a medição sozinho, numa matriz de 56 execuções sem estimar o custo de cada uma; o Jest gerado leva seis minutos por execução com 24 processos, e o agente de TypeScript, que eu não tinha encerrado, rodava o mesmo ao lado.
+- O núcleo mudou com os agentes já trabalhando (a verificação inicial da execução estreita), e os testes deles tiveram de seguir.
+- O agente de C# ficou em laço esperando um processo em segundo plano e não concluiu.
+
+### Verificação
+
+- `ruff check .`, `ruff format --check src tests scripts/mutate.py` e `mypy` strict: limpos, 648 arquivos.
+- `pytest -m "not slow" -n 8`, Windows: 10083 aprovados, 41 pulados, 252 s.
+- Testes `slow` com a ferramenta de verdade, depois das correções das revisões, um comando de cada vez e com limite de tempo forçado: Java (Maven e Gradle, JDK 21) 17 aprovados em 194 s; C# 14 aprovados em 142 s, com o `dotnet-coverage` instalado pelo instalador da Forja; Go, TypeScript (Vitest e Jest), Python, o gate e os modelos de projeto, 33 aprovados e 1 falha em 136 s. A falha é do ambiente: o teste do modelo de Java rodou com o Java 8 do PATH; com o JDK 21 em `JAVA_HOME`, passou.
+- Antes dessas correções, a pasta de cada linguagem tinha rodado inteira: Go 69, TypeScript 68, Java 105, C# 63 aprovados.
+- `install_tool` de verdade para o `dotnet-coverage`: baixou, conferiu o checksum e os testes `slow` de C# rodaram com a montagem instalada.
+- Um travamento na verificação, que não é do produto: o teste `slow` de Gradle capturava a saída por pipe; quando o Gradle sobe um daemon novo, o daemon herda o pipe e o teste espera por ele. O teste passou a gravar a saída em arquivo.
+
+### Pontos para o dono
+
+1. **O que fazer com a escolha dos testes.** Está no código e ligada. Pelos números, eu não a deixaria ligada por padrão: ela piora o tempo nos projetos medidos, e o caso em que deveria ganhar não foi medido. Três caminhos: (a) medir num projeto de verdade, com testes que demoram, antes de decidir; (b) desligar por padrão, com uma chave na política para ligar; (c) reverter a escolha e ficar com o que não depende dela (o ponto 4, a parada no comando inteiro, a instalação do `dotnet-coverage`, a correção do leitor). Recomendo (a) e, até lá, (b). A parada no comando inteiro também não foi medida em separado.
+2. **`dotnet-coverage`.** O GitHub dá o repositório que o pacote indica (`microsoft/codecoverage`) como MIT, e por isso ele entrou. O pacote NuGet traz um `License.txt` próprio (Microsoft Software License Terms) e pede aceite de licença. Fica o registro.
+3. **O veredito instável do código antigo no Gradle** (acima) é um defeito anterior a esta fase, sem item na avaliação.
+
+### Pendências
+
+- A decisão do ponto 1 acima.
+- **Não rodou nesta fase:** a mutação dos arquivos de `src` que a fase mudou (`scripts/mutate.py`), que o plano pede, porque toma a máquina inteira por muito tempo; a medição de Maven e do Jest gerado; os testes no Linux (o WSL tem Python 3.10 e a Forja não importa lá; só o driver de Go rodou, com saída 0); macOS.
+- Achados da revisão dos adaptadores, sem correção: em Maven e Gradle de vários módulos a pasta dos dados por teste é relativa ao módulo, e pode ficar lixo fora da raiz; no Jest, `--setupFilesAfterEnv` pela linha de comando substitui o do projeto na execução dos testes por linha, e o relator dela quebra sem `tsconfig.json` (nos dois casos nada é escolhido); a configuração da Forja para o Vitest só carrega `vitest.config.*`; em C#, id com `\\` não casa no filtro, e o índice dos snapshots não foi provado com mais de um projeto de teste; a pasta raiz do cache do lançador de Java só é restringida quando é criada.
+- **Voltar, junto com o dono, à pergunta dos pilares de teste contra o gate de mutação.** Hoje o gate cobra toda linha tocada, seja qual for a complexidade ciclomática. Comparar com o que o `unclebob/mutator` faz, lendo a implementação dele, e decidir juntos se faz sentido mudar. Nada muda até essa análise.
+- **Ponto 1 da entrada anterior** (o agente só roda testes e lint em Python): é o próximo.
+- **Itens novos na fila,** da entrada anterior: JavaScript sem `tsconfig.json`; formato e lint em Java e TypeScript só com a ferramenta declarada; instalar dependência nova só para PyPI; `red_green` só reconhece o erro do próprio teste em Python.
+- **Fase 5** (script), que depende só da fase 2.
+- O `doctor` não lista o `dotnet-coverage`.
+- O checkout de verificação (`%LOCALAPPDATA%\\forja-verif`) está em `c180ea5`. O material desta fase (scripts de medição, `final.jsonl`, a árvore do "antes") está em `%LOCALAPPDATA%\\forja-fase4`.
+- As pendências da entrada anterior continuam.
